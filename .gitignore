@@ -16,3 +16,6 @@ auth.json
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# Local noncommercial OAuth SDK build and runtime
+vendor/siwc-runtime/
