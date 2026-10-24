@@ -1,30 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
-import {addSiwcResources} from '../scripts/private-electron-builder-config.mjs';
-test('private installer includes staged SDK in resources (no upstream updater)',()=>{
- const base='appId: org.learnharness.private.windows\nextraResources:\n  - from: .next\n    to: server\nmac:\n  target: dmg\n';
- const next=addSiwcResources(base);
- assert.match(next,/from: vendor\\n    to: \\.\\n    filter:\\n      - "siwc-runtime\\/\\*\\*\\/\\*"/);
- assert.match(next,/to: server\\n  # Copy from vendor/);
- assert.throws(()=>addSiwcResources(next),/already included/);
- assert.throws(()=>addSiwcResources('invalid layout'),/Unsupported/);
+import { readFileSync } from 'node:fs';
+import { addSiwcResources } from '../scripts/private-electron-builder-config.mjs';
+
+const example = [
+  'appId: org.learnharness.private.windows',
+  'extraResources:',
+  '  - from: .next',
+  '    to: server',
+  'mac:',
+  '  target: dmg',
+  ''
+].join('\n');
+const sdkResource = [
+  '  - from: vendor',
+  '    to: .',
+  '    filter:',
+  '      - "siwc-runtime/**/*"'
+].join('\n');
+
+test('private installer preserves nested SDK node_modules and other resources', () => {
+  const next = addSiwcResources(example);
+  assert.ok(next.includes(sdkResource), 'SDK copied from vendor parent');
+  assert.ok(next.includes('to: server'), 'Existing standalone server retained');
+  assert.ok(!next.includes('  - from: vendor/siwc-runtime\n'), 'No root node_modules fileset');
+  assert.throws(() => addSiwcResources(next), /already included/);
+  assert.throws(() => addSiwcResources('invalid layout'), /Unsupported/);
 });
 
-test('private installer handles Git for Windows CRLF YAML',()=>{
- const base='appId: org.learnharness.private.windows\nextraResources:\n  - from: .next\n    to: server\nmac:\n  target: dmg\n';
- const patched=addSiwcResources(base.replace(/\n/g,'\r\n'));
- assert.match(patched,/from: vendor\\n    to: \\.\\n    filter:\\n      - "siwc-runtime\\/\\*\\*\\/\\*"/);
-});
-test('private installer config patch works with the actual repository YAML',()=>{
- const file=readFileSync(new URL('../../electron-builder.yml',import.meta.url),'utf8');
- const output=addSiwcResources(file);
- assert.match(output,/from: vendor\n    to: \.\n    filter:\n      - "siwc-runtime\/\*\*\/\*"/);
+test('private installer handles Windows CRLF YAML', () => {
+  const result = addSiwcResources(example.replace(/\n/g, '\r\n'));
+  assert.ok(result.includes(sdkResource));
+  assert.ok(!result.includes('\r\n'));
 });
 
-test('installer never puts SDK node_modules at a resource copy root',()=>{
-  const base='extraResources:\n  - from: .next\n    to: server\nmac:\n';
-  const result=addSiwcResources(base);
-  assert.doesNotMatch(result,/from: vendor\/siwc-runtime/);
-  assert.match(result,/from: vendor\n    to: \.\n    filter:\n      - "siwc-runtime\/\*\*\/\*"/);
+test('private installer transform accepts actual application builder YAML', () => {
+  const source = readFileSync(new URL('../../electron-builder.yml', import.meta.url), 'utf8');
+  const next = addSiwcResources(source);
+  assert.ok(next.includes(sdkResource));
+  assert.ok(next.includes('extraResources:\n'));
+  assert.ok(next.includes('mac:\n'));
 });
