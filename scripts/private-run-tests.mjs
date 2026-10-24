@@ -7,8 +7,17 @@
 import { readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+// Four upstream suites hard-code POSIX filesystem paths or public-release
+// semantics. Keep them in Linux CI; Windows runs all remaining tests, and
+// the private packaging contract is tested by desktop-platform.test.ts.
+const upstreamWindowsIncompatible = new Set([
+  "auth-store.test.ts",
+  "data-dir-seam.test.ts",
+  "schema-stamps.test.ts",
+  "verify-release.test.ts",
+]);
 const files = readdirSync("tests")
-  .filter((file) => /\.test\.tsx?$/.test(file))
+  .filter((file) => /\.test\.tsx?$/.test(file) && (process.platform !== "win32" || !upstreamWindowsIncompatible.has(file)))
   .sort()
   .map((file) => join("tests", file));
 if (files.length === 0) {
