@@ -53,6 +53,16 @@ jobs:
             exit 1
           }
           if (!(Get-ChildItem dist -Filter "*setup.exe")) { exit 1 }
+      # Portable extract-and-run app bypasses NSIS when a local setup window
+      # becomes unresponsive. Both outputs are the SAME compiled application.
+      # Keep the complete directory, including all nested SDK dependencies.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: learnharness-private-windows-portable
+          path: dist/win-unpacked/
+          retention-days: 3
+          if-no-files-found: error
+          compression-level: 6
       - uses: actions/upload-artifact@v4
         with:
           name: learnharness-private-windows-sdk
