@@ -37,7 +37,7 @@ describe("persisted microphone preference", () => {
 		assert.equal(parseGeneralSettingsBody({ microphoneLabel: "bad\nvalue" }).ok, false);
 	});
 	it("remaps an origin-specific device ID only when its microphone label is unique", () => {
-		const devices = [
+		const devices: Array<Pick<MediaDeviceInfo, "kind" | "label" | "deviceId">> = [
 			{ kind: "audioinput", label: "USB Headset", deviceId: "new-origin-id" },
 			{ kind: "audioinput", label: "Laptop Mic", deviceId: "internal-id" },
 		];
