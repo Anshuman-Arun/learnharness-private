@@ -1,0 +1,42 @@
+name: Official ChatGPT DevKit compatibility
+on:
+  push:
+    branches: [feature/chatgpt-plan-native-candidate]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  patched-sdk:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - name: Clone official SDK at a reviewed source commit
+        shell: pwsh
+        run: |
+          git clone https://github.com/openai/sign-in-with-chatgpt-devkit.git .official-devkit
+          git -C .official-devkit checkout 0a36fefeb913055c8c7a1a29b63d82b96b2e841a
+      - name: Apply local noncommercial tool-event extension
+        run: node private-devkit/scripts/patch-siwc-devkit.mjs .official-devkit
+      - name: Install DevKit dependencies
+        shell: pwsh
+        run: npm --prefix .official-devkit ci --ignore-scripts
+      - name: Compile patched SDK and typecheck
+        shell: pwsh
+        run: |
+          npm --prefix .official-devkit run typecheck -w @siwc/local
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix .official-devkit run build -w @siwc/local
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Stage private SDK runtime without publishing
+        run: node private-devkit/scripts/stage-siwc-runtime.mjs .official-devkit
+      - name: Verify SDK remains noncommercial and tool-capable
+        shell: pwsh
+        run: |
+          if (!(Test-Path vendor/siwc-runtime/OPENAI_DEVKIT_LICENSE.txt)) { exit 1 }
+          if (!(Test-Path vendor/siwc-runtime/node_modules/@siwc/local/dist/structured-events.js)) { exit 1 }
+          node --input-type=module -e "import {createChatGPT} from './vendor/siwc-runtime/node_modules/@siwc/local/dist/index.js'; if(typeof createChatGPT !== 'function') process.exit(1)"
