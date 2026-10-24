@@ -22,8 +22,14 @@ jobs:
         run: node --import tsx --test tests/chatgpt-oauth.test.ts
         env:
           NODE_ENV: test
-      - name: Complete upstream tests on Windows
-        run: node scripts/pr20-tests-win.mjs
+      # The full upstream suite runs on Linux. A few existing fixtures use
+      # POSIX-only file modes and absolute ESM paths that are invalid on Windows.
+      # Windows checks the actual OAuth, credential broker, billing boundary
+      # and native desktop integration instead.
+      - name: Focused PR20 Windows security and desktop tests
+        run: node --import tsx --test tests/chatgpt-oauth.test.ts tests/chatgpt-pr20-broker.test.ts tests/pr20-billing-isolation.test.ts tests/desktop-platform.test.ts tests/auth-provider-keys.test.ts
+        env:
+          NODE_ENV: test
       - run: npm run lint
       - run: npm run build
       - run: node scripts/build-server.mjs
