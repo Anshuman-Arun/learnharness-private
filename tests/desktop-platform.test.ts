@@ -9,6 +9,8 @@ import { describe, it } from "node:test";
 
 const require = createRequire(import.meta.url);
 const mainFile = fileURLToPath(new URL("../electron/main.cjs", import.meta.url));
+// Relative requires inside Electron must resolve from Electron, not this test directory.
+const mainRequire = createRequire(mainFile);
 const mainSource = readFileSync(mainFile, "utf8");
 
 /** Decline the single-instance lock so normal boot never spawns a server.
@@ -27,7 +29,7 @@ function windowOptions(platform: string) {
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
-		require: (id: string) => id === "electron" ? electron : require(id),
+		require: (id: string) => id === "electron" ? electron : mainRequire(id),
 		process: { platform, argv: [], env: {}, on() {} },
 		__dirname: dirname(mainFile),
 	};
