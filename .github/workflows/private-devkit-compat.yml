@@ -41,7 +41,17 @@ jobs:
       - name: Verify SDK is in installed application resources
         shell: pwsh
         run: |
-          if (!(Test-Path "dist/win-unpacked/resources/siwc-runtime/node_modules/@siwc/local/dist/structured-events.js")) { exit 1 }
+          Write-Host "Packaged resources directories:"
+          Get-ChildItem "dist/win-unpacked/resources" | Select-Object -ExpandProperty Name
+          $entry = "dist/win-unpacked/resources/siwc-runtime/node_modules/@siwc/local/dist/structured-events.js"
+          if (!(Test-Path $entry)) {
+            Write-Error "Required SDK module missing from unpacked installer: $entry"
+            exit 1
+          }
+          if (!(Test-Path "dist/win-unpacked/resources/siwc-runtime/OPENAI_DEVKIT_LICENSE.txt")) {
+            Write-Error "Required SDK license missing from packaged resources"
+            exit 1
+          }
           if (!(Get-ChildItem dist -Filter "*setup.exe")) { exit 1 }
       - uses: actions/upload-artifact@v4
         with:
