@@ -13,7 +13,9 @@ function once(s,a,b) {
 }
 const mainFile="electron/main.cjs",yamlFile="electron-builder.yml";
 let main=fs.readFileSync(mainFile,"utf8");
-let yaml=fs.readFileSync(yamlFile,"utf8");
+// Git for Windows can check out YAML with CRLF. Canonicalize before matching
+// its section headings; do not change the app's source semantics.
+let yaml=fs.readFileSync(yamlFile,"utf8").replace(/\r\n/g,"\n");
 main=once(main,'const PRODUCT_NAME = "LearnHarness";','const PRODUCT_NAME = "LearnHarness PR20 Test";');
 main=once(main,'function setupAutoUpdater() {','function setupAutoUpdater() {\n\t// Evaluation app must never install updates from upstream.\n\treturn;');
 yaml=once(yaml,'appId: com.learnharness.LearnHarness','appId: org.learnharness.private.pr20-test');
