@@ -610,6 +610,46 @@ async function main() {
 	// are log lines — this can never block boot.
 	setupAutoUpdater();
 	ipcMain.on("lh:update-install", () => installUpdateNow());
+	// Renderer-safe subscription actions. Never expose the SDK client,
+	// access/refresh tokens, or loopback broker secret via Electron IPC.
+	// Only the application's own main-frame origin may invoke sign-in.
+	function assertPrivateRenderer(event) {
+		const win = BrowserWindow.fromWebContents(event.sender);
+		const actual = event.senderFrame?.url;
+		const expectedOrigin = new URL(url).origin;
+		if (!win || !actual || new URL(actual).origin !== expectedOrigin ||
+			new URL(win.webContents.getURL()).origin !== expectedOrigin) {
+			throw new Error("Unauthorized ChatGPT desktop request");
+		}
+	}
+	ipcMain.handle("lh:chatgpt:session", async (event) => {
+		assertPrivateRenderer(event);
+		return privateSubscription
+			? {available:true,...await privateSubscription.service.session()}
+			: {available:false,status:"unavailable",sharing:false};
+	});
+	ipcMain.handle("lh:chatgpt:connect", async (event) => {
+		assertPrivateRenderer(event);
+		if (!privateSubscription) return {available:false,status:"unavailable",sharing:false};
+		try {
+			const state = await privateSubscription.service.signIn();
+			return {available:true,...state};
+		} catch {
+			// OAuth or transport details can include sensitive user/account data.
+			log("ChatGPT sign-in not completed; inspect trusted desktop diagnostics");
+			return {available:true,status:"error",sharing:false};
+		}
+	});
+	ipcMain.handle("lh:chatgpt:disconnect", async (event) => {
+		assertPrivateRenderer(event);
+		if (!privateSubscription) return {available:false,status:"unavailable",sharing:false};
+		try {
+			return {available:true,...await privateSubscription.service.disconnect()};
+		} catch {
+			return {available:true,status:"error",sharing:false};
+		}
+	});
+
 
 	// Sidebar-at-narrow-window (owner, 2026-09-17): the renderer auto-closes
 	// the sidebar below SIDEBAR_AUTOCLOSE (928px); opening it again at that

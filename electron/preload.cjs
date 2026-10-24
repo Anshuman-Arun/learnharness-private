@@ -42,4 +42,8 @@ contextBridge.exposeInMainWorld("lh", {
 		return () => ipcRenderer.removeListener("lh:update-status", listener);
 	},
 	installUpdate: () => ipcRenderer.send("lh:update-install"),
+	// Credential-free desktop account actions (allowlisted Electron IPC only).
+	chatgptSession: () => ipcRenderer.invoke("lh:chatgpt:session"),
+	chatgptConnect: () => ipcRenderer.invoke("lh:chatgpt:connect"),
+	chatgptDisconnect: () => ipcRenderer.invoke("lh:chatgpt:disconnect"),
 });

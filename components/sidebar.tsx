@@ -65,6 +65,10 @@ declare global {
 			/** Auto-update channel (Wave C, 2026-10-10): "lh:update-status" pushes once a staged update exists. */
 			onUpdateStatus?: (cb: (status: { status: string; version: string | null }) => void) => () => void;
 			installUpdate?: () => void;
+			/** Safe desktop account state; OAuth credentials stay in Electron main. */
+			chatgptSession?: () => Promise<{ available:boolean; status:string; sharing:boolean }>;
+			chatgptConnect?: () => Promise<{ available:boolean; status:string; sharing:boolean }>;
+			chatgptDisconnect?: () => Promise<{ available:boolean; status:string; sharing:boolean }>;
 		};
 	}
 }

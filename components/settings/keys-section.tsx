@@ -314,6 +314,62 @@ function AddProviderRow({
 	);
 }
 
+/** In-app desktop sign-in: the custom Windows title bar hides native menus.
+ * Never ask for an API key or transport OAuth credentials into React. */
+function ChatGPTDesktopAccount() {
+	const [supported, setSupported] = useState(false);
+	const [account, setAccount] = useState<{available:boolean;status:string;sharing:boolean}|null>(null);
+	const [busy, setBusy] = useState(false);
+	useEffect(() => {
+		const api = window.lh;
+		if (!api?.chatgptSession) return;
+		setSupported(true);
+		void api.chatgptSession().then(setAccount).catch(() =>
+			setAccount({available:false,status:"error",sharing:false}));
+	}, []);
+	if (!supported) return null; // Browser mode has no local desktop OAuth.
+	const connected = account?.status === "connected" && account.sharing;
+	const stateText = !account ? "Checking account…" :
+		!account.available ? "ChatGPT desktop sign-in is unavailable in this build." :
+		connected ? "Connected with ChatGPT plan sharing." :
+		account.status === "connected" ? "Connected; plan sharing is not enabled." :
+		account.status === "connecting" ? "Connecting…" :
+		account.status === "reauth_required" ? "Reconnect required." :
+		account.status === "error" ? "Connection failed. Check the desktop logs." :
+		"Not connected.";
+	async function act(action:"connect"|"disconnect") {
+		const api=window.lh;
+		const fn=action==="connect"?api?.chatgptConnect:api?.chatgptDisconnect;
+		if (!fn || busy) return;
+		setBusy(true);
+		try {
+			const state=await fn();
+			setAccount(state);
+			if(state.status==="connected" && state.sharing) notifySettingsSaved("keys");
+		} catch {
+			setAccount({available:true,status:"error",sharing:false});
+		} finally {
+			setBusy(false);
+		}
+	}
+	return (
+		<div data-testid="chatgpt-desktop-account" className="flex items-center justify-between gap-3 rounded-sm px-1 py-2">
+			<div className="min-w-0">
+				<p className="font-ui text-xs text-foreground">ChatGPT subscription</p>
+				<p data-testid="chatgpt-connection-status" className="text-[11px] text-muted-foreground">{stateText}</p>
+			</div>
+			{account?.available && (
+				<button type="button"
+					data-testid="chatgpt-connect"
+					disabled={busy}
+					onClick={() => void act(connected?"disconnect":"connect")}
+					className="shrink-0 rounded-sm border border-border px-2 py-1 font-ui text-xs text-foreground hover:bg-accent disabled:opacity-40"
+				>{busy?"Working…":connected?"Disconnect":"Connect ChatGPT"}</button>
+			)}
+		</div>
+	);
+}
+
 export function KeysSection({
 	/** A deep-linked row to unfold on arrival (zero-keys wave): the
 	 *  dictation error's click lands here on DEEPGRAM_API_KEY. Followed
@@ -413,6 +469,7 @@ export function KeysSection({
 	return (
 		<>
 			<SettingsGroup label="Model providers" testid="group-provider-keys">
+				<ChatGPTDesktopAccount />
 				{providerRows.map((status) => (
 					<KeyTableRow
 						key={status.id}
