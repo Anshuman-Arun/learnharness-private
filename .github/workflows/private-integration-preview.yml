@@ -1,0 +1,25 @@
+name: Native provider integration preview
+on:
+  push:
+    branches: [feature/chatgpt-plan-runtime]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - name: Assemble provider into disposable checkout
+        run: node scripts/private-preview-integration.mjs
+      - run: npm run typecheck
+      - run: node private-devkit/scripts/run-overlay-only.mjs
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
