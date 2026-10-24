@@ -17,6 +17,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Exercise native subscription broker and provider tests
+        run: node --test tests/private-electron-boot.test.mjs tests/pi-provider-private.test.mjs tests/private-windows-launcher.test.mjs
       - run: node private-devkit/scripts/run-overlay-only.mjs
       - run: npm test
       - run: npm run lint
@@ -32,6 +34,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Exercise native subscription broker and provider tests
+        run: node --test tests/private-electron-boot.test.mjs tests/pi-provider-private.test.mjs tests/private-windows-launcher.test.mjs
       - run: npm run test:win
       - run: npm run lint
       - run: npm run build
