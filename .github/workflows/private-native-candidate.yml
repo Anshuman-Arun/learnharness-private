@@ -1,0 +1,39 @@
+name: Native ChatGPT candidate verification
+on:
+  push:
+    branches: [feature/chatgpt-plan-native-candidate]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: node private-devkit/scripts/run-overlay-only.mjs
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:win
+      - run: npm run lint
+      - run: npm run build
+      - run: node scripts/build-server.mjs
+      - run: node scripts/smoke-server.mjs --electron
