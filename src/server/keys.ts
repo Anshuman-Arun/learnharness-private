@@ -200,6 +200,7 @@ export function keyValue(id: string): string | undefined {
  * (gate by what would run). Providers absent from AUTH_PROVIDER_KEYS take
  * no key at all: nothing to gate, present by definition. */
 export function providerKeyPresent(provider: string): boolean {
+  if(provider==="chatgpt-plan") return Boolean(process.env.LH_SUBSCRIPTION_BROKER_PORT && process.env.LH_SUBSCRIPTION_BROKER_SECRET);
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
 	return info ? keyValue(info.envVar) !== undefined : true;
 }

@@ -24,7 +24,7 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog, safeStorage } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -36,6 +36,7 @@ const path = require("node:path");
 const SIDEBAR_AUTOCLOSE = 928;
 
 const PRODUCT_NAME = "LearnHarness Private";
+const {startPrivateSubscription}=require("./private-subscription/init.cjs");
 
 // APP NAME → userData (owner, 2026-10-10): the Application Support dir is
 // exactly "LearnHarness" in dev AND packaged. Packaged Electron would
@@ -128,6 +129,7 @@ if (process.argv.includes("--browser-service")) {
 }
 
 let serverProcess = null;
+let privateSubscription = null;
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
 // in an event handler): the window + child server are the product, and
@@ -183,6 +185,20 @@ function log(line) {
 	}
 }
 
+function startPrivateDevServer() {
+  const nextCli = require.resolve("next/dist/bin/next");
+  const child=spawn(process.execPath,[nextCli,"dev"],{
+    cwd:process.cwd(),
+    env:{...process.env,ELECTRON_RUN_AS_NODE:"1",...(privateSubscription?.childEnvironment??{})},
+    stdio:["ignore","pipe","pipe"]
+  });
+  serverProcess=child;
+  child.stdout.on("data",buf=>log(`next-dev: ${String(buf).trimEnd()}`));
+  child.stderr.on("data",buf=>log(`next-dev error: ${String(buf).trimEnd()}`));
+  child.on("exit",code=>{log(`next-dev exited (${code})`);serverProcess=null;});
+  return child;
+}
+
 function startServer(port) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
@@ -193,6 +209,7 @@ function startServer(port) {
 				env: {
 					...process.env,
 					ELECTRON_RUN_AS_NODE: "1",
+					...(privateSubscription?.childEnvironment ?? {}),
 					NODE_ENV: "production",
 					PORT: String(port),
 					HOSTNAME: "127.0.0.1", // the server defaults to 0.0.0.0 — never
@@ -504,6 +521,11 @@ function installMenu() {
 				// Manual check (Wave C): answers via native dialog — no renderer
 				// round-trip. The 24h automatic checks stay silent.
 				{ label: "Check for Updates…", click: () => checkForUpdates({ manual: true }) },
+                {label:"Connect ChatGPT…",enabled:Boolean(privateSubscription),click:()=>{
+                  void privateSubscription.service.signIn()
+                    .then(()=>dialog.showMessageBox({type:"info",message:"ChatGPT connected",detail:"Open Models to refresh account entitlements."}))
+                    .catch(()=>dialog.showMessageBox({type:"warning",message:"ChatGPT sign-in was not completed."}));
+                }},
 				{ type: "separator" },
 				{ role: "hide" },
 				{ role: "hideOthers" },
@@ -554,10 +576,12 @@ async function main() {
 
 	// The child must not outlive us — cover every quit path.
 	app.on("before-quit", killServer);
+	app.on("before-quit",()=>{void privateSubscription?.close().catch(()=>{});});
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
 	await app.whenReady();
+	privateSubscription=await startPrivateSubscription({app,shell,safeStorage,log});
 
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
 	// spawn, no packaging, full HMR. The rest of this shell still applies
@@ -572,6 +596,10 @@ async function main() {
 		log(`server up: ${url}`);
 	} else {
 		log(`dev mode: ${devUrl}`);
+		if(process.env.LH_PRIVATE_NEXT_DEV==="1"){
+			startPrivateDevServer();
+			await waitUntilUp(url);
+		}
 	}
 
 	installMenu();

@@ -1,6 +1,7 @@
 import {
 	clampThinkingLevel,
 	createModels,
+	createAssistantMessageEventStream,
 	getSupportedThinkingLevels,
 	type Api,
 	type Model,
@@ -12,6 +13,8 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
+import {createPlanProvider} from "../subscription/pi-provider.mjs";
+import type {Provider} from "@earendil-works/pi-ai";
 
 /** App identity is immutable and shared by Models and every native Agent.
  * Agent's default Pi attribution otherwise overrides the Models identity. */
@@ -44,6 +47,11 @@ export interface PiEngine {
 export type { ThinkingLevel };
 
 let collection: ReturnType<typeof createModels> | undefined;
+let planProvider: ReturnType<typeof createPlanProvider> | undefined;
+export async function syncChatGPTPlanModels(): Promise<void> {
+  if (!planProvider) piModels();
+  await planProvider?.syncModels();
+}
 
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
@@ -57,6 +65,8 @@ export function piModels() {
 	if (!collection) {
 		collection = createModels({ identity: APP_IDENTITY });
 		for (const provider of builtinProviders()) collection.setProvider(provider);
+		planProvider = createPlanProvider({makeEventStream:createAssistantMessageEventStream});
+		collection.setProvider(planProvider as unknown as Provider);
 	}
 	return collection;
 }
