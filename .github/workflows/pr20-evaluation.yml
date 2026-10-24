@@ -1,0 +1,65 @@
+name: PR20 isolated Windows acceptance
+on:
+  push:
+    branches:
+      - experiment/upstream-pr20-chatgpt
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: PR20 OAuth focused tests
+        run: node --import tsx --test tests/chatgpt-oauth.test.ts
+        env:
+          NODE_ENV: test
+      - name: Complete upstream tests on Windows
+        run: node scripts/pr20-tests-win.mjs
+      - run: npm run lint
+      - run: npm run build
+      - run: node scripts/build-server.mjs
+      - run: node scripts/smoke-server.mjs --electron
+      - name: Build portable Windows application (without NSIS installer)
+        shell: pwsh
+        run: |
+          npx --no-install electron-builder --win --x64 --dir --publish never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify isolated identity and required OAuth code inside app
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'dist/win-unpacked/LearnHarness PR20 Test.exe')) { throw 'Expected portable app absent' }
+          if (!(Test-Path 'dist/win-unpacked/resources/app.asar')) { throw 'App archive absent' }
+          if (!(Test-Path 'dist/win-unpacked/resources/server/standalone/server.js')) { throw 'Next server absent' }
+          $files = @(npx --no-install asar list 'dist/win-unpacked/resources/app.asar')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!($files | Where-Object { $_ -like '*/electron/chatgpt-oauth.cjs' })) { throw 'OAuth runtime missing from app.asar' }
+          if (!($files | Where-Object { $_ -like '*/node_modules/jose/package.json' })) { throw 'jose missing from app.asar' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: learnharness-pr20-portable-windows
+          path: dist/win-unpacked/
+          retention-days: 5
+          if-no-files-found: error
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build

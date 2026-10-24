@@ -36,7 +36,7 @@ const { createChatGPTOAuthRuntime } = require("./chatgpt-oauth.cjs");
 // renderer owns the number; this is the IPC widen target).
 const SIDEBAR_AUTOCLOSE = 928;
 
-const PRODUCT_NAME = "LearnHarness";
+const PRODUCT_NAME = "LearnHarness PR20 Test";
 
 // APP NAME → userData (owner, 2026-10-10): the Application Support dir is
 // exactly "LearnHarness" in dev AND packaged. Packaged Electron would
@@ -452,6 +452,8 @@ function installUpdateNow() {
 }
 
 function setupAutoUpdater() {
+	// Evaluation build: NEVER contact the upstream release feed or upgrade this test app.
+	return;
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
 		return;
