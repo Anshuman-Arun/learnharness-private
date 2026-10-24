@@ -28,6 +28,8 @@ jobs:
       - run: npm run build
       - run: node scripts/build-server.mjs
       - run: node scripts/smoke-server.mjs --electron
+      - name: Isolate Windows app after upstream regression suite
+        run: node scripts/pr20-isolate-package.mjs
       - name: Build portable Windows application (without NSIS installer)
         shell: pwsh
         run: |

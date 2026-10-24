@@ -27,7 +27,7 @@ function windowOptions(platform: string) {
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
-		require: (id: string) => id === "electron" ? electron : require(id),
+		require: (id: string) => id === "electron" ? electron : id === "./chatgpt-oauth.cjs" ? { createChatGPTOAuthRuntime() {} } : require(id),
 		process: { platform, argv: [], env: {}, on() {} },
 		__dirname: dirname(mainFile),
 	};
@@ -77,7 +77,8 @@ describe("desktop window chrome", () => {
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"expandWindow", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform",
+			"chatGPTCancelSignIn", "chatGPTDisconnect", "chatGPTOpenAuthorization", "chatGPTSignIn",
+			"expandWindow", "getChatGPTStatus", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform",
 		]);
 	});
 });
