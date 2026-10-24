@@ -233,6 +233,8 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 export interface GeneralSettings {
 	/** Auto-update the app (default ON). Mechanism ships in a later wave. */
 	autoUpdate?: boolean;
+	/** Dictation microphone deviceId; "default" follows the OS default. */
+	microphoneId?: string;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -396,7 +398,7 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
+	general: { autoUpdate: true, microphoneId: "default" },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -441,6 +443,12 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	if (
+		typeof raw.microphoneId === "string" &&
+		raw.microphoneId.length > 0 &&
+		raw.microphoneId.length <= 512 &&
+		!/[\x00-\x1f\x7f]/.test(raw.microphoneId)
+	) out.microphoneId = raw.microphoneId;
 	return out;
 }
 

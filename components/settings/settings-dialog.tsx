@@ -49,6 +49,7 @@ import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
+import { MicrophonePicker } from "./microphone-picker.tsx";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -369,10 +370,16 @@ export function SettingsDialogBody({
 											checked={record.general?.autoUpdate ?? true}
 											label="auto update"
 											onChange={(on) =>
-												void write("general", { autoUpdate: on })
+												void write("general", { ...record.general, autoUpdate: on })
 											}
 										/>
 									</SettingsRow>
+									<MicrophonePicker
+										value={record.general?.microphoneId ?? "default"}
+										onChange={(microphoneId) =>
+											void write("general", { ...record.general, microphoneId })
+										}
+									/>
 								</SettingsSection>
 							)}
 							{active === "keys" && (

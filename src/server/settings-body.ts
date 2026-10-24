@@ -75,7 +75,7 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
-/** general: { autoUpdate?: boolean } */
+/** general: { autoUpdate?: boolean, microphoneId?: string } */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -85,6 +85,15 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 			return { ok: false, error: "autoUpdate must be a boolean" };
 		}
 		settings.autoUpdate = raw.autoUpdate;
+	}
+	if (raw.microphoneId !== undefined) {
+		if (
+			typeof raw.microphoneId !== "string" ||
+			raw.microphoneId.length === 0 ||
+			raw.microphoneId.length > 512 ||
+			/[\x00-\x1f\x7f]/.test(raw.microphoneId)
+		) return { ok: false, error: "microphoneId must be a nonempty device ID (max 512 characters)" };
+		settings.microphoneId = raw.microphoneId;
 	}
 	return { ok: true, settings };
 }

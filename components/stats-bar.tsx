@@ -89,6 +89,9 @@ export function StatsBar({
 	const pricedCount = turns.length - unpriced;
 	const costLabel = pricedCount > 0 ? formatUsd(cost) : "—";
 	const lastModel = turns.at(-1)?.model;
+	const chatGPTConnected = catalog?.providers.some((provider) =>
+		provider.id === "openai-chatgpt" && provider.keyPresent,
+	) ?? false;
 
 	return (
 		<div
@@ -189,6 +192,19 @@ export function StatsBar({
 			{/* The model + thinking control — one controller for the conversation
 			    agents (prober/teacher); the record's `turns` above still folds
 			    the ACTUAL models billed, regardless of what the picker says. */}
+			{chatGPTConnected && (
+				<a
+					href="https://chatgpt.com/#settings/Usage"
+					target="_blank"
+					rel="noopener noreferrer"
+					title="Review actual ChatGPT plan usage and app limits in ChatGPT Settings → Usage"
+					aria-label="Manage ChatGPT plan usage"
+					data-testid="chatgpt-plan-usage"
+					className="shrink-0 whitespace-nowrap text-muted-foreground/80 transition-colors hover:text-foreground"
+				>
+					Plan usage ↗
+				</a>
+			)}
 			<ModelControl chatId={chatId} />
 		</div>
 	);

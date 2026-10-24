@@ -107,6 +107,27 @@ export const METER_CELLS = 48;
  *  section's openRow state and the PUT /api/keys/:id seam). */
 export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
 
+/** A named device is a strict choice: never silently record from another mic. */
+export function dictationAudioConstraints(microphoneId = "default"): MediaStreamConstraints {
+	return {
+		audio: {
+			...(microphoneId !== "default" ? { deviceId: { exact: microphoneId } } : {}),
+			channelCount: 1,
+			echoCancellation: true,
+			noiseSuppression: true,
+			autoGainControl: true,
+		},
+	};
+}
+
+/** Uses persisted app settings, not origin-local localStorage (port changes every boot). */
+async function microphoneConstraintsFromSettings(): Promise<MediaStreamConstraints> {
+	const response = await fetch("/api/settings", { cache: "no-store" });
+	if (!response.ok) throw new Error("Could not read microphone setting.");
+	const body = (await response.json()) as { settings?: { general?: { microphoneId?: string } } | null };
+	return dictationAudioConstraints(body.settings?.general?.microphoneId ?? "default");
+}
+
 /** The client-authored KEYLESS line (zero-keys wave, owner 2026-09-25):
  * the token route's raw 503 message is dev-speak ("add it to auth.json
  * (desktop) or .env.local (dev)") — the surface says the short truth
@@ -442,9 +463,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// first use.
 		const tokenPromise = warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
-		const micPromise = navigator.mediaDevices.getUserMedia({
-			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-		});
+		const micPromise = microphoneConstraintsFromSettings()
+			.then((constraints) => navigator.mediaDevices.getUserMedia(constraints));
 		let stream: MediaStream;
 		try {
 			stream = await micPromise;
@@ -489,6 +509,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			const msg =
 				e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")
 					? "Microphone permission denied"
+					: e instanceof DOMException && (e.name === "NotFoundError" || e.name === "OverconstrainedError")
+						? "Selected microphone unavailable — choose another in Settings → General"
 					: e instanceof Error
 						? e.message
 						: "mic unavailable";
