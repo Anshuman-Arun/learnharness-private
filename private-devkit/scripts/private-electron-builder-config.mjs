@@ -4,10 +4,12 @@
  */
 export function addSiwcResources(yaml){
   if(typeof yaml!=='string')throw new Error('Expected electron-builder YAML');
-  if(yaml.includes('from: vendor/siwc-runtime'))throw new Error('DevKit resource already included');
+  // Git on Windows may check out the YAML as CRLF. Work with one canonical newline style.
+  const source=yaml.replace(/\r\n/g,'\n');
+  if(source.includes('from: vendor/siwc-runtime'))throw new Error('DevKit resource already included');
   const anchor='\nmac:\n';
-  if(yaml.split(anchor).length!==2||!yaml.includes('\nextraResources:\n'))
+  if(source.split(anchor).length!==2||!source.includes('\nextraResources:\n'))
     throw new Error('Unsupported electron-builder YAML layout; review manually');
-  return yaml.replace(anchor,
+  return source.replace(anchor,
     '\n  - from: vendor/siwc-runtime\n    to: siwc-runtime\n    filter:\n      - "**/*"\nmac:\n');
 }
