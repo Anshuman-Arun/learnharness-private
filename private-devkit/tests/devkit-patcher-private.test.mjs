@@ -56,3 +56,16 @@ test('DevKit patcher refuses upstream drift without partial changes',t=>{
   assert.equal(fs.existsSync(path.join(src,'structured-events.ts')),false);
   assert.equal(fs.readFileSync(path.join(src,'types.ts'),'utf8').includes('StructuredStreamOptions'),false);
 });
+
+test('DevKit patcher supports Windows CRLF checkouts',t=>{
+  const root=temporarySdk();t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const src=path.join(root,'packages/local/src');
+  for(const name of ['types.ts','index.ts']) {
+    const file=path.join(src,name);
+    const before=fs.readFileSync(file,'utf8');
+    fs.writeFileSync(file,before.replace(/\n/g,'\r\n'));
+  }
+  execFileSync(process.execPath,[script,root]);
+  const index=fs.readFileSync(path.join(src,'index.ts'),'utf8');
+  assert.match(index,/streamStructuredEvents\(options\)/);
+});

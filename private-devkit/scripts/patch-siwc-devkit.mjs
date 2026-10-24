@@ -15,7 +15,7 @@ const dry=process.argv.includes('--dry-run');
 const kit=path.dirname(fileURLToPath(import.meta.url));
 const changes=new Map();
 function ensure(test,message){if(!test)throw new Error(message)}
-function read(name){return fs.readFileSync(path.join(target,name),'utf8')}
+function read(name){return fs.readFileSync(path.join(target,name),'utf8').replace(/\r\n/g,'\n')}
 function replaceOnce(str,needle,replacement,label){
   const count=str.split(needle).length-1;
   ensure(count===1,`${label}: expected one exact source anchor, found ${count}`);
