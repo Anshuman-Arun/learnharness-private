@@ -72,7 +72,7 @@ export function MicrophonePicker({
 	const namedDevices = devices.filter((device) => device.label);
 	const byId = namedDevices.find((device) => device.deviceId === value);
 	const byLabel = namedDevices.filter((device) => device.label === label);
-	const resolved = value === "default" ? "default" : byId?.deviceId ?? (byLabel.length === 1 ? byLabel[0].deviceId : value);
+	const resolved = value === "default" ? "default" : byId?.deviceId ?? (byLabel.length === 1 ? byLabel[0]?.deviceId ?? value : value);
 	const missing = value !== "default" && !byId && byLabel.length !== 1;
 	return (
 		<div data-testid="microphone-preference">

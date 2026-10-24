@@ -127,7 +127,7 @@ export function findMicrophoneByLabel(
 ): string | undefined {
 	if (!label) return undefined;
 	const matches = devices.filter((item) => item.kind === "audioinput" && item.label === label && item.deviceId);
-	return matches.length === 1 ? matches[0].deviceId : undefined;
+	return matches.length === 1 ? matches[0]?.deviceId : undefined;
 }
 
 async function selectedMicrophone(): Promise<MediaStream> {
