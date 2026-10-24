@@ -67,11 +67,18 @@ export function piModels() {
 	return collection;
 }
 
-function piChatGPTModels() {
+export function piChatGPTModels() {
 	if (!chatGPTCollection) {
 		chatGPTCollection = createModels({
 			identity: APP_IDENTITY,
 			credentials: new ChatGPTBrokerCredentialStore(),
+			// Subscription authentication is a separate billing boundary. If the
+			// broker has no authorized OAuth credential, ambient OPENAI_API_KEY
+			// must NEVER be used as an alternative.
+			authContext: {
+				env: async () => undefined,
+				fileExists: async () => false,
+			},
 		});
 		for (const provider of builtinProviders()) {
 			if (provider.id === CHATGPT_SOURCE_PROVIDER_ID) chatGPTCollection.setProvider(provider);
@@ -135,6 +142,9 @@ export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 		streamFn: (requestModel, context, options) =>
 			models.streamSimple(requestModel, context, {
 				...options,
+				// Do not let an explicitly supplied ambient key/header bypass the
+				// ChatGPT broker boundary on the subscription-only path.
+				...(usesChatGPT ? { apiKey: undefined, env: undefined, headers: undefined } : {}),
 				reasoning: level === "off" ? undefined : level,
 			}),
 	};
