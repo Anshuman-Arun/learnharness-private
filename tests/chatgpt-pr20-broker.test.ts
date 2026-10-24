@@ -26,7 +26,8 @@ describe("PR20 real localhost broker (no account/network required)", () => {
       encryptString:(str:string)=>{
         const nonce=crypto.randomBytes(12);
         const cipher=crypto.createCipheriv("aes-256-gcm",key,nonce);
-        return Buffer.concat([nonce,cipher.getAuthTag(),cipher.update(str,"utf8"),cipher.final()]);
+        const body=Buffer.concat([cipher.update(str,"utf8"),cipher.final()]);
+        return Buffer.concat([nonce,cipher.getAuthTag(),body]);
       },
       decryptString:(input:Buffer)=>{
         const decipher=crypto.createDecipheriv("aes-256-gcm",key,input.subarray(0,12));
