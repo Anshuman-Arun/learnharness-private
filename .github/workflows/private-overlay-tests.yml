@@ -1,0 +1,18 @@
+name: Private adapter staging tests
+on:
+  push:
+    branches: [feature/chatgpt-plan-overlay]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  overlay:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: Verify standalone subscription adapter
+        run: node private-devkit/scripts/run-overlay-only.mjs
