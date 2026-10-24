@@ -8,7 +8,7 @@ permissions:
 jobs:
   patched-sdk:
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,6 +34,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Stage private SDK runtime without publishing
         run: node private-devkit/scripts/stage-siwc-runtime.mjs .official-devkit
+      - name: Package private Windows installer with SDK
+        run: node private-devkit/scripts/build-windows-private.mjs
+      - name: Verify SDK is in installed application resources
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist/win-unpacked/resources/siwc-runtime/node_modules/@siwc/local/dist/structured-events.js")) { exit 1 }
+          if (!(Get-ChildItem dist -Filter "*setup.exe")) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: learnharness-private-windows-sdk
+          path: dist/*setup.exe
+          retention-days: 3
+          if-no-files-found: error
       - name: Verify SDK remains noncommercial and tool-capable
         shell: pwsh
         run: |
