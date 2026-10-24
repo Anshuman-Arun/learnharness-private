@@ -1,0 +1,27 @@
+name: Private Windows installer packaging
+on:
+  push:
+    branches: [feature/private-windows-installer-check]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installer:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - name: Build unsigned private Windows installer
+        run: npm run desktop:dist:win
+      - name: Keep installer for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: learnharness-private-windows-baseline
+          path: dist/*-setup.exe
+          retention-days: 7
+          if-no-files-found: error
