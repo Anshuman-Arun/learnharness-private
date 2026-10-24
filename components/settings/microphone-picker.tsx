@@ -5,13 +5,15 @@ import { SettingsRow, ThinSelect } from "./controls.tsx";
 
 type Microphone = { deviceId: string; label: string };
 
-/** Select a stable device ID (stored by the server), or follow Windows' default. */
+/** Persist both ID and name; IDs are salted by origin, and localhost's port changes per boot. */
 export function MicrophonePicker({
 	value,
+	label,
 	onChange,
 }: {
 	value: string;
-	onChange: (microphoneId: string) => void;
+	label: string;
+	onChange: (microphoneId: string, microphoneLabel: string) => void;
 }) {
 	const [devices, setDevices] = useState<Microphone[]>([]);
 	const [busy, setBusy] = useState(false);
@@ -25,16 +27,12 @@ export function MicrophonePicker({
 		try {
 			const available = await navigator.mediaDevices.enumerateDevices();
 			const unique = new Map<string, Microphone>();
-			let index = 0;
 			for (const device of available) {
 				if (device.kind !== "audioinput" || !device.deviceId || device.deviceId === "default" || device.deviceId === "communications") continue;
-				if (!unique.has(device.deviceId)) {
-					index++;
-					unique.set(device.deviceId, {
-						deviceId: device.deviceId,
-						label: device.label || `Microphone ${index} (grant access to see its name)`,
-					});
-				}
+				if (!unique.has(device.deviceId)) unique.set(device.deviceId, {
+					deviceId: device.deviceId,
+					label: device.label,
+				});
 			}
 			setDevices([...unique.values()]);
 			setError(null);
@@ -57,7 +55,7 @@ export function MicrophonePicker({
 		}
 		setBusy(true);
 		try {
-			// Only this click requests capture; stop immediately after granting permission.
+			// This explicit click only checks permission, never sends audio to Deepgram.
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 			try {
 				await refresh();
@@ -71,18 +69,25 @@ export function MicrophonePicker({
 		}
 	};
 
-	const missing = value !== "default" && !devices.some((device) => device.deviceId === value);
+	const namedDevices = devices.filter((device) => device.label);
+	const byId = namedDevices.find((device) => device.deviceId === value);
+	const byLabel = namedDevices.filter((device) => device.label === label);
+	const resolved = value === "default" ? "default" : byId?.deviceId ?? (byLabel.length === 1 ? byLabel[0].deviceId : value);
+	const missing = value !== "default" && !byId && byLabel.length !== 1;
 	return (
 		<div data-testid="microphone-preference">
-			<SettingsRow label="Dictation microphone" hint="Choose an input for Deepgram. Saved on this device." testid="row-microphone">
+			<SettingsRow label="Dictation microphone" hint="Used by Deepgram; saved across restarts." testid="row-microphone">
 				<ThinSelect
-					value={value}
-					onChange={onChange}
+					value={resolved}
+					onChange={(id) => {
+						const device = namedDevices.find((item) => item.deviceId === id);
+						onChange(id, device?.label ?? "");
+					}}
 					ariaLabel="Dictation microphone"
 					testid="microphone-select"
 				>
 					<option value="default">System default</option>
-					{devices.map((device) => (
+					{namedDevices.map((device) => (
 						<option key={device.deviceId} value={device.deviceId}>{device.label}</option>
 					))}
 					{missing && <option value={value}>Saved microphone (not currently detected)</option>}
@@ -103,9 +108,12 @@ export function MicrophonePicker({
 					className="rounded-sm border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
 				>{busy ? "Checking…" : "Detect microphones"}</button>
 			</div>
+			{namedDevices.length === 0 && !error && (
+				<p className="text-xs text-muted-foreground">Click Detect microphones to grant access and show device names.</p>
+			)}
 			{error && <p role="alert" className="text-xs text-destructive">{error}</p>}
 			{missing && !error && (
-				<p className="text-xs text-muted-foreground">That microphone is not currently listed. Connect it or select System default.</p>
+				<p className="text-xs text-muted-foreground">Saved microphone is not currently identified. Connect it, click Detect microphones, or choose System default.</p>
 			)}
 		</div>
 	);

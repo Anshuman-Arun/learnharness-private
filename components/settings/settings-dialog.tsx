@@ -376,8 +376,9 @@ export function SettingsDialogBody({
 									</SettingsRow>
 									<MicrophonePicker
 										value={record.general?.microphoneId ?? "default"}
-										onChange={(microphoneId) =>
-											void write("general", { ...record.general, microphoneId })
+										label={record.general?.microphoneLabel ?? ""}
+										onChange={(microphoneId, microphoneLabel) =>
+											void write("general", { ...record.general, microphoneId, microphoneLabel })
 										}
 									/>
 								</SettingsSection>

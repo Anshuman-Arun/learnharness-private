@@ -75,7 +75,7 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
-/** general: { autoUpdate?: boolean, microphoneId?: string } */
+/** general: { autoUpdate?: boolean, microphoneId?: string, microphoneLabel?: string } */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -94,6 +94,12 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 			/[\x00-\x1f\x7f]/.test(raw.microphoneId)
 		) return { ok: false, error: "microphoneId must be a nonempty device ID (max 512 characters)" };
 		settings.microphoneId = raw.microphoneId;
+	}
+	if (raw.microphoneLabel !== undefined) {
+		if (typeof raw.microphoneLabel !== "string" || raw.microphoneLabel.length > 256 || /[\x00-\x1f\x7f]/.test(raw.microphoneLabel)) {
+			return { ok: false, error: "microphoneLabel must be a device name (max 256 characters)" };
+		}
+		settings.microphoneLabel = raw.microphoneLabel;
 	}
 	return { ok: true, settings };
 }
