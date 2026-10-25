@@ -503,29 +503,44 @@ function restoreDollarMathEscapes(text: string): string {
  * transport), and deepseek-v4.1-flash once; quadrupling appeared when the
  * in-session agent "compensated" for its own doubled first attempt.
  *
- * THE RULE. Inside a balanced math span ONLY (legacy `\(…\)`/`\[…\]` and
- * dollar `$…$`/`$$…$$`, code spans and fences excluded), an EVEN-length
- * backslash run (2, 4, …) immediately followed by a command start — a letter
- * (any command name; bare letters after a row break are never authored
- * content) or a punctuation command (`,` `;` `:` `!` `|` — thin spaces,
- * norm bars) — collapses to a single backslash. Even runs before anything
- * else (space, newline, `&`, `[`, `$`, digits) are legitimate row breaks and
- * stay; ODD runs (3, 5, …) are row break(s) plus a real command with its own
- * backslash — e.g. matrix cells written `a \\\nabla` — and stay untouched,
- * so matrix content cannot be corrupted. Outside spans nothing is touched:
- * doubled backslashes in prose or code are not ours to judge. Unbalanced
- * spans pass through, exactly like the debris passes.
+ * THE RULE: conservatively heal even backslash runs only before KNOWN TeX
+ * commands. A valid matrix row break may be immediately followed by a
+ * variable (e.g. pmatrix with y_1 followed by \\y_2); treating every
+ * following letter as a command corrupts the matrix. Unknown macros and
+ * arbitrary words therefore retain their original backslashes. Odd runs
+ * and legitimate row breaks stay intact; code/prose are untouched.
  */
 const COMMAND_START_CLASS = "[A-Za-z,;:!|]";
+const KNOWN_TEX_WORDS = new Set([
+  "begin", "end", "times", "cdot", "ast", "star", "pm", "mp", "div",
+  "in", "notin", "ni", "subset", "subseteq", "supset", "supseteq", "cup", "cap", "emptyset",
+  "le", "leq", "ge", "geq", "neq", "ne", "approx", "equiv", "sim", "propto",
+  "forall", "exists", "neg", "land", "lor", "implies", "iff",
+  "to", "mapsto", "leftarrow", "rightarrow", "Rightarrow", "Leftarrow", "Leftrightarrow",
+  "longrightarrow", "Longrightarrow", "uparrow", "downarrow",
+  "frac", "dfrac", "tfrac", "sqrt", "binom", "sum", "prod", "int", "iint", "oint", "lim",
+  "sin", "cos", "tan", "log", "ln", "exp", "min", "max", "sup", "inf",
+  "mathbb", "mathcal", "mathfrak", "mathbf", "mathit", "mathrm", "operatorname", "text", "textbf",
+  "left", "right", "middle", "Big", "big", "Bigg", "bigg",
+  "top", "bot", "perp", "parallel", "nabla", "partial", "infty", "dot", "ddot", "hat", "bar", "vec", "overline", "underline",
+  "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "theta", "vartheta", "lambda", "mu", "nu", "xi",
+  "pi", "rho", "sigma", "tau", "phi", "varphi", "chi", "psi", "omega", "Delta", "Gamma", "Lambda", "Sigma", "Omega",
+  "ldots", "cdots", "vdots", "ddots", "quad", "qquad", "hspace", "kern", "textdollar",
+]);
 
-/** Collapse even backslash runs before a command start; keep odd runs. */
+/** A double-backslash before a plain variable is a row break, not broken TeX. */
 function halveOverescapedCommandRuns(inner: string): string {
-	return inner.replace(
-		new RegExp("(\\\\+)(?=" + COMMAND_START_CLASS + ")", "g"),
-		(run: string) => (run.length % 2 === 0 ? "\\" : run),
-	);
+  return inner.replace(
+    new RegExp("(\\\\+)(?=" + COMMAND_START_CLASS + ")", "g"),
+    (run: string, _captured: string, offset: number, whole: string) => {
+      if (run.length % 2 !== 0) return run;
+      const after = whole.slice(offset + run.length);
+      if (/^[,;:!|]/.test(after)) return "\\";
+      const command = /^[A-Za-z]+/.exec(after)?.[0];
+      return command && KNOWN_TEX_WORDS.has(command) ? "\\" : run;
+    },
+  );
 }
-
 export function healOverescapedCommands(text: string): string {
 	if (!text.includes("\\\\")) return text;
 	const out: string[] = [];

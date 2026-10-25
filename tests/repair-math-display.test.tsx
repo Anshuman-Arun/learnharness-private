@@ -252,6 +252,14 @@ describe("practice display surfaces", () => {
 });
 
 
+describe("Batch A — do not corrupt matrix row breaks", () => {
+  it("leaves backslash row breaks followed by variable names intact", () => {
+    const raw = String.raw`$$
+\\begin{pmatrix}y_1\\\\y_2\\\\z_3\\end{pmatrix}
+$$`;
+    assert.equal(repairMathForDisplay(raw), raw);
+  });
+});
 describe("Batch A — ordinary chat math and linear algebra", () => {
 	it("renders matrix dimensions and operators, not italic word fragments", () => {
 		const source = String.raw`The product of a $2\times 3$ matrix and a $3\times 2$ matrix is $2\times 2$.`;
