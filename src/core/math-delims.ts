@@ -4,7 +4,8 @@
  * Current authoring uses `$...$` inline and `$$...$$` on separate lines for
  * display (owner, 2026-10-12). This pure transform keeps correctly formed
  * old backslash-delimited content readable; dollar math passes through to
- * Streamdown's native parser. Escape restoration below recognizes both
+ * Streamdown's native parser; bare numeric currency openers are escaped.
+ * Escape restoration below recognizes both
  * syntaxes while retaining the existing recovery rules.
  *
  * Rules:
@@ -127,7 +128,7 @@ function closeEndsLine(text: string, afterClose: number): boolean {
 
 /**
  * Rewrite balanced `\(...\)` → `$$...$$` and `\[...\]` → `$$\n...\n$$`.
- * Everything else passes through byte-for-byte.
+ * Numeric currency openers are escaped; other text passes through unchanged.
  */
 /** The escaped-dollar-aware inline closer (owner, 2026-10-12): micromark's
  *  mathText closer is code-span logic — ANY size-matched `$` run closes,
@@ -138,6 +139,7 @@ function closeEndsLine(text: string, afterClose: number): boolean {
  *  inline rules otherwise (exact size match, whole-run skip). */
 function findInlineDollarCloseEscapeAware(text: string, from: number): number {
 	for (let j = from; j < text.length;) {
+		if (text[j] === "\n" && /^[ \t]*\r?\n/.test(text.slice(j + 1))) return -1;
 		if (text[j] !== "$") {
 			j += 1;
 			continue;
@@ -151,6 +153,15 @@ function findInlineDollarCloseEscapeAware(text: string, from: number): number {
 		j += count;
 	}
 	return -1;
+}
+
+/** Numeric dollar openers are currency when the next dollar cannot close
+ *  math: whitespace before it, a digit after it, or no closer in this paragraph.
+ *  Real numeric formulas such as `$100$` and `$4\%$` retain their delimiters. */
+function isCurrencyDollar(text: string, i: number): boolean {
+	if (!/\d/.test(text[i + 1] ?? "")) return false;
+	const closeAt = findInlineDollarCloseEscapeAware(text, i + 1);
+	return closeAt === -1 || /\s/.test(text[closeAt - 1]!) || /\d/.test(text[closeAt + 1] ?? "");
 }
 
 /** Replace `\$` (odd-backslash dollars) inside a math span with the
@@ -260,15 +271,18 @@ export function transformMathDelimiters(markdown: string): string {
 		if (ch === "$" && !isEscaped(markdown, i)) {
 			const run = dollarRun(markdown, i);
 			if (run === 1) {
+				if (isCurrencyDollar(markdown, i)) {
+					out.push("\\$");
+					i += 1;
+					continue;
+				}
 				const closeAt = findInlineDollarCloseEscapeAware(markdown, i + 1);
 				if (closeAt !== -1) {
 					const content = markdown.slice(i + 1, closeAt);
 					const replaced = replaceEscapedDollars(content);
-					if (replaced !== content) {
-						out.push(`$${replaced}$`);
-						i = closeAt + 1;
-						continue;
-					}
+					out.push(`$${replaced}$`);
+					i = closeAt + 1;
+					continue;
 				}
 			} else {
 				out.push(markdown.slice(i, i + run));
@@ -402,6 +416,7 @@ function findDollarClose(
 		return undefined;
 	}
 	for (let j = from; j < text.length;) {
+		if (text[j] === "\n" && /^[ \t]*\r?\n/.test(text.slice(j + 1))) return undefined;
 		if (text[j] !== "$") {
 			j += 1;
 			continue;
@@ -450,7 +465,7 @@ function restoreDollarMathEscapes(text: string): string {
 				}
 			}
 		}
-		if (text[i] === "$" && !isEscaped(text, i)) {
+		if (text[i] === "$" && !isEscaped(text, i) && !isCurrencyDollar(text, i)) {
 			const size = dollarRun(text, i);
 			const isDisplay = dollarIsDisplay(text, i, size);
 			const close = findDollarClose(text, i + size, size, isDisplay);
@@ -548,7 +563,7 @@ export function healOverescapedCommands(text: string): string {
 				}
 			}
 		}
-		if (text[i] === "$" && !isEscaped(text, i)) {
+		if (text[i] === "$" && !isEscaped(text, i) && !isCurrencyDollar(text, i)) {
 			const size = dollarRun(text, i);
 			const isDisplay = dollarIsDisplay(text, i, size);
 			const close = findDollarClose(text, i + size, size, isDisplay);

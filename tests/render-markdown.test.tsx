@@ -13,14 +13,50 @@ import React from "react";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import { MermaidError } from "../components/mermaid-error.tsx";
-import { transformMathDelimiters, healOverescapedCommands } from "../src/core/math-delims.ts";
+import { transformMathDelimiters, healOverescapedCommands, repairMathForDisplay } from "../src/core/math-delims.ts";
 
 /** Render through MessageResponse in static mode (no streaming/remend artifacts). */
 function render(md: string): string {
 	return renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
 }
+
+describe("currency mixed with math", () => {
+	it("keeps dollar amounts and paragraph breaks while rendering percentage math", () => {
+		const question = "Contribute $100 million and receive $6 million yearly, plus $100 million at maturity.\n\nAssume a $4\\%$ annual return.";
+		assert.equal(repairMathForDisplay(question), question, "currency must not trigger escape repair");
+		for (const mode of ["static", "streaming"] as const) {
+			const { document } = parseHTML(renderToStaticMarkup(<MessageResponse mode={mode}>{repairMathForDisplay(question)}</MessageResponse>));
+			assert.equal(document.querySelectorAll("p").length, 2);
+			assert.ok(document.querySelector("p")!.textContent!.includes("$100 million and receive $6 million yearly, plus $100 million"));
+			assert.deepEqual([...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent), [String.raw`4\%`]);
+			assert.equal(document.querySelectorAll(".katex-error").length, 0);
+		}
+	});
+
+	it("keeps a lone amount literal without consuming the next variable", () => {
+		const { document } = parseHTML(render("Pay $5 and let $x$ vary; keep $10. Range: $5–$10."));
+		assert.deepEqual([...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent), ["x"]);
+		assert.ok(document.firstElementChild!.textContent!.includes("Pay $5 and let"));
+		assert.ok(document.firstElementChild!.textContent!.includes("keep $10."));
+		assert.ok(document.firstElementChild!.textContent!.includes("Range: $5–$10."));
+	});
+
+	it("preserves numeric formulas, escaped currency, and literal code", () => {
+		const md = String.raw`$100$ and $5 + 10$; \$5; ` + "`$5 and $10`\n\n```text\n$5 and $10\n```";
+		const { document } = parseHTML(render(md));
+		assert.deepEqual([...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent), ["100", "5 + 10"]);
+		assert.equal(document.querySelectorAll("code").length, 2);
+		assert.ok([...document.querySelectorAll("code")].every((n) => n.textContent!.includes("$5 and $10")));
+	});
+
+	it("does not repair inline dollars across a paragraph boundary", () => {
+		const md = "$x\n\n+y$";
+		assert.equal(repairMathForDisplay(md), md);
+	});
+});
 
 describe("math delimiter transform (pure unit)", () => {
 	it("converts inline \\(...\\) to the two-dollar inline form", () => {
@@ -53,9 +89,9 @@ describe("math delimiter transform (pure unit)", () => {
 		);
 	});
 
-	it("leaves currency untouched", () => {
+	it("escapes bare currency without changing math", () => {
 		const md = "It costs $5 and $10 more. $$big$$ sums too.";
-		assert.equal(transformMathDelimiters(md), md);
+		assert.equal(transformMathDelimiters(md), "It costs \\$5 and \\$10 more. $$big$$ sums too.");
 	});
 
 	it("leaves escaped delimiters untouched (\\\\( is a literal backslash)", () => {
@@ -285,9 +321,9 @@ describe("escaped dollars inside math — transform units", () => {
 		assert.equal(transformMathDelimiters(md), md);
 	});
 
-	it("leaves prose escaped dollars and bare currency untouched", () => {
+	it("preserves escaped dollars and escapes bare currency", () => {
 		const md = "It costs \\$5 flat, then $5 and $10 more.";
-		assert.equal(transformMathDelimiters(md), md);
+		assert.equal(transformMathDelimiters(md), "It costs \\$5 flat, then \\$5 and \\$10 more.");
 	});
 
 	it("leaves display spans untouched — a lone $ can't close $$, \\$ already survives", () => {
