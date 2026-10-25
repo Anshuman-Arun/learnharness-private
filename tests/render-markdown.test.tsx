@@ -451,13 +451,12 @@ describe("over-escaped command heal — doubled backslashes in tool args (owner 
 		assert.equal(healOverescapedCommands("$\\\\nabla"), "$\\\\nabla");
 	});
 
-	it("the raw doubled gradient-descent question renders the word-signature (the bug this heal exists for)", () => {
-		// The real session record (chat_mv7r02og, msg 3), expressed as the
-		// clean form with every backslash doubled — exactly what mimo emitted.
+		it("the ordinary chat renderer now repairs the raw doubled gradient-descent question", () => {
 		const raw = GD_QUESTION.replace(/\\/g, "\\\\");
 		const html = render(raw);
-		assert.ok(!html.includes("∇"), "doubled form does not produce the glyph");
-		assert.ok(html.includes("katex-error"), "doubled form errors in KaTeX");
+		assert.ok(html.includes("∇"), "the unmodified stored input renders nabla");
+		assert.ok(html.includes("⊤"), "transpose renders");
+		assert.ok(!html.includes("katex-error"), "no KaTeX errors");
 	});
 
 	it("the healed question renders ∇ and ⊤ with zero KaTeX errors", () => {
