@@ -524,7 +524,7 @@ const KNOWN_TEX_WORDS = new Set([
   "left", "right", "middle", "Big", "big", "Bigg", "bigg",
   "top", "bot", "perp", "parallel", "nabla", "partial", "infty", "dot", "ddot", "hat", "bar", "vec", "overline", "underline",
   "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "theta", "vartheta", "lambda", "mu", "nu", "xi",
-  "pi", "rho", "sigma", "tau", "phi", "varphi", "chi", "psi", "omega", "Delta", "Gamma", "Lambda", "Sigma", "Omega",
+  "pi", "rho", "sigma", "tau", "phi", "varphi", "chi", "psi", "omega", "ell", "Delta", "Gamma", "Lambda", "Sigma", "Omega",
   "ldots", "cdots", "vdots", "ddots", "quad", "qquad", "hspace", "kern", "textdollar",
 ]);
 
