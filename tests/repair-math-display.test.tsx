@@ -255,7 +255,7 @@ describe("practice display surfaces", () => {
 describe("Batch A — do not corrupt matrix row breaks", () => {
   it("leaves backslash row breaks followed by variable names intact", () => {
     const raw = String.raw`$$
-\\begin{pmatrix}y_1\\\\y_2\\\\z_3\\end{pmatrix}
+\begin{pmatrix}y_1\\y_2\\z_3\end{pmatrix}
 $$`;
     assert.equal(repairMathForDisplay(raw), raw);
   });
