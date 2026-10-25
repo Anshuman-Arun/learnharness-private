@@ -194,7 +194,7 @@ describe("practice display surfaces", () => {
 		}
 	});
 
-	it("does not change the collapsed preview, dismissal or global prose renderer", () => {
+	it("does not change the collapsed preview or dismissal; global prose now repairs damaged math", () => {
 		const preview = renderToStaticMarkup(dock({ statement: doubled }, false));
 		assert.ok(preview.includes(doubled));
 		assert.deepEqual(math(preview).annotations, []);
@@ -202,8 +202,8 @@ describe("practice display surfaces", () => {
 		assert.ok(dismissed.includes("Problem dismissed."));
 		assert.deepEqual(math(dismissed).annotations, []);
 		const plain = math(renderToStaticMarkup(<MessageResponse>{doubled}</MessageResponse>));
-		assert.deepEqual(plain.annotations, [doubled.slice(1, -1)]);
-		assert.ok(!plain.glyphs.includes("∇")); // Same unchanged assistant/user MessageResponse path.
+		assert.deepEqual(plain.annotations, [tex]);
+		assert.ok(plain.glyphs.includes("∇")); // Assistant/user text now shares display repair with questions.
 	});
 
 	it("teaching quiz/ask/explain still repair the same bytes without mutating their inputs", () => {
@@ -248,5 +248,37 @@ describe("practice display surfaces", () => {
 		assertMath(revealHtml, [tex, tex]);
 		assert.deepEqual(concluded, before);
 		assert.deepEqual(toLlmMessages(concluded), history);
+	});
+});
+
+
+describe("Batch A — ordinary chat math and linear algebra", () => {
+	it("renders matrix dimensions and operators, not italic word fragments", () => {
+		const source = String.raw`The product of a $2\\times 3$ matrix and a $3\\times 2$ matrix is $2\\times 2$.`;
+		const { document } = parseHTML(renderToStaticMarkup(<MessageResponse mode="static">{source}</MessageResponse>));
+		const expressions = [...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent);
+		assert.deepEqual(expressions, [String.raw`2\\times 3`, String.raw`3\\times 2`, String.raw`2\\times 2`]);
+		assert.equal(document.querySelectorAll(".katex-error").length, 0);
+		assert.ok(document.firstElementChild?.textContent?.includes("×"));
+	});
+
+	it("repairs double-escaped operators in chat without changing plain prose and code", () => {
+		const expression = String.raw`$A^T y \\in \\mathbb{R}^{3 \\times 1}$`;
+		const doubled = expression.replace(/\\/g, "\\\\");
+		const source = `Check this: ${doubled}\n\n` + "`" + doubled + "`";
+		const html = renderToStaticMarkup(<MessageResponse mode="static">{source}</MessageResponse>);
+		const { document } = parseHTML(html);
+		assert.deepEqual([...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent), [expression.slice(1, -1)]);
+		assert.equal(document.querySelectorAll(".katex-error").length, 0);
+		assert.ok(document.querySelector("code")?.textContent?.includes(doubled), "code source must stay byte-identical");
+	});
+
+	it("renders a full matrix multiplication display with genuine row breaks", () => {
+		const formula = String.raw`\\begin{aligned} A &= \\begin{pmatrix}1&2&3\\\\4&5&6\\end{pmatrix} \\\\ A^Ty &= \\begin{pmatrix}1&4\\\\2&5\\\\3&6\\end{pmatrix} \\begin{pmatrix}y_1\\\\y_2\\end{pmatrix} \\end{aligned}`;
+		const html = renderToStaticMarkup(<MessageResponse mode="static">{`$$\n${formula}\n$$`}</MessageResponse>);
+		const { document } = parseHTML(html);
+		assert.deepEqual([...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent), [formula]);
+		assert.equal(document.querySelectorAll(".katex-error").length, 0);
+		assert.ok(document.querySelectorAll(".mtable").length >= 3);
 	});
 });
