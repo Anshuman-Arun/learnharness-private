@@ -254,16 +254,16 @@ describe("practice display surfaces", () => {
 
 describe("Batch A — ordinary chat math and linear algebra", () => {
 	it("renders matrix dimensions and operators, not italic word fragments", () => {
-		const source = String.raw`The product of a $2\\times 3$ matrix and a $3\\times 2$ matrix is $2\\times 2$.`;
+		const source = String.raw`The product of a $2\times 3$ matrix and a $3\times 2$ matrix is $2\times 2$.`;
 		const { document } = parseHTML(renderToStaticMarkup(<MessageResponse mode="static">{source}</MessageResponse>));
 		const expressions = [...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent);
-		assert.deepEqual(expressions, [String.raw`2\\times 3`, String.raw`3\\times 2`, String.raw`2\\times 2`]);
+		assert.deepEqual(expressions, [String.raw`2\times 3`, String.raw`3\times 2`, String.raw`2\times 2`]);
 		assert.equal(document.querySelectorAll(".katex-error").length, 0);
 		assert.ok(document.firstElementChild?.textContent?.includes("×"));
 	});
 
 	it("repairs double-escaped operators in chat without changing plain prose and code", () => {
-		const expression = String.raw`$A^T y \\in \\mathbb{R}^{3 \\times 1}$`;
+		const expression = String.raw`$A^T y \in \mathbb{R}^{3 \times 1}$`;
 		const doubled = expression.replace(/\\/g, "\\\\");
 		const source = `Check this: ${doubled}\n\n` + "`" + doubled + "`";
 		const html = renderToStaticMarkup(<MessageResponse mode="static">{source}</MessageResponse>);
@@ -274,7 +274,7 @@ describe("Batch A — ordinary chat math and linear algebra", () => {
 	});
 
 	it("renders a full matrix multiplication display with genuine row breaks", () => {
-		const formula = String.raw`\\begin{aligned} A &= \\begin{pmatrix}1&2&3\\\\4&5&6\\end{pmatrix} \\\\ A^Ty &= \\begin{pmatrix}1&4\\\\2&5\\\\3&6\\end{pmatrix} \\begin{pmatrix}y_1\\\\y_2\\end{pmatrix} \\end{aligned}`;
+		const formula = String.raw`\begin{aligned} A &= \begin{pmatrix}1&2&3\\4&5&6\end{pmatrix} \\ A^Ty &= \begin{pmatrix}1&4\\2&5\\3&6\end{pmatrix} \begin{pmatrix}y_1\\y_2\end{pmatrix} \end{aligned}`;
 		const html = renderToStaticMarkup(<MessageResponse mode="static">{`$$\n${formula}\n$$`}</MessageResponse>);
 		const { document } = parseHTML(html);
 		assert.deepEqual([...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent), [formula]);
