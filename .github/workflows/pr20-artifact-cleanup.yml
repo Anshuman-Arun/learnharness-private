@@ -1,0 +1,55 @@
+name: Remove old PR20 Windows artifacts
+
+# This maintenance workflow deletes only *Actions artifacts*, never sources,
+# branches, workflow histories, releases, user data, or other build products.
+on:
+  push:
+    branches:
+      - experiment/upstream-pr20-chatgpt
+    paths:
+      - .github/workflows/pr20-artifact-cleanup.yml
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: cleanup-pr20-portable-artifacts
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Delete obsolete PR20 portable Windows ZIP artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const artifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              { owner, repo, per_page: 100 }
+            );
+            const targets = artifacts.filter(a => a.name === "learnharness-pr20-portable-windows");
+            core.info(`Found ${targets.length} old PR20 Windows build artifact(s).`);
+            let deleted = 0;
+            let freed = 0;
+            let errors = 0;
+            for (const artifact of targets) {
+              try {
+                await github.rest.actions.deleteArtifact({ owner, repo, artifact_id: artifact.id });
+                deleted++;
+                freed += artifact.size_in_bytes ?? 0;
+                core.info(`Deleted artifact ${artifact.id} from run ${artifact.workflow_run?.id} (${artifact.size_in_bytes} bytes).`);
+              } catch (err) {
+                errors++;
+                core.warning(`Could not delete artifact ${artifact.id}: ${err.message}`);
+              }
+            }
+            await core.summary
+              .addHeading("PR20 artifact cleanup")
+              .addRaw(`Deleted ${deleted}/${targets.length} portable artifacts; ${(freed / 1048576).toFixed(1)} MiB of old data marked for release. Failures: ${errors}.\n\nGitHub's storage quota may take 6–12 hours to recalculate.\n`)
+              .write();
+            if (errors) core.setFailed(`${errors} artifact deletions failed.`);
