@@ -58,7 +58,7 @@ describe("SIWC live inference payload compatibility", () => {
 	it("wires the payload normalization ONLY into subscription engine, after other onPayload handlers",()=>{
 		const source=readFileSync(new URL("../src/agent/models.ts",import.meta.url),"utf8");
 		assert.match(source,/usesChatGPT \? \{/);
-		assert.match(source,/prepareChatGPTResponsesPayload\(changed \?\? payload\)/);
+		assert.match(source,/prepareChatGPTResponsesPayload\(\(changed \?\? payload\) as \{ input: unknown \}\)/);
 	});
 });
 
