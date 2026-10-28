@@ -20,11 +20,12 @@ export function parseEstimateAnswer(raw: unknown): EstimateAnswer {
 }
 export function estimateScore(question: EstimateQuestion, answer: EstimateAnswer) {
  const {reference:y}=question, {low,high,estimate}=answer;
- const covered=low<=y&&y<=high, logError=Math.abs(Math.log(estimate/y));
+ const covered=low<=y&&y<=high, logError=Math.abs(Math.log(estimate)-Math.log(y));
  // Central 80% interval score in natural-log units; narrower intervals are rewarded only when calibrated.
  const l=Math.log(low),u=Math.log(high),target=Math.log(y);
  const intervalScore=u-l+10*Math.max(l-target,0)+10*Math.max(target-u,0);
- return {factorError:Math.exp(logError),logError,covered,intervalScore,assumptionDependent:question.assumptionDependent};
+ const factor=Math.exp(logError);
+ return {factorError:Number.isFinite(factor)?factor:null,logError,covered,intervalScore,assumptionDependent:question.assumptionDependent};
 }
 export function estimationCalibration(attempts: EstimateAttempt[]) {
  const exact=attempts.filter(a=>a.answer&&a.submittedAt!==undefined&&a.kind!=="fermi");

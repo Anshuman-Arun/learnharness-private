@@ -8,3 +8,13 @@ describe('timed quant exams',()=>{
  it('expires at the absolute deadline even without a browser timer, locks writes and reveals the debrief',()=>{const e=quantExams(3000)[0]!;const final=changeExam({action:'refresh',id:e.id},e.deadline);assert.equal(final.endedAt,e.deadline);assert.ok(final.sections);assert.ok('expected'in final.questions[0]!);assert.throws(()=>changeExam({action:'answer',id:e.id,revision:final.revision,index:0,answer:'1',reasoning:'late',flagged:false},e.deadline+1),/locked/);assert.equal(quantExams(e.deadline+1)[0]?.endedAt,e.deadline);});
  it('grades only committed responses and produces a section-specific debrief',()=>{const exam:QuantExam={version:1,id:'grade',seed:4,config,revision:0,startedAt:0,deadline:60000,endedAt:50000,responses:{}};const first=examQuestions(exam)[0]!;exam.responses[0]={answer:String(first.question.expected),reasoning:'worked',flagged:false,savedAt:100};const view=examView(exam,60000);assert.equal(view.sections?.find(s=>s.section==='arithmetic')?.correct,1);assert.equal(view.sections?.find(s=>s.section==='probability')?.answered,0);});
 });
+
+it('rejects malformed writes without revision changes and locks at the exact server deadline',()=>{
+ const e=changeExam({action:'start',config},100000);
+ const valid={action:'answer',id:e.id,revision:e.revision,index:0,answer:'1/2',reasoning:'independent test',flagged:false};
+ for(const invalid of [{index:-1},{index:6},{index:.5},{answer:'1/0'},{answer:'Infinity'},{reasoning:'x'.repeat(4001)},{flagged:'true'},{revision:999}])assert.throws(()=>changeExam({...valid,...invalid},100001));
+ assert.equal(changeExam({action:'refresh',id:e.id},100002).revision,e.revision);
+ const saved=changeExam(valid,e.deadline-1);assert.equal(saved.responses[0]?.answer,'1/2');
+ assert.throws(()=>changeExam({...valid,revision:saved.revision,answer:'2'},e.deadline),/locked/);
+ const ended=changeExam({action:'refresh',id:e.id},e.deadline);assert.equal(ended.endedAt,e.deadline);assert.equal(ended.responses[0]?.answer,'1/2');
+});
