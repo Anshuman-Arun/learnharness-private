@@ -389,3 +389,28 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
   line-height: 1.4;
   min-height: 25px;
 }
+
+/* Light lesson-plan legibility: PlanDiagram's original white/gray SVG
+ * stroke classes assume a black backing. On the cream lesson popup they
+ * become faint enough to disappear. Scope this ONLY to the actual popup:
+ * the home diagram's intentionally charcoal canvas and the original
+ * mini-DAG geometry/arrow shapes remain untouched. */
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status] rect:first-child {
+  stroke: #7a6b5c;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status="upcoming"] rect:first-child {
+  stroke: #86796a;
+  fill: #f6f1e6;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status] text {
+  fill: #29251f;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status="upcoming"] text {
+  fill: #574c40;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] > path {
+  stroke: #7a6b5c;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] marker path {
+  fill: #7a6b5c;
+}
