@@ -89,3 +89,4 @@ export * from "./quant-exam";
 export * from "./mistakes";
 export * from "./retrieval";
 export * from "./quant-sprints";
+export * from "./training-evidence";
