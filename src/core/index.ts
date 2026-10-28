@@ -25,6 +25,7 @@ export * from "./learning-evidence.ts";
 export * from "./arithmetic.ts";
 export * from "./cpp-workspace.ts";
 export * from "./cpp-run.ts";
+export * from "./scratchpad.ts";
 // The event bus (push architecture, 2026-10-02): vocabulary + emit/subscribe
 // for every layer; the browser shell consumes the types + the runtime names
 // through this barrel (shell law: pure core via @/src/core only).

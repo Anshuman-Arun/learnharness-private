@@ -1,0 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
+const root = path.resolve(import.meta.dirname, "..");
+const target = path.join(root, "public/vendor/excalidraw");
+const marker = path.join(target, ".learnharness-generated");
+if (fs.existsSync(target) && !fs.existsSync(marker)) throw new Error("Refusing to replace an unknown drawing-assets directory");
+fs.mkdirSync(target, { recursive: true }); fs.writeFileSync(marker, "Generated from the locked Excalidraw package.\n");
+fs.cpSync(path.join(root, "node_modules/@excalidraw/excalidraw/dist/prod/fonts"), path.join(target, "fonts"), { recursive: true });
+fs.copyFileSync(path.join(root, "third-party/excalidraw-LICENSE"), path.join(target, "LICENSE"));
+fs.copyFileSync(path.join(root, "third-party/excalidraw-font-notices.txt"), path.join(target, "FONT-NOTICES.txt"));

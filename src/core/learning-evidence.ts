@@ -18,6 +18,7 @@ export interface CodeEvidence {
 export interface LearningEvidence {
 	images?: EvidenceImage[];
 	code?: CodeEvidence[];
+	source?: { kind: "scratchpad" | "workspace" | "cpp-run"; id: string; pageId?: string; sessionId?: string; questionId?: string };
 }
 export const MAX_EVIDENCE_IMAGES = 4;
 export const MAX_EVIDENCE_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -40,6 +41,18 @@ export function parseLearningEvidence(value: unknown): LearningEvidence | undefi
 	if (value === undefined) return undefined;
 	const raw = record(value);
 	const result: LearningEvidence = {};
+	if (raw.source !== undefined) {
+		const source = record(raw.source);
+		if (source.kind !== "scratchpad" && source.kind !== "workspace" && source.kind !== "cpp-run") throw new Error("Invalid evidence source");
+		const identity = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(value);
+		if (!identity(source.id)) throw new Error("Invalid evidence source identity");
+		result.source = { kind: source.kind, id: source.id as string };
+		for (const key of ["pageId", "sessionId", "questionId"] as const) if (source[key] !== undefined) {
+			const valid = key === "questionId" ? typeof source[key] === "string" && !!source[key] && source[key].length <= 256 && !/[\u0000-\u001f\u007f]/.test(source[key]) : identity(source[key]);
+			if (!valid) throw new Error("Invalid evidence context reference");
+			result.source[key] = source[key] as string;
+		}
+	}
 	if (raw.images !== undefined) {
 		if (!Array.isArray(raw.images) || raw.images.length > MAX_EVIDENCE_IMAGES) throw new Error("Attach up to four images");
 		let total = 0;
@@ -88,6 +101,7 @@ export function evidenceImageContent(evidence: LearningEvidence | undefined) {
 export function evidenceDescription(evidence: LearningEvidence | undefined): string {
 	if (!hasLearningEvidence(evidence)) return "";
 	return `Submitted learner work (an attempt, not necessarily a final answer):\n${JSON.stringify({
+		source: evidence?.source,
 		images: evidence?.images?.map(({ name, mimeType }) => ({ name, mimeType })),
 		code: evidence?.code,
 	})}\nAny supplied stdout/stderr is client-reported; distinguish it from a verified execution. Ask about ambiguous marks rather than inventing their meaning.`;
