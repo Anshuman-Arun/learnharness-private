@@ -49,6 +49,20 @@ try {
     await page.goto(base+"/learning-map",{waitUntil:"networkidle2",timeout:65000});
     await page.waitForFunction(()=>document.querySelectorAll('[data-testid^="plan-node-"]').length>=12,{timeout:30000});
     await page.evaluate(()=>document.fonts.ready);
+    if(size.width<640) {
+      const mobile=await page.evaluate(()=>({
+        pageWidth:document.querySelector("main[data-global-learning-page]")?.getBoundingClientRect().width??0,
+        sidebarLeft:document.querySelector("aside.sidebar-motion")?.getBoundingClientRect().left??0,
+      }));
+      assert.ok(mobile.pageWidth>=size.width-4,"global map must occupy the phone's full width");
+      assert.ok(mobile.sidebarLeft<0,"sidebar must be off-screen on initial mobile load");
+      await page.click('[data-testid="global-map-mobile-menu"]');
+      await new Promise(r=>setTimeout(r,250));
+      const opened=await page.$eval("aside.sidebar-motion",el=>el.getBoundingClientRect().left);
+      assert.ok(opened>=-1,"mobile navigation opens as overlay");
+      await page.click('button[aria-label="Close navigation menu"]');
+      await new Promise(r=>setTimeout(r,250));
+    }
     // Wait for ResizeObserver + camera fit to run, then verify geometry.
     await new Promise(r=>setTimeout(r,450));
     const result=await page.evaluate(()=>{
