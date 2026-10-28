@@ -612,7 +612,8 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 		loginState = { connecting: true, phase: "preparing" };
 		pendingLogin = (async () => {
 			const deviceId = await loadOrCreateDeviceId(deviceFile);
-			const previous = await credentials.read(PROVIDER_ID);
+			const stored = await credentials.read(PROVIDER_ID);
+			const previous = validCredential(stored) ? stored : undefined;
 			const credential = await authorize(
 				previous,
 				deviceId,
