@@ -2,9 +2,9 @@
  * LhMark — the app mark (owner's icon-no-padding.svg, 2026-09-17), inlined
  * as JSX so it rides along with the components (no network fetch, recolorable,
  * crisp at any size). 806×806 viewBox, no padding: sizing/padding is the
- * consumer's job. The existing LearnHarness spiral is tinted with the saved accent; its
- * companion ring uses the theme foreground, remaining legible in both
- * the cream and charcoal palettes. No Interview-App mark is used.
+ * consumer's job. The existing LearnHarness spiral and its filled terminal are tinted with
+ * the saved accent; only the other terminal's outline uses the theme ink.
+ * This keeps the mark cohesive in both cream and charcoal palettes. No Interview-App mark is used.
  *
  * Replaces the "LH" wordmark text in the sidebar band (also the traffic-light
  * gutter's resident in the merged desktop chrome).
@@ -33,7 +33,7 @@ export function LhMark({ className = "" }: { className?: string }) {
 							/>
 						</g>
 						<g transform="matrix(1.261034,0,-0,1.261034,3139.627182,-45.007413)">
-							<circle cx="1270.5" cy="3988.5" r="683.5" style={{ fill: "var(--foreground, #f3eee5)" }} />
+							<circle cx="1270.5" cy="3988.5" r="683.5" style={{ fill: "var(--primary, #d47760)" }} />
 						</g>
 					</g>
 				</g>
