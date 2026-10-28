@@ -99,6 +99,7 @@ export function EvidencePreview({ evidence }: { evidence?: LearningEvidence }) {
 			<summary>{code.name} ({code.language})</summary>
 			<pre className="overflow-auto whitespace-pre-wrap text-xs">{code.source}</pre>
 			{code.prediction && <p>Prediction: {code.prediction}</p>}
+			{code.execution && <p>Reported execution: {code.execution.ok ? "passed" : code.execution.errorKind} · exit {code.execution.exitCode ?? "—"}{code.execution.timedOut ? " · timed out" : ""}</p>}
 			{code.stdout && <pre className="whitespace-pre-wrap text-xs">Reported stdout: {code.stdout}</pre>}
 			{code.stderr && <pre className="whitespace-pre-wrap text-xs">Reported stderr: {code.stderr}</pre>}
 		</details>)}
