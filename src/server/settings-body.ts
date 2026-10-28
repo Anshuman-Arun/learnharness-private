@@ -86,6 +86,18 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 		}
 		settings.autoUpdate = raw.autoUpdate;
 	}
+	if (raw.microphoneId !== undefined) {
+		if (typeof raw.microphoneId !== "string" || raw.microphoneId.length === 0 ||
+			raw.microphoneId.length > 512 || /[\x00-\x1f\x7f]/.test(raw.microphoneId))
+			return { ok: false, error: "microphoneId must be a nonempty device ID (max 512 characters)" };
+		settings.microphoneId = raw.microphoneId;
+	}
+	if (raw.microphoneLabel !== undefined) {
+		if (typeof raw.microphoneLabel !== "string" || raw.microphoneLabel.length > 256 ||
+			/[\x00-\x1f\x7f]/.test(raw.microphoneLabel))
+			return { ok: false, error: "microphoneLabel must be a device name (max 256 characters)" };
+		settings.microphoneLabel = raw.microphoneLabel;
+	}
 	return { ok: true, settings };
 }
 
