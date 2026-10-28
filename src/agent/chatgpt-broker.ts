@@ -39,10 +39,20 @@ class BrokerError extends Error {
 }
 
 function brokerConfig(): { url: string; secret: string } | undefined {
-	const url = process.env.LH_CHATGPT_BROKER_URL;
+	const raw = process.env.LH_CHATGPT_BROKER_URL;
 	const secret = process.env.LH_CHATGPT_BROKER_SECRET;
-	if (!url || !secret) return undefined;
-	return { url: url.replace(/\/$/, ""), secret };
+	if (!raw || !secret) return undefined;
+	try {
+		const url = new URL(raw);
+		// Never forward an OAuth broker capability to a userinfo URL, remote
+		// host, redirect service, or local path that was injected via env.
+		if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" ||
+			!url.port || url.username || url.password ||
+			url.pathname !== "/" || url.search || url.hash) return undefined;
+		return {url: url.origin, secret};
+	} catch {
+		return undefined;
+	}
 }
 
 export function chatGPTBrokerConfigured(): boolean {
@@ -58,6 +68,8 @@ async function brokerRequest<T>(pathname: string, method: "GET" | "POST", signal
 		method,
 		headers: { authorization: `Bearer ${config.secret}` },
 		cache: "no-store",
+		redirect: "error",
+		credentials: "omit",
 		signal: requestSignal,
 	});
 	if (!response.ok) throw new BrokerError(`ChatGPT credential broker returned ${response.status}.`, response.status);

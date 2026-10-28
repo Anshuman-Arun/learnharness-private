@@ -8,6 +8,8 @@ import { afterEach, describe, it } from "node:test";
 import {
 	CHATGPT_PROVIDER_ID,
 	ChatGPTBrokerCredentialStore,
+	getChatGPTBrokerStatus,
+	getChatGPTBrokerModels,
 } from "../src/agent/chatgpt-broker.ts";
 import { piEngineForSpec } from "../src/agent/models.ts";
 import { modelCatalog, validateModelsSettings, validateAccountAwareChatSettings, validateAccountAwareModelsSettings, validateAccountAwareAgentModels } from "../src/server/model-catalog.ts";
@@ -48,6 +50,31 @@ afterEach(() => {
 });
 
 describe("ChatGPT OAuth provider alias", () => {
+	it("refuses every non-loopback or redirect-capable broker URL before sending the bearer capability", async () => {
+		const oldUrl=process.env.LH_CHATGPT_BROKER_URL;
+		const oldSecret=process.env.LH_CHATGPT_BROKER_SECRET;
+		const oldFetch=globalThis.fetch;
+		try {
+			process.env.LH_CHATGPT_BROKER_SECRET="sensitive-broker-capability";
+			globalThis.fetch=async()=>{ throw new Error("Broker must not access the network"); };
+			for(const url of [
+				"https://evil.example:443","http://evil.example:3000","http://localhost:3000",
+				"http://127.0.0.1:3000/path", "http://user@127.0.0.1:3000",
+				"http://127.0.0.1:3000/?redirect=1","javascript:alert(1)",
+			]) {
+				process.env.LH_CHATGPT_BROKER_URL=url;
+				assert.deepEqual(await getChatGPTBrokerStatus(),{available:false,connected:false});
+				assert.deepEqual(await getChatGPTBrokerModels(),[]);
+			}
+		}finally{
+			if(oldUrl===undefined)delete process.env.LH_CHATGPT_BROKER_URL;
+			else process.env.LH_CHATGPT_BROKER_URL=oldUrl;
+			if(oldSecret===undefined)delete process.env.LH_CHATGPT_BROKER_SECRET;
+			else process.env.LH_CHATGPT_BROKER_SECRET=oldSecret;
+			globalThis.fetch=oldFetch;
+		}
+	});
+
 	it("adds a separate ChatGPT catalog without replacing OpenAI API-key models", () => {
 		process.env.LH_CHATGPT_BROKER_URL = "http://127.0.0.1:12345";
 		process.env.LH_CHATGPT_BROKER_SECRET = "test-secret";
