@@ -7,9 +7,8 @@
  * variables move IMMEDIATELY (the section's whole point — it must DO
  * something). Hex inputs commit on blur/Enter; the background derives the
  * raised/accent/edge palette in code (components/settings/appearance.tsx).
- * Mode is dark-only this wave: control rendered DISABLED with a note — the
- * light palette is the design wave's work, and a lying control is worse
- * than an honest disabled one.
+ * Editorial v10 adds functional light/dark/system themes, accent colors,
+ * zoom, corners and borders to the same persisted appearance section.
  *
  * Graph graying (owner, 2026-09-20) follows the graph viewer's render-panel
  * convention: the whole row dims when a parent is off (stored values
@@ -42,6 +41,17 @@ import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
 import { CommitInput, SettingsRow, ThinSelect, Toggle } from "./controls.tsx";
+
+/** Visual swatches from the approved Interview-App editorial v10 design. */
+export const EDITORIAL_ACCENTS = [
+	{ id: "ink", label: "Ink", color: "#30312f" },
+	{ id: "cobalt", label: "Indigo", color: "#4a5d78" },
+	{ id: "teal", label: "Teal", color: "#477169" },
+	{ id: "amber", label: "Amber", color: "#a06c28" },
+	{ id: "coral", label: "Vermilion", color: "#a74733" },
+	{ id: "violet", label: "Violet", color: "#74617f" },
+	{ id: "rose", label: "Rose", color: "#a65a65" },
+] as const;
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -99,6 +109,8 @@ export function AppearanceSection({
 }) {
 	const { appearance: resolved } = useAppearance();
 	const md = appearance?.mdRendering;
+	const [draftIntensity, setDraftIntensity] = useState(appearance?.accentIntensity ?? 16);
+	useEffect(() => setDraftIntensity(appearance?.accentIntensity ?? 16), [appearance?.accentIntensity]);
 
 	// The font dropdown's open state + its enumeration cache. undefined =
 	// not enumerated yet (desktop: click-bound queryLocalFonts pending);
@@ -186,19 +198,90 @@ export function AppearanceSection({
 
 	return (
 		<>
-			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
-				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
+			<SettingsRow label="Mode" hint="Follow system, light or dark" testid="row-mode">
+				<ThinSelect
+					value={appearance?.mode ?? "dark"}
+					ariaLabel="mode"
+					testid="select-mode"
+					onChange={(v) => onSectionChange({ ...appearance, mode: v as NonNullable<AppearanceSettings["mode"]> })}
+				>
+					<option value="system">System</option>
+					<option value="light">Light</option>
 					<option value="dark">Dark</option>
+				</ThinSelect>
+			</SettingsRow>
+			<SettingsRow label="Accent" hint="Editorial highlight color" testid="row-accent">
+				<div className="flex flex-wrap items-center gap-2" role="group" aria-label="Accent color">
+					{EDITORIAL_ACCENTS.map((option) => (
+						<button
+							key={option.id}
+							type="button"
+							aria-label={option.label}
+							aria-pressed={(appearance?.accent ?? "coral") === option.id}
+							title={option.label}
+							data-testid={`accent-${option.id}`}
+							className="size-7 rounded-sm border-2 border-transparent outline-offset-2 aria-pressed:border-foreground"
+							style={{ backgroundColor: option.color }}
+							onClick={() => onSectionChange({ ...appearance, accent: option.id })}
+						/>
+					))}
+				</div>
+			</SettingsRow>
+			<SettingsRow label="Accent intensity" hint={`${draftIntensity}% wash`} testid="row-accent-intensity">
+				<input
+					type="range" min={8} max={28} step={1}
+					aria-label="Accent intensity"
+					data-testid="input-accent-intensity"
+					className="w-44 accent-current"
+					value={draftIntensity}
+					onChange={(e) => setDraftIntensity(Number(e.target.value))}
+					onPointerUp={() => { if (draftIntensity !== (appearance?.accentIntensity ?? 16)) onSectionChange({ ...appearance, accentIntensity: draftIntensity }); }}
+					onKeyUp={(e) => { if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(e.key) && draftIntensity !== (appearance?.accentIntensity ?? 16)) onSectionChange({ ...appearance, accentIntensity: draftIntensity }); }}
+				/>
+			</SettingsRow>
+			<SettingsRow label="Interface zoom" hint="25–500%; 100% restores normal size" testid="row-interface-zoom">
+				<span className="flex items-center gap-2">
+					<button type="button" aria-label="Zoom out" className="rounded-sm border border-border px-2 py-1" onClick={() => onSectionChange({ ...appearance, zoomPercent: Math.max(25, (appearance?.zoomPercent ?? 100) - 10) })}>−</button>
+					<CommitInput
+						type="number"
+						value={String(appearance?.zoomPercent ?? "")}
+						placeholder="100"
+						ariaLabel="Interface zoom percent"
+						testid="input-interface-zoom"
+						onCommit={(v) => {
+							if (v === "") return onSectionChange({ ...appearance, zoomPercent: undefined });
+							const n = Number(v);
+							if (Number.isFinite(n)) onSectionChange({ ...appearance, zoomPercent: Math.min(500, Math.max(25, Math.round(n))) });
+						}}
+						/>
+					<button type="button" aria-label="Zoom in" className="rounded-sm border border-border px-2 py-1" onClick={() => onSectionChange({ ...appearance, zoomPercent: Math.min(500, (appearance?.zoomPercent ?? 100) + 10) })}>+</button>
+					<button type="button" className="text-xs text-muted-foreground underline" onClick={() => onSectionChange({ ...appearance, zoomPercent: 100 })}>Reset</button>
+				</span>
+			</SettingsRow>
+			<SettingsRow label="Corners" hint="Controls, panels and menus" testid="row-corners">
+				<ThinSelect value={appearance?.corners ?? "soft"} ariaLabel="corners" testid="select-corners" onChange={(v) => onSectionChange({ ...appearance, corners: v as NonNullable<AppearanceSettings["corners"]> })}>
+					<option value="square">Square</option>
+					<option value="soft">Soft</option>
+					<option value="round">Round</option>
+					<option value="generous">Generous</option>
+				</ThinSelect>
+			</SettingsRow>
+			<SettingsRow label="Borders" hint="Outline contrast" testid="row-borders">
+				<ThinSelect value={appearance?.borders ?? "regular"} ariaLabel="borders" testid="select-borders" onChange={(v) => onSectionChange({ ...appearance, borders: v as NonNullable<AppearanceSettings["borders"]> })}>
+					<option value="quiet">Quiet</option>
+					<option value="regular">Regular</option>
+					<option value="strong">Strong</option>
+					<option value="contrast">High contrast</option>
 				</ThinSelect>
 			</SettingsRow>
 			<SettingsRow
 				label="Background"
-				hint={`Empty = ${resolved.background ?? "#2a2825"}`}
+				hint={`Empty = ${resolved.background ?? (resolved.mode === "light" ? "#f2eddf" : "#2a2825")}`}
 				testid="row-background"
 			>
 				<CommitInput
 					value={appearance?.background ?? ""}
-					placeholder="#2a2825"
+					placeholder={resolved.mode === "light" ? "#f2eddf" : "#2a2825"}
 					ariaLabel="background hex"
 					testid="input-background"
 					onCommit={(v) => onSectionChange({ ...appearance, background: v === "" ? null : v })}
