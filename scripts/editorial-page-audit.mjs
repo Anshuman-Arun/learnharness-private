@@ -73,8 +73,11 @@ const server=spawn(process.execPath,[".next/standalone/server.js"],{
 });
 let browser;
 function rgb(raw) {
-  const v=(raw.match(/[\\d.]+/g)??[]).slice(0,3).map(Number);
-  return v.length===3?v:[0,0,0];
+  if(/^#[0-9a-f]{6}$/i.test(raw))return [1,3,5].map(i=>parseInt(raw.slice(i,i+2),16));
+  if(/^#[0-9a-f]{3}$/i.test(raw))return [1,2,3].map(i=>parseInt(raw[i]+raw[i],16));
+  const v=raw.replace(/[a-z()]/gi,"").split(/[ ,/]+/).filter(Boolean).slice(0,3).map(Number);
+  if(v.length!==3||v.some(n=>!Number.isFinite(n)))throw Error("Non-RGB color "+raw);
+  return v;
 }
 function luminance(c) {
   const a=c.map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;});
