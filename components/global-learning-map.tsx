@@ -188,6 +188,9 @@ export function GlobalLearningMap() {
             className="mt-2 border-b border-border pb-2 text-xs">
             <span className="font-semibold capitalize">{e.outcome}</span> · {e.kind}
             {e.question&&<p className="mt-1">{e.question}</p>}
+            {e.answerText&&<p className="mt-1 text-muted-foreground">Answer: {e.answerText}</p>}
+            {e.reasoning&&<p className="mt-1 text-muted-foreground">Reasoning: {e.reasoning}</p>}
+            {e.confidence!==null&&<p className="mt-1 text-muted-foreground">Confidence: {e.confidence}%</p>}
           </div>)}</>}
       </aside>}
     </div>
