@@ -26,6 +26,8 @@ export function parseScratchpad(raw: unknown): Omit<Scratchpad, "revision" | "up
 		for (const element of page.elements) {
 			if (!element || typeof element !== "object" || !id(element.id) || !elementTypes.has(String(element.type))) throw new Error("Only drawing and text elements are supported");
 			for (const key of ["x", "y", "width", "height", "angle"]) if (typeof element[key] !== "number" || !Number.isFinite(element[key]) || Math.abs(element[key] as number) > 10000000) throw new Error("Invalid element geometry");
+			if (element.points !== undefined && (!Array.isArray(element.points) || element.points.length > 50000 || element.points.some((point) => !Array.isArray(point) || point.length !== 2 || point.some((value) => typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > 10000000)))) throw new Error("Invalid stroke points");
+			if (element.pressures !== undefined && (!Array.isArray(element.pressures) || element.pressures.length > 50001 || element.pressures.some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1))) throw new Error("Invalid pen pressure data");
 			if (element.link !== undefined && element.link !== null && (typeof element.link !== "string" || !/^https?:\/\//.test(element.link))) throw new Error("Drawing links must use HTTP or HTTPS");
 		}
 		if (new Set(page.elements.map((element) => element.id)).size !== page.elements.length) throw new Error("Drawing element ids must be unique");
