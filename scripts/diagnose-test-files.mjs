@@ -9,8 +9,8 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 
 const files = readdirSync("tests").filter((f) => /\.test\.tsx?$/.test(f)).sort();
-const parallel = 8;
-const timeout = 20_000;
+const parallel = 6;
+const timeout = 45_000;
 let next = 0;
 const failures = [];
 async function worker() {

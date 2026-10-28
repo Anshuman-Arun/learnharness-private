@@ -796,7 +796,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  found unset (test values count as configured — they ARE engines),
 	 *  and whether a configured stage's provider key is gone (provider-key
 	 *  interlude, 2026-09-25) — both refuse BEFORE any batch runs. */
-	async function refuseIfStagesUnready(): Promise<void> {
+	function refuseIfStagesUnready(): void | Promise<void> {
 		const stages: readonly [ModelRole, PiEngine | undefined][] = [
 			["extractor", stageEngine("extractor", deps.extractor)],
 			["auditor", stageEngine("auditor", deps.auditor)],
@@ -807,16 +807,25 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			console.info(`[extraction] refused — no model configured for: ${[...missing].join(", ")}`);
 			throw new ModelsNotConfiguredError([...missing]);
 		}
-		// Key-presence parity: first offender surfaces (extractor before
-		// auditor); fixing that key re-gates and the next run surfaces the
-		// next offender, if any.
-		for (const [role, engine] of stages) {
-			const refusal = await deps.providerKeyMissing?.(engine!.providerId ?? engine!.model.provider, ROLE_SLOT[role], engine!.model.id);
-			if (refusal) {
-				console.info(`[extraction] refused — ${JSON.stringify(refusal)}`);
-				throw new ProviderKeyMissingError(refusal.provider, refusal.slots);
+		// Keep the original synchronous preflight when direct test engines
+		// have no provider-key callback. Yielding an unconditional microtask
+		// here breaks the documented synchronous registration/abort seam:
+		// abortExtraction() must find the run immediately after invocation.
+		if (!deps.providerKeyMissing) return;
+		// Production credentials may need I/O. Await only when the model
+		// callback is present, before starting model inference.
+		return (async () => {
+			for (const [role, engine] of stages) {
+				const refusal = await deps.providerKeyMissing!(
+					engine!.providerId ?? engine!.model.provider,
+					ROLE_SLOT[role], engine!.model.id,
+				);
+				if (refusal) {
+					console.info(`[extraction] refused — ${JSON.stringify(refusal)}`);
+					throw new ProviderKeyMissingError(refusal.provider, refusal.slots);
+				}
 			}
-		}
+		})();
 	}
 	// THE SHARED REGISTRIES (runs() above — globalThis): every pipeline
 	// instance (route entries in dev, tests) sees the same runs, the same
@@ -1110,7 +1119,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// (2026-09-25): the write channel needs extractor + auditor
 			// engines AND their providers' keys; a refusal lands BEFORE any
 			// stage runs (typed — the trigger skips, routes surface 503).
-			await refuseIfStagesUnready();
+			const providerAdmission = refuseIfStagesUnready();
+			if (providerAdmission) await providerAdmission;
 			const covered = coverageOf(record.messages, graphStore.readCoverage(), chatId);
 			if (covered.uncovered.length === 0) {
 				console.info(`[extraction ${chatId}] nothing uncovered — no-op`);
@@ -1306,7 +1316,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// BYOK per-need gate (owner, 2026-09-22) + key presence
 			// (2026-09-25): same refusal as the chat front door — no
 			// extractor/auditor engines, or a stage key gone, no run.
-			await refuseIfStagesUnready();
+			const providerAdmission = refuseIfStagesUnready();
+			if (providerAdmission) await providerAdmission;
 			// CHUNKED like the chat path (owner, 2026-09-28): each chunk is a
 			// standalone extract → audit → merge, so no single call carries a
 			// whole large file. Abort mid-run keeps earlier chunks merged
