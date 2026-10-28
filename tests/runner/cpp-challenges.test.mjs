@@ -15,3 +15,14 @@ test('real isolated judge accepts general solutions and rejects example hardcodi
   const echo=await judgeCppChallenge({challengeId:'collision-pairs',files:[{name:'main.cpp',source:'#include <iostream>\nint main(){std::cout<<std::cin.rdbuf();std::cerr<<"hidden-diagnostic";}'}]});assert.equal(echo.result.stdout,'');assert.equal(echo.result.stderr,'');assert.ok(!JSON.stringify(echo.result.cases.filter(c=>c.name.startsWith('Hidden'))).includes('hidden-diagnostic'));assert.equal(cppJudgeHistory().length,5);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('judge preserves partial progress and withholds hidden output after a flood',async()=>{
+ try{
+  const report=await judgeCppChallenge({challengeId:'collision-pairs',files:[{name:'main.cpp',source:'#include <iostream>\nint main(){int n;std::cin>>n;if(n==5){std::cout<<4<<"\\n";return 0;}for(;;)std::cout<<"hidden-runtime-payload-";}'}]});
+  assert.equal(report.result.errorKind,'output-limit');assert.equal(report.passedChecks,1);assert.equal(report.result.cases?.length,2);
+  assert.equal(report.result.cases?.[1].stdout,'[hidden check output withheld]');assert.equal(JSON.stringify(report.result).includes('hidden-runtime-payload'),false);
+  const before=cppJudgeHistory().length,controller=new AbortController();controller.abort();
+  await assert.rejects(judgeCppChallenge({challengeId:'collision-pairs',files:[{name:'main.cpp',source:'int main(){}'}]},controller.signal));
+  assert.equal(cppJudgeHistory().length,before,'cancelled attempts do not publish a completed report');
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});

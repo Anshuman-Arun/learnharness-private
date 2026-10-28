@@ -36,3 +36,9 @@ export function sprintExit(topic:string,seed:number):SprintExitQuestion[]{const 
 }
 export interface SprintProgress{version:1;id:string;revision:number;seed:number;startedAt:number;completed:SprintPhase[];notes:Partial<Record<SprintPhase,string>>;elapsed:Partial<Record<SprintPhase,number>>;timer?:{phase:SprintPhase;startedAt:number};exitStartedAt?:number;exitSubmittedAt?:number;exitAnswers?:Array<{answer:string;reasoning:string}>}
 export function sprintPrompt(sprint:QuantSprint,phase:SprintPhase,kind:'teach'|'practice',notes:string){return `Work with me on ${sprint.title}, a bounded 4.5-hour quant OA/interview sprint. Current phase: ${phase}. Prerequisites: ${sprint.prerequisites.join('; ')}. Outcomes: ${sprint.outcomes.join('; ')}. ${kind==='practice'?'Use practice problems that require transfer, without naming the technique upfront.':'Diagnose prerequisites first, then help me derive results with one targeted hint or subquestion at a time.'} Require my predictions and reasoning before worked answers. Examine my submitted text, sketches and code together. I can switch Guided/Explain mode at any time. Derivation prompts: ${sprint.derive.join(' ')} Coding exercise: ${sprint.code} Common traps: ${sprint.pitfalls.join('; ')}. Learner notes: ${notes||'(none)'}. Do not claim mastery from time spent; finish with transfer problems and a later recall plan.`;}
+
+export const SPRINT_MAX_SEGMENT_SECONDS=8*60*60;
+export function sprintElapsed(progress:Pick<SprintProgress,'elapsed'|'timer'>,phase:SprintPhase,now:number):number{
+ const active=progress.timer?.phase===phase?Math.max(0,Math.min(SPRINT_MAX_SEGMENT_SECONDS,(now-progress.timer.startedAt)/1000)):0;
+ return(progress.elapsed[phase]??0)+active;
+}

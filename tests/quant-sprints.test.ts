@@ -7,3 +7,17 @@ describe('bounded quant study sprints',()=>{
  it('hides exit prompts before start, hides references before commitment, then freezes scored derivations',()=>{let v=changeSprint({action:'start',id:'order-races'},1000);assert.equal(v.exit,undefined);v=changeSprint({action:'exit-start',id:'order-races',revision:v.progress!.revision},2000);assert.equal(v.exit?.length,3);for(const q of v.exit!){assert.equal('expected'in q,false);assert.equal('rubric'in q,false);}assert.throws(()=>changeSprint({action:'exit-submit',id:'order-races',revision:v.progress!.revision,answers:[{answer:'1',reasoning:'x'}]},3000),/three/);const answers=[{answer:'0',reasoning:'I need to derive the competing-clock normalization.'},{answer:'0',reasoning:'I incorrectly added expected waiting times.'},{answer:'0',reasoning:'I need to integrate the survival function.'}];const done=changeSprint({action:'exit-submit',id:'order-races',revision:v.progress!.revision,answers},4000);assert.ok(done.exit?.every(q=>'expected'in q&&'correct'in q));assert.equal(done.progress?.exitAnswers?.[1]?.reasoning,answers[1]?.reasoning);assert.throws(()=>changeSprint({action:'exit-submit',id:'order-races',revision:done.progress!.revision,answers},5000),/not active/);});
  it('stages guided derivation or transfer practice without including exit answer keys',()=>{const s=QUANT_SPRINTS[0]!;assert.match(sprintPrompt(s,'derive','teach','my prerequisite gap'),/one targeted hint/);assert.match(sprintPrompt(s,'guided','practice',''),/without naming the technique/);assert.ok(!sprintPrompt(s,'exit','teach','').includes('expected:'));});
 });
+
+it('uses one bounded elapsed-time calculation and does not double count a backward clock jump',async()=>{
+ const{sprintElapsed}=await import('../src/core/quant-sprints.ts');
+ const progress={elapsed:{derive:5},timer:{phase:'derive' as const,startedAt:1000}};
+ assert.equal(sprintElapsed(progress,'derive',5000),9);
+ assert.equal(sprintElapsed(progress,'derive',1000+9*3600000),28805);
+ assert.equal(sprintElapsed(progress,'derive',0),5);
+ assert.equal(sprintElapsed(progress,'review',5000),0);
+ let view=changeSprint({action:'start',id:'calibration-ev'},2000);
+ view=changeSprint({action:'timer',id:'calibration-ev',revision:view.progress!.revision,phase:'diagnostic',running:true},2000);
+ view=changeSprint({action:'notes',id:'calibration-ev',revision:view.progress!.revision,phase:'diagnostic',notes:'Clock moved backwards'},1000);
+ view=changeSprint({action:'timer',id:'calibration-ev',revision:view.progress!.revision,phase:'diagnostic',running:false},3000);
+ assert.equal(view.progress!.elapsed.diagnostic,1);
+});
