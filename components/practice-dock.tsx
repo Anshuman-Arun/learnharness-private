@@ -4,7 +4,9 @@ import { useCallback, useRef, useState } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
-import { joinDictation, useDictationTarget } from "@/components/dictation";
+import { finishDictation, joinDictation, useDictationTarget } from "@/components/dictation";
+import { EvidenceInput } from "@/components/learning-evidence";
+import { hasLearningEvidence, type LearningEvidence } from "@/src/core";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { cn } from "@/lib/utils";
 import { repairMathForDisplay } from "@/src/core";
@@ -39,7 +41,7 @@ export interface PracticeDockProps {
 	expanded: boolean;
 	onExpand: () => void;
 	/** text — POST {type:"thinking"} (one lane; the register is read from the text). */
-	onSubmit: (text: string) => void;
+	onSubmit: (text: string, evidence?: LearningEvidence) => void;
 	/** Escape in the thinking field stops dictation (threaded from the page). */
 	onEscape?: () => void;
 	/** Compaction is running for this chat (owner round 14): the thinking
@@ -51,6 +53,9 @@ export interface PracticeDockProps {
 
 export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onEscape, compactionRunning = false }: PracticeDockProps) {
 	const [thinking, setThinking] = useState("");
+	const [evidence, setEvidence] = useState<LearningEvidence>();
+	const [evidenceReading, setEvidenceReading] = useState(false);
+	const submitting = useRef(false);
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
 	// the tail, never a stale closure.
@@ -69,12 +74,16 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	);
 
 	const submit = () => {
-		if (compactionRunning) return;
-		const text = thinkingRef.current.trim();
-		if (text.length === 0) return;
-		thinkingRef.current = "";
-		setThinking("");
-		onSubmit(text);
+		if (compactionRunning || evidenceReading || submitting.current) return;
+		submitting.current = true;
+		void finishDictation().then(() => {
+			const text = thinkingRef.current.trim();
+			if (!text && !hasLearningEvidence(evidence)) return;
+			onSubmit(text, evidence);
+			thinkingRef.current = "";
+			setThinking("");
+			setEvidence(undefined);
+		}).finally(() => { submitting.current = false; });
 	};
 
 	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): dictation
@@ -102,6 +111,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	/* ── the expanded form ── */
 	return (
 		<div data-testid="practice-dock" data-problem={problemCallId}>
+			<EvidenceInput value={evidence} onChange={setEvidence} disabled={compactionRunning} onBusyChange={setEvidenceReading} />
 			{/* The agent's half: the 'Problem' eyebrow (mirroring the quiz
 			    cards' label row — owner round, 2026-10-05) + the statement,
 			    markdown + LaTeX rendered, capped by the measured column
@@ -161,7 +171,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 					<Button
 						type="button"
 						data-testid="practice-send"
-						disabled={thinking.trim().length === 0 || compactionRunning}
+						disabled={(!thinking.trim() && !hasLearningEvidence(evidence)) || compactionRunning || evidenceReading}
 						onClick={() => submit()}
 						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 					>

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
+import { EvidenceInput } from "@/components/learning-evidence";
+import { hasLearningEvidence, type LearningEvidence } from "@/src/core";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
@@ -314,6 +316,8 @@ function QuestionDockForm({
 	const [sel, setSel] = useState<DockSelection>(emptyDockSelection());
 	// The learner's transfer channel — thinking, never "a note".
 	const [thinking, setThinking] = useState("");
+	const [evidence, setEvidence] = useState<LearningEvidence>();
+	const [evidenceReading, setEvidenceReading] = useState(false);
 	const [other, setOther] = useState("");
 	const [text, setText] = useState("");
 	/* Refs MIRROR the two dictation-target fields ("nothing gets lost"
@@ -361,11 +365,11 @@ function QuestionDockForm({
 
 	const canSubmit =
 		qd.mode === "text"
-			? text.trim().length > 0
+			? text.trim().length > 0 || hasLearningEvidence(evidence) || isDictationActive()
 			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
 
 	const submit = () => {
-		if (!canSubmit || compactionRunning) return;
+		if (!canSubmit || compactionRunning || evidenceReading) return;
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): Enter may arrive while
 		 * a run is live with reasoning still in Deepgram's hands. Stop the
 		 * run, let the last finals land in the target field, and only then
@@ -381,6 +385,7 @@ function QuestionDockForm({
 	const doSubmit = () => {
 		if (!canSubmit) return;
 		const req: AnswerRequest = {
+			evidence,
 			dontKnow: sel.dontKnow,
 			values: [...sel.selected].map((i) => qd.options[i]!.value),
 			other: sel.otherSelected ? other : undefined,
@@ -823,6 +828,7 @@ function QuestionDockForm({
 					submit();
 				}}
 			>
+				<EvidenceInput value={evidence} onChange={setEvidence} disabled={compactionRunning} onBusyChange={setEvidenceReading} />
 				<div
 					data-testid={qd.mode === "text" ? "answer-field" : "thinking-field"}
 					className="rounded-[10px] border border-border/70 bg-background/60 transition-colors focus-within:border-primary/50"
@@ -900,7 +906,7 @@ function QuestionDockForm({
 						</span>
 						<Button
 							type="submit"
-							disabled={!canSubmit || compactionRunning}
+							disabled={!canSubmit || compactionRunning || evidenceReading}
 							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 						>
 							Submit answer

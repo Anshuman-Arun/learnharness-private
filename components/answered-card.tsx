@@ -6,6 +6,7 @@ import { GlyphMark } from "@/components/ui/glyph-mark";
 import { ThinkingBlock } from "@/components/thinking-block";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { EvidencePreview } from "@/components/learning-evidence";
 import type { ChatSettings, QuestionAnswerData } from "@/src/core";
 import { parseAskInput, parseQuizInput } from "@/src/core";
 
@@ -161,6 +162,7 @@ export function AnsweredCard({ answer, input, teachingMode }: { answer: Question
 			)}
 
 			{answer.text && <div className="lh-prose mt-2 whitespace-pre-wrap">“{answer.text}”</div>}
+			<EvidencePreview evidence={answer.evidence} />
 
 			{/* The confidence record (owner round 6): the slider's rail, disc
 			    removed — the missing handle itself says "this is a record, not a
