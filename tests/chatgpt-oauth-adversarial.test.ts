@@ -13,6 +13,7 @@ type RecordValue = Record<string, unknown>;
 type Store = {
   read(id: string): Promise<RecordValue | undefined>;
   modify(id: string, transform: (current: RecordValue | undefined) => Promise<RecordValue>, options?: {signal?: AbortSignal}): Promise<RecordValue | undefined>;
+  delete(id: string, options?: {expectedRefresh?:string}): Promise<RecordValue | false>;
 };
 const native = require("../electron/chatgpt-oauth.cjs") as {
   createEncryptedCredentialStore(file: string, backend: RecordValue): Store;
@@ -41,6 +42,74 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+
+  it("revokes precisely the rotated refresh token that local disconnect actually deletes", async () => {
+    await scratch(async dir => {
+      const safeStorage=encryptedBackend();
+      const store=native.createEncryptedCredentialStore(path.join(dir,"chatgpt-oauth.enc.json"),safeStorage);
+      await store.modify("openai",async()=>({
+        type:"oauth", access:"old-access",refresh:"old-refresh",clientId:"client",
+        subject:"verified-user",expires:Date.now()-10_000,
+        scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"],
+      }));
+      const oldFetch=globalThis.fetch;
+      let revoked:string|null=null;
+      globalThis.fetch=async(input,init)=>{
+        const url=String(input);
+        if(url.startsWith("http://127.0.0.1:"))return oldFetch(input,init);
+        if(url.endsWith("/.well-known/openid-configuration"))return Response.json({
+          issuer:"https://auth.openai.com",
+          authorization_endpoint:"https://auth.openai.com/oauth/authorize",
+          token_endpoint:"https://auth.openai.com/oauth/token",
+          jwks_uri:"https://auth.openai.com/.well-known/jwks.json",
+          revocation_endpoint:"https://auth.openai.com/oauth/revoke",
+        });
+        if(url.endsWith("/oauth/token"))return Response.json({
+          access_token:"new-access",refresh_token:"new-refresh",token_type:"bearer",
+          scope:"openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",expires_in:3600,
+        });
+        if(url.endsWith("/oauth/revoke")){
+          revoked=new URLSearchParams(init?.body as string).get("token");
+          return new Response(null,{status:200});
+        }
+        throw new Error("Unexpected remote request: "+url);
+      };
+      const handlers=new Map<string,(event?:unknown)=>Promise<unknown>>();
+      const runtime=await native.createChatGPTOAuthRuntime({
+        userDataDir:dir,safeStorage,shell:{openExternal:async()=>undefined},
+        ipcMain:{handle:(name:string,fn:(event?:unknown)=>Promise<unknown>)=>{handlers.set(name,fn);}},
+        authorizeIpc:()=>true,log:()=>undefined,
+      });
+      try{
+        const headers={authorization:`Bearer ${runtime.brokerSecret}`};
+        const token=await fetch(runtime.brokerUrl+"/v1/token",{method:"POST",headers});
+        assert.equal(token.status,200);
+        assert.equal((await token.json()).accessToken,"new-access");
+        const active=await store.read("openai");
+        assert.equal(active?.refresh,"new-refresh");
+        const output=await handlers.get("lh:chatgpt:disconnect")!() as {connected:boolean};
+        assert.equal(output.connected,false);
+        assert.equal(revoked,"new-refresh","remote revoke must use the token actually removed after rotation");
+        assert.equal(await store.read("openai"),undefined);
+      }finally{runtime.close();globalThis.fetch=oldFetch;}
+    });
+  });
+
+  it("compare-and-delete cannot wipe a newly reconnected account after a stale invalid-grant refresh", async()=>{
+    await scratch(async dir=>{
+      const store=native.createEncryptedCredentialStore(path.join(dir,"vault.json"),encryptedBackend());
+      await store.modify("openai",async()=>({type:"oauth",refresh:"refresh-before",access:"old"}));
+      await store.modify("openai",async()=>({type:"oauth",refresh:"refresh-after",access:"new"}));
+      const stale=await store.delete("openai",{expectedRefresh:"refresh-before"});
+      assert.equal(stale,false);
+      assert.equal((await store.read("openai"))?.refresh,"refresh-after");
+      const deleted=await store.delete("openai",{expectedRefresh:"refresh-after"});
+      assert.equal(deleted?.refresh,"refresh-after");
+      assert.equal(await store.read("openai"),undefined);
+    });
+  });
+
+
   it("fails closed for malformed saved OAuth credentials and API keys masquerading as OAuth", async () => {
     const {validCredential}=native as unknown as {validCredential:(value:unknown)=>boolean};
     const baseline = {
