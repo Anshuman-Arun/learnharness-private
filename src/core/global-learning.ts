@@ -114,7 +114,7 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
     }
     if(bindings.size) sessions.push({id:record.id,title:record.title,concepts:bindings.size});
     // Tool-call inputs are the plan-node source of truth; tool results
-    // are the graded evidence. Probe calls have NO plan node id.
+    // are the graded evidence. Probe questions can bind to conceptId.
     const calls=new Map<string,{nodeId:string;conceptId:string;kind:LearningEvidence["kind"];question:string}>();
     for(const message of record.messages??[]) {
       if(message.role!=="assistant" || !Array.isArray(message.content))continue;
@@ -139,7 +139,6 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
       const identity=bindings.get(call.nodeId) || call.conceptId;
       const outcome=answer.correct===true ? "correct" :
         answer.correct===false ? "incorrect" : "ungraded";
-      const isCheck=call.kind!=="predict";
       const evidence:LearningEvidence={
         chatId:record.id,toolCallId:message.toolCallId,localNodeId:call.nodeId,
         question:call.question,kind:call.kind,outcome,
