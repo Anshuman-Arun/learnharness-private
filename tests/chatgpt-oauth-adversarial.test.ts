@@ -25,7 +25,8 @@ function encryptedBackend() {
     encryptString: (data: string) => {
       const iv = crypto.randomBytes(12);
       const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-      return Buffer.concat([iv, cipher.getAuthTag(), cipher.update(data, "utf8"), cipher.final()]);
+      const body = Buffer.concat([cipher.update(data, "utf8"), cipher.final()]);
+      return Buffer.concat([iv, cipher.getAuthTag(), body]);
     },
     decryptString: (data: Buffer) => {
       const decipher = crypto.createDecipheriv("aes-256-gcm", key, data.subarray(0, 12));
