@@ -50,3 +50,36 @@ it("adds an image to the pending submission and removes it through real UI event
 		Object.assign(globalThis, previous);
 	}
 });
+
+it("keeps code attached while an asynchronous image read is pending", async () => {
+	const { window } = parseHTML("<html><body><div id='root'></div></body></html>");
+	const previous = { window: globalThis.window, document: globalThis.document, FileReader: globalThis.FileReader };
+	let finish: () => void;
+	class Reader {
+		result = `data:image/png;base64,${png}`;
+		onload?: () => void;
+		readAsDataURL() { finish = () => this.onload?.(); }
+	}
+	Object.assign(globalThis, { window, document: window.document, FileReader: Reader, IS_REACT_ACT_ENVIRONMENT: true });
+	let current: LearningEvidence | undefined;
+	function Harness() {
+		const [value, setValue] = useState<LearningEvidence>();
+		current = value;
+		return <><EvidenceInput value={value} onChange={setValue} /><button id="code" onClick={() => setValue({ ...value, code: [{ name: "main.cpp", language: "cpp", source: "int main(){}" }] })}>Attach code</button></>;
+	}
+	const root = createRoot(window.document.getElementById("root")! as unknown as HTMLElement);
+	try {
+		await act(async () => root.render(<Harness />));
+		const input = window.document.querySelector('input[type="file"]')!;
+		Object.defineProperty(input, "files", { value: [{ name: "sketch.png", type: "image/png", size: 68 }] });
+		await act(async () => input.dispatchEvent(new window.Event("change", { bubbles: true })));
+		await act(async () => window.document.getElementById("code")!.click());
+		assert.equal(current?.code?.length, 1);
+		await act(async () => finish());
+		assert.equal(current?.images?.length, 1);
+		assert.equal(current?.code?.length, 1);
+	} finally {
+		await act(async () => root.unmount());
+		Object.assign(globalThis, previous);
+	}
+});
