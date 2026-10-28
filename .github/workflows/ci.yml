@@ -81,6 +81,15 @@ jobs:
       - run: node scripts/build-server.mjs
       - name: Launch real Next UI in Chrome with synthetic graph fixtures
         run: node scripts/editorial-visual-qa.mjs
+      - name: Audit real pages, typography, brand color, settings and lesson UI
+        run: node scripts/editorial-page-audit.mjs
+      - name: Upload complete editorial page audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: editorial-complete-page-audit
+          path: artifacts/editorial-pages/*.png
+          if-no-files-found: warn
       - name: Retain dark/light screenshots for inspection
         if: always()
         uses: actions/upload-artifact@v7
