@@ -243,8 +243,9 @@ export async function handleChatInput(
 		} catch { /* Fail closed on catalog discovery outage. */ }
 		if (!allowed) {
 			return Response.json({
-				error: "chatgpt_model_unavailable",
-				message: "The selected model is unavailable to this ChatGPT account. Refresh Providers and choose an available model.",
+				code: "chatgpt_model_unavailable",
+				error: "The selected ChatGPT model is unavailable to this account. Refresh Providers and choose an available model.",
+				provider: CHATGPT_PROVIDER_ID,
 			}, { status: 503 });
 		}
 	}
