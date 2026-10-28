@@ -25,6 +25,8 @@ import {
 	CHATGPT_SOURCE_PROVIDER_ID,
 	chatGPTBrokerConfigured,
 	getChatGPTBrokerStatus,
+	getChatGPTBrokerModels,
+	type ChatGPTAvailableModel,
 } from "../agent/chatgpt-broker.ts";
 import { settingsStore } from "../store/settings.ts";
 import { effectiveSettings } from "./stores.ts";
@@ -197,15 +199,26 @@ export function catalogContextLimits(): Map<string, number> {
  *  (sorted by provider then id — stable, diff-friendly) + the config
  *  defaults a settings-less chat runs + the background roles' resolved
  *  pins (the settings UI's per-role default captions). */
-export function modelCatalog(options: { chatGPTConnected?: boolean } = {}): ModelCatalogResponse {
+export function modelCatalog(options: { chatGPTConnected?: boolean; availableChatGPTModels?: ChatGPTAvailableModel[] } = {}): ModelCatalogResponse {
 	const keyed = keyedProviderIds();
 	const keyedModels = piModels()
 		.getProviders()
 		.filter((p) => keyed.has(p.id))
 		.flatMap((p) => piModels().getModels(p.id))
 		.map((model) => toModelDto(model));
+	// The account's live roster is the upper bound. Pi still defines the
+	// transport/metadata for models it supports: unknown slugs are omitted.
+	// A missing roster in pure legacy tests retains their catalog fixture;
+	// liveModelCatalog always provides the real (possibly empty) roster.
+	const allowed = options.availableChatGPTModels &&
+		new Map(options.availableChatGPTModels.map((item) => [item.id, item.name]));
 	const chatGPTModels = options.chatGPTConnected
-		? piModels().getModels(CHATGPT_SOURCE_PROVIDER_ID).map((model) => toModelDto(model, CHATGPT_PROVIDER_ID))
+		? piModels().getModels(CHATGPT_SOURCE_PROVIDER_ID)
+			.filter((model) => !allowed || allowed.has(model.id))
+			.map((model) => ({
+				...toModelDto(model, CHATGPT_PROVIDER_ID),
+				name: allowed?.get(model.id) || model.name,
+			}))
 		: [];
 	const models = [...keyedModels, ...chatGPTModels]
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)));
@@ -220,7 +233,12 @@ export function modelCatalog(options: { chatGPTConnected?: boolean } = {}): Mode
 
 export async function liveModelCatalog(): Promise<ModelCatalogResponse> {
 	const chatGPT = await getChatGPTBrokerStatus();
-	return modelCatalog({ chatGPTConnected: chatGPT.connected });
+	let availableChatGPTModels: ChatGPTAvailableModel[] = [];
+	if (chatGPT.connected) {
+		try { availableChatGPTModels = await getChatGPTBrokerModels(); }
+		catch { /* Do not invent entitlement if model discovery fails. */ }
+	}
+	return modelCatalog({ chatGPTConnected: chatGPT.connected, availableChatGPTModels });
 }
 
 function modelFor(provider: string, id: string): Model<Api> | undefined {

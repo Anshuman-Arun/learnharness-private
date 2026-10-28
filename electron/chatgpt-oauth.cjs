@@ -9,6 +9,7 @@ const ISSUER = "https://auth.openai.com";
 const RESOURCE = "https://api.openai.com/v1";
 const SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 const SHARING_SCOPE = "chatgpt.tokens.use.direct";
+const REQUIRED_SCOPES = SCOPES.split(" ");
 const CALLBACK_PATH = "/auth/callback";
 const DYNAMIC_CLIENT_ID = "dynamic_agent_client";
 let discoveryPromise;
@@ -220,7 +221,7 @@ function credentialFields(data, previousScopes) {
 	const scopeText = typeof data.scope === "string" ? data.scope : previousScopes?.join(" ");
 	if (!scopeText) throw new Error("ChatGPT did not confirm the granted permissions.");
 	const scopes = scopeText.split(/\s+/).filter(Boolean);
-	if (!scopes.includes(SHARING_SCOPE)) throw new Error("ChatGPT plan usage was not enabled for LearnHarness.");
+	if (!REQUIRED_SCOPES.every((scope) => scopes.includes(scope))) throw new Error("ChatGPT did not grant all required plan permissions.");
 	if (
 		typeof data.access_token !== "string" ||
 		!data.access_token ||
@@ -428,6 +429,54 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 	let pendingLogin;
 	let activeLoginController;
 	let loginState = { connecting: false, phase: "idle" };
+	let catalogEpoch = 0;
+	let catalogCache = null;
+	let catalogPending = null;
+	const invalidateCatalog = () => { catalogEpoch++; catalogCache = null; catalogPending = null; };
+	async function accessCredential() {
+		return credentials.modify(PROVIDER_ID, async (current) => {
+			if (current?.type !== "oauth") return undefined;
+			return current.expires <= Date.now() + 10 * 60_000 ? refreshCredential(current) : undefined;
+		});
+	}
+	async function discoverAccountModels() {
+		const epoch = catalogEpoch;
+		if (catalogCache && catalogCache.expires > Date.now()) return catalogCache.models;
+		if (catalogPending) return catalogPending;
+		const pending = (async () => {
+			const credential = await accessCredential();
+			if (credential?.type !== "oauth" || !credential.access) throw new Error("ChatGPT is not connected.");
+			const response = await fetch(`${RESOURCE}/models`, {
+				headers: { authorization: `Bearer ${credential.access}` },
+				signal: AbortSignal.timeout(15_000),
+				redirect: "error",
+			});
+			if (!response.ok) throw new Error(`ChatGPT account model discovery failed (${response.status}).`);
+			const contentLength = Number(response.headers.get("content-length") ?? 0);
+			if (contentLength > 1_048_576) throw new Error("ChatGPT model catalog exceeds the size limit.");
+			const raw = await response.text();
+			if (raw.length > 1_048_576) throw new Error("ChatGPT model catalog exceeds the size limit.");
+			const body = JSON.parse(raw);
+			if (!body || !Array.isArray(body.models)) throw new Error("ChatGPT returned an invalid model catalog.");
+			const models = [];
+			const seen = new Set();
+			for (const model of body.models.slice(0, 500)) {
+				if (model?.visibility !== "list" ||
+					typeof model.slug !== "string" ||
+					!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(model.slug) ||
+					typeof model.display_name !== "string" ||
+					!model.display_name.trim() || seen.has(model.slug)) continue;
+				seen.add(model.slug);
+				models.push({ id: model.slug, name: model.display_name.slice(0, 160) });
+			}
+			if (epoch !== catalogEpoch) throw new Error("ChatGPT connection changed during model discovery.");
+			catalogCache = { expires: Date.now() + 60_000, models };
+			return models;
+		})();
+		catalogPending = pending;
+		try { return await pending; }
+		finally { if (catalogPending === pending) catalogPending = null; }
+	}
 
 	async function status() {
 		if (!storageSecure(safeStorage)) {
@@ -475,6 +524,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 			);
 			controller.signal.throwIfAborted();
 			await credentials.modify(PROVIDER_ID, async () => credential, { signal: controller.signal });
+			invalidateCatalog();
 			loginState = { connecting: false, phase: "connected" };
 		})().catch((error) => {
 			loginState = {
@@ -514,6 +564,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 		// Revocation is best-effort, but local disconnect MUST succeed even
 		// during an outage or provider revocation failure.
 		await credentials.delete(PROVIDER_ID);
+		invalidateCatalog();
 		loginState = { connecting: false, phase: "idle" };
 		try {
 			if (credential?.type === "oauth") await revokeCredential(credential);
@@ -539,11 +590,21 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 				json(res, 200, await status());
 				return;
 			}
+			if (req.method === "GET" && req.url === "/v1/models") {
+				const connected = await status();
+				if (!connected.connected) {
+					json(res, 401, { error: "chatgpt_not_connected" });
+					return;
+				}
+				try {
+					json(res, 200, { models: await discoverAccountModels() });
+				} catch {
+					json(res, 503, { error: "chatgpt_models_unavailable" });
+				}
+				return;
+			}
 			if (req.method === "POST" && req.url === "/v1/token") {
-				const credential = await credentials.modify(PROVIDER_ID, async (current) => {
-					if (current?.type !== "oauth") return undefined;
-					return current.expires <= Date.now() + 10 * 60_000 ? refreshCredential(current) : undefined;
-				});
+				const credential = await accessCredential();
 				if (credential?.type !== "oauth" || !credential.access) {
 					json(res, 401, { error: "chatgpt_not_connected" });
 					return;

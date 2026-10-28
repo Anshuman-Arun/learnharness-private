@@ -7,7 +7,7 @@ import {
 	type TeachingAgent,
 } from "../agent/teacher-agent.ts";
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
-import { CHATGPT_PROVIDER_ID, getChatGPTBrokerStatus } from "../agent/chatgpt-broker.ts";
+import { CHATGPT_PROVIDER_ID, getChatGPTBrokerStatus, getChatGPTBrokerModels } from "../agent/chatgpt-broker.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
 import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
 import type { ModelRole } from "../../config.ts";
@@ -209,6 +209,18 @@ export async function handleChatInput(
 		const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
 		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
 		return Response.json(envelope, { status: 503 });
+	}
+	if (conversation.provider === CHATGPT_PROVIDER_ID) {
+		let allowed = false;
+		try {
+			allowed = (await getChatGPTBrokerModels()).some((model) => model.id === conversation.id);
+		} catch { /* Fail closed on catalog discovery outage. */ }
+		if (!allowed) {
+			return Response.json({
+				error: "chatgpt_model_unavailable",
+				message: "The selected model is unavailable to this ChatGPT account. Refresh Providers and choose an available model.",
+			}, { status: 503 });
+		}
 	}
 
 	// THE COMPACTION GATE (owner round 14, 2026-10-05 — the structural

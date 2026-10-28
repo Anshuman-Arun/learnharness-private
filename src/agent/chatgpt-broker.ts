@@ -14,6 +14,16 @@ export interface ChatGPTBrokerStatus {
 	error?: string;
 }
 
+export interface ChatGPTAvailableModel { id: string; name: string }
+
+export async function getChatGPTBrokerModels(signal?: AbortSignal): Promise<ChatGPTAvailableModel[]> {
+	if (!brokerConfig()) return [];
+	const result = await brokerRequest<{models: ChatGPTAvailableModel[]}>("/v1/models", "GET", signal);
+	if (!Array.isArray(result.models)) throw new Error("Invalid ChatGPT account model catalog.");
+	return result.models.filter((item) => item &&
+		typeof item.id === "string" && typeof item.name === "string");
+}
+
 interface TokenResponse {
 	accessToken: string;
 	expires: number;
