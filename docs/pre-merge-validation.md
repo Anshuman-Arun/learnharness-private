@@ -1,6 +1,6 @@
 # Pre-merge validation
 
-The 15 feature PRs are open as drafts (#8–#22). This validation branch is stacked on the final feature branch. Main remains unchanged. Keep the reconnect/Windows fixes with the feature stack before approving a merge.
+The 15 feature PRs are open as drafts (#8–#22). [Validation PR #23](https://github.com/Anshuman-Arun/learnharness-private/pull/23) is stacked on the final feature branch. Main remains unchanged. Keep the reconnect/Windows fixes with the feature stack before approving a merge.
 
 ## Issues found and fixed
 
