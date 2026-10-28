@@ -414,3 +414,19 @@ html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-lab
 html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] marker path {
   fill: #7a6b5c;
 }
+
+/* The initial plan often has zero visited concepts, so EVERY node starts
+ * "upcoming". Keep that subdued hierarchy, but not at a contrast level
+ * where the only diagram on the screen becomes effectively unreadable. */
+html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status="upcoming"] text {
+  fill: #c8c0b4;
+}
+html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status="upcoming"] rect:first-child {
+  stroke: #8e857a;
+}
+html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Plan diagram"] > path.stroke-border {
+  stroke: #8e857a;
+}
+html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Plan diagram"] marker path.fill-border {
+  fill: #8e857a;
+}
