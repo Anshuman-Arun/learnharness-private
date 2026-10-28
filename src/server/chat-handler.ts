@@ -217,6 +217,11 @@ export async function handleChatInput(
 	// beginTurn, no liveness effects — and the record re-reads after
 	// because compaction appends the marker.
 	const conversationEngine = piEngineForSpec(conversation);
+	const evidence = input.type === "answer" ? input.answer.evidence
+		: input.type === "text" || input.type === "thinking" ? input.evidence : undefined;
+	if (evidence?.images?.length && !conversationEngine.model.input.includes("image")) {
+		return Response.json({ error: "This model cannot read images. Choose an image-capable conversation model before submitting your sketch.", code: "image_model_required" }, { status: 400 });
+	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{

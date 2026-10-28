@@ -39,6 +39,7 @@ import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
 import type { PlanBlockData } from "./contracts/chat.ts";
+import type { LearningEvidence } from "./learning-evidence.ts";
 
 /** A view part — the loose part vocabulary the renderers consume (the same
  *  shape names the pre-Wave-D UIMessage dialect used, so the renderer
@@ -171,12 +172,15 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 		}
 
 		if (role === "user") {
+			const submitted = m as LhMessage & { evidence?: LearningEvidence; learnerText?: string };
 			const content = m.content as string | Array<{ type: string; text?: string }>;
 			const texts =
 				typeof content === "string"
 					? [content]
 					: content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text);
-			out.push({ id: m.id, role: "user", parts: texts.map(textPart) });
+			out.push({ id: m.id, role: "user", parts: [
+				...(submitted.evidence ? [textPart(submitted.learnerText ?? ""), { type: "data-learning-evidence", data: submitted.evidence }] : texts.map(textPart)),
+			] });
 			continue;
 		}
 

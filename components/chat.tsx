@@ -58,6 +58,8 @@ import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-c
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
 import { TeachingModeControl } from "@/components/teaching-mode-control";
+import { EvidenceInput, EvidencePreview } from "@/components/learning-evidence";
+import { hasLearningEvidence, type LearningEvidence } from "@/src/core";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, TurnUsage } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
@@ -492,10 +494,10 @@ export function Chat({
 	// the dock stays mounted (the problem is still active until the agent
 	// concludes).
 	const submitThinking = useCallback(
-		(text: string) => {
+		async (text: string, evidence?: LearningEvidence) => {
 			const problem = activeProblemRef.current;
-			if (!problem) return;
-			void send({ type: "thinking", problemCallId: problem.toolCallId, text });
+			if (!problem) return false;
+			return send({ type: "thinking", problemCallId: problem.toolCallId, text, evidence });
 		},
 		[send],
 	);
@@ -547,6 +549,16 @@ export function Chat({
 	const phases = useMemo(() => phaseTimeline(messages), [messages]);
 
 	const [text, setText] = useState("");
+	const [composerEvidence, setComposerEvidence] = useState<LearningEvidence>();
+	const [evidenceReading, setEvidenceReading] = useState(false);
+	const sentEvidenceRef = useRef<LearningEvidence | undefined>(undefined);
+	useEffect(() => {
+		if (error && sentEvidenceRef.current) {
+			setComposerEvidence(sentEvidenceRef.current);
+			sentEvidenceRef.current = undefined;
+		}
+		if (status === "ready" && !error) sentEvidenceRef.current = undefined;
+	}, [error, status]);
 	/* The composer's value MIRROR ("nothing gets lost" round, owner
 	 * 2026-10-01): a dictation flush lands via setState, which a closure
 	 * waiting through `await finish()` cannot observe in time. Kept
@@ -684,7 +696,7 @@ export function Chat({
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
 	const canSend =
-		(text.trim().length > 0 || dictation.active) && !pending && !activeProblem && !compacting;
+		(text.trim().length > 0 || dictation.active || hasLearningEvidence(composerEvidence)) && !pending && !activeProblem && !compacting && !evidenceReading && !(busy && hasLearningEvidence(composerEvidence));
 
 	/* THE PRACTICE PAUSE (owner round 16): between problems — practice
 	 * kind, nothing active, nothing in flight, and at least one problem
@@ -1143,12 +1155,14 @@ export function Chat({
 		void dictation.finish().then(doSteerOrSend);
 	};
 	const doSend = () => {
-		if (busy || pending || compacting) return;
+		if (busy || pending || compacting || evidenceReading) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		if (!t && !hasLearningEvidence(composerEvidence)) return;
 		draftRef.current = t; // the refusal flow's preserve-and-replay seam
+		sentEvidenceRef.current = composerEvidence;
 		applyText("");
-		void send({ type: "text", text: t });
+		setComposerEvidence(undefined);
+		void send({ type: "text", text: t, evidence: composerEvidence });
 	};
 
 	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
@@ -1163,8 +1177,9 @@ export function Chat({
 	const doSteerOrSend = () => {
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		if (!t && !hasLearningEvidence(composerEvidence)) return;
 		if (busy) {
+			if (hasLearningEvidence(composerEvidence)) return;
 			applyText("");
 			void steer(t);
 			return;
@@ -1440,6 +1455,7 @@ export function Chat({
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													{m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")}
 												</div>
+												{m.parts.filter((part) => part.type === "data-learning-evidence").map((part, i) => <EvidencePreview key={i} evidence={part.data as LearningEvidence} />)}
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1634,6 +1650,8 @@ export function Chat({
 						)
 					}
 					composer={
+						<>
+						<EvidenceInput value={composerEvidence} onChange={setComposerEvidence} disabled={busy || compacting} onBusyChange={setEvidenceReading} />
 						<Composer
 							// Stop aborts ANY in-flight turn (stream-reattach wave): the
 							// square renders while a reattached/wake turn runs too — the
@@ -1654,6 +1672,7 @@ export function Chat({
 							onNext={sendNext}
 							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
 						/>
+						</>
 					}
 					onSubmitAnswer={(output) => {
 						if (!pending) return;
@@ -1851,7 +1870,7 @@ function DockOverlay({
 	 *  question (the composer is replaced); null in teaching sessions. */
 	practice: { toolCallId: string; input: unknown } | null;
 	/** (commit, text) — the practice dock's two submit lanes. */
-	onSubmitThinking: (text: string) => void;
+	onSubmitThinking: (text: string, evidence?: LearningEvidence) => Promise<boolean>;
 	/** Teach-phase pending question: arrives collapsed behind the reveal button (W5). */
 	requiresReveal: boolean;
 	/** The reading-thinking draft (owner 2026-10-03) — owned by ChatView so
