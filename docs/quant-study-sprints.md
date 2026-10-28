@@ -19,7 +19,7 @@ Training → 4.5-hour quant sprints provides twelve original curricula, each int
 
 After martingales and random walks, a useful sequence is indicators → order statistics/races → stopping → absorbing chains → Monte Carlo, with streaming C++ alongside. Add Bayesian/Gaussian modules for statistics/research roles and hedging for trading interviews.
 
-Each module includes prerequisites, diagnostic questions, derivation prompts, guided transfer tasks, a concrete C++/simulation exercise and common traps. Progress, milestone notes and running timer state persist locally on the server. Timers continue while the page is closed; pause before leaving. Local unsaved note/exit drafts survive reload in the same tab. Checkmarks track activity, not mastery.
+Each module includes prerequisites, diagnostic questions, derivation prompts, guided transfer tasks, a concrete C++/simulation exercise and common traps. Progress, milestone notes and running timer state persist locally on the server. Timers continue while the page is closed; pause before leaving. Each uncheckpointed running segment is capped at eight hours. Display and persistence use the same server-time calculation. Local unsaved note/exit drafts survive reload in the same tab. Checkmarks track activity, not mastery.
 
 Open guided teaching session selects the reversible Guided setting and stages the curriculum/current notes as evidence. Open practice session uses the existing practice agent. Review the staged evidence and send an instruction such as “Begin with the prerequisite diagnostic.” No provider call is made until you submit. These handoffs deliberately omit exit answer keys.
 

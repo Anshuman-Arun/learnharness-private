@@ -1,42 +1,32 @@
-# Pre-merge validation
+# Reviewed feature-stack validation
 
-The 15 feature PRs are open as drafts (#8–#22). [Validation PR #23](https://github.com/Anshuman-Arun/learnharness-private/pull/23) is stacked on the final feature branch. Main remains unchanged. Keep the reconnect/Windows fixes with the feature stack before approving a merge.
+PRs #8–18 are merged. The remaining feature PRs #19–22 and validation PR #23 remain open. #19 targets main; merge the remaining stack in order and retarget the next PR after its parent lands. Tablet reconnect, pairing-concurrency, and Windows asset fixes are already present from #14.
 
-## Issues found and fixed
+## Findings fixed in their feature PRs
 
-1. **Old tablet frames could survive a pairing change.** A failed frame remained in memory after disconnect; a delayed response could also change the sequence counter of a later pairing. The client now clears scheduled/pending state, aborts the previous request and checks a pairing generation before accepting responses. Resume requests use the same guard. The production-browser regression fails against the original client and passes with the fix.
-2. **Two PC tabs could create concurrent writers.** Both requests could pass the active-lease check before the HTTPS create request completed. A per-pad in-flight reservation now permits one pairing; a real concurrent HTTPS test verifies one success and one rejection.
-3. **Windows font fallback matching missed native backslashes.** The esbuild plugin's path matcher only handled POSIX separators. The shared matcher now accepts both separators, with a regression testing actual Windows and POSIX package paths and rejecting unrelated packages.
+- **#19, notebook:** recognize exams completed by their deadline without another exam-page visit; classify extreme finite estimates using stable log error; hide reference-derived retry tolerance until commitment; bind demonstrated corrections to the retry's correction revision; prevent text entered during pending mutations from disappearing.
+- **#20, retrieval:** reject unsupported review modes without consuming the due card; protect pending recall inputs; preserve server-result-based ratings, stale-write checks, bounded snooze, and duplicate-rating idempotence.
+- **#21, sprints:** retain Guided/practice handoff options alongside lossless bounded evidence; clear acknowledged draft values without deleting newer unsaved text; use server-based clocks and the same eight-hour segment calculation for display/persistence; avoid double-counting a backward clock adjustment.
+- **#22, judge:** preserve earlier passed cases when a later case exceeds its output limit; keep hidden output redacted; reject invalid sanitizer flags before contacting a runner; exercise the published size/integer boundaries with general solutions.
 
-## Local evidence
+The cross-stack nullable-score and sprint-handoff compatibility failures introduced during the earlier propagation were corrected and are covered by the exact-layer checks.
 
-- `npm test`: **1,977 passed**, no failures/skips.
-- `npm run typecheck` and `npm run lint`: passed.
-- Optimized production build: passed after font access was enabled.
-- `scripts/build-server.mjs` plus `scripts/smoke-server.mjs`: the supported standalone bundle boots and serves root/settings/models/graph successfully, with its existing payload checks.
-- Seven real Docker runner tests passed: multifile compilation/stdin/cases, compile failures, filesystem/privilege isolation, infinite loops/output limits, sanitizers, cancellation/authentication and cleanup.
-- Certificate-verified HTTPS tests passed, including two simultaneous pairing requests, scope enforcement, replay/reconnect, revocation and static-path boundaries.
-- The complete production-browser suite passed **11 scenarios plus its parent test (12 reported tests), with no skips**. A subsequent targeted portrait/landscape tablet run passed; its other ten scenarios were explicitly skipped for that targeted run.
+## Evidence
 
-| Feature(s) | Additional browser/API checks |
-|---|---|
-| Teaching toggle | Guided → reload → Explain, persisted session setting |
-| Arithmetic | Wrong then correct attempt, stale-index rejection, stopped-round reload |
-| Estimation | Invalid interval rejection, hidden pre-commit reference, persisted review |
-| Probability | Pause at a batch boundary; reload preserves exact completed count |
-| Stopping | Forced final acceptance, delayed debrief, policy comparison |
-| Timed OA | Unsaved answer/flag reload, navigation save, post-finish write rejection |
-| Notebook | Saved correction → successful retry → demonstrated proof; original answer retained |
-| Retrieval | Incorrect committed answer overrides an Easy rating |
-| Sprints | Unsaved notes survive timer changes; exit drafts survive reload; delayed rubrics |
-| C++ workspace/runner/judge | Revision conflict, frozen source/stdout, real hidden-check failure/redaction, tutor evidence handoff |
-| Scratchpad/iPad/evidence | Pressure-bearing touch strokes, portrait/landscape fit, offline reload/replay, cross-pad isolation, delayed acknowledgment after re-pair, PC reclaim with helper down, math-text/font export, PNG capture staged in session |
+- Default suite: **1,997 tests passed**, zero failures/skips.
+- Combined production browsers: **27 tests passed**, zero failures/skips. This includes the original workflows and new pending-save, draft-recovery, Guided/practice, and clock-skew regressions.
+- Production HTTP checks: **58 requests passed** across notebook, retrieval, sprints, and judge validation. They cover malformed input, immutable answers, stale revisions, source preservation, and concurrent duplicate ratings.
+- Real Docker runner: **8 tests passed**, including isolation, diagnostics, time/output limits, cancellation, authentication, cleanup, and partial-case preservation.
+- Real Docker judge: **2 workflow tests passed**, covering general collision/top-k/variance solutions, hardcoded/echoing/flooding programs, hidden-output redaction, frozen source, and cancellation without report publication.
+- Certificate-verified HTTPS pairing checks passed, including concurrency, scope, replay/reconnect, revocation, and notice assets.
+- TypeScript, architectural ESLint, optimized build, supported standalone packaging, and startup smoke checks passed. The existing four dynamic-filesystem tracing warnings remain; the packaged server serves root, models, graph, and settings successfully.
+- Exact PR-layer typechecks and feature regressions are required before readiness is reported. Current CI results are linked on each PR.
 
-The default suite also exercises native image/code/dictation-transcript transport through an injected agent provider, answer-reveal behavior, exact probability/Bellman math, calibration, scheduler boundaries, retry variants and source provenance.
+PR CI is **Windows-only**. It retains full typecheck/test/lint quality checks, native Electron renderer tests, optimized builds, standalone packaging, and native startup. Tests were corrected for Windows file URLs, schema paths, and NTFS permission semantics rather than skipped. Release publishing workflows are separate.
 
 ## Reproduce
 
-Use Node 26, Docker with the pinned GCC image, OpenSSL, and Chromium. `LH_CHROMIUM_PATH` can select another installed Chromium/Chrome executable. Run:
+Use Node 26, Docker with the digest-pinned GCC image, OpenSSL, and Chromium/Chrome. Set `LH_CHROMIUM_PATH` to the browser executable when it is not `/usr/bin/chromium`.
 
 ```sh
 npm ci
@@ -48,8 +38,11 @@ npm run test:tablet
 npm run test:premerge
 ```
 
-`test:premerge` builds and prepares the standalone bundle, then starts isolated production data/auth, a local compiler service, and a dedicated HTTPS companion with an explicitly trusted temporary test CA. Browser requests use a loopback adapter whose HTTPS upstream still verifies that CA. It makes no paid model calls and does not use the user's session records. The production test app uses loopback port 3107. Failed runs retain a private temporary artifact directory for diagnosis; passing runs clean up. The complete test must run without `LH_BROWSER_CASE`; that optional substring only selects a targeted debugging scenario.
+For the real challenge workflow, start `npm run cpp:runner` in another terminal and run `npm run test:cpp-challenges` with the same runner-token configuration. That test uses temporary training records.
+
+`test:premerge` builds/packages the app and runs all three production-browser suites. Each suite uses disposable data/auth, ephemeral compiler and HTTPS helpers, and a test CA explicitly verified by the HTTPS adapter. The main browser apps use ports 3107 and 3117; the scratchpad-draft suite uses 3108. No paid provider request is made. Passing runs remove their temporary data; failed runs retain artifacts. Run final validation without `LH_BROWSER_CASE`, which is only a targeted debugging filter.
 
 ## Limits
 
-Chromium touch/pressure emulation verifies the pointer and transport paths, not physical Apple Pencil palm rejection, iPad Safari behavior or Windows certificate installation. GitHub's standalone matrix provides Windows/macOS/Linux build/startup checks, not hardware validation. Follow `docs/ipad-companion.md` for the physical-device check. Live paid-model vision interpretation, hint-policy adherence and retention gains remain unmeasured. No feature has been merged to main.
+Chromium touch/pressure emulation verifies pointer/transport behavior; physical Apple Pencil palm rejection, iPad Safari storage, Windows certificate installation, and live model adherence require separate device/provider testing. Local challenge sources remain inspectable; finite hidden checks do not prove asymptotic complexity or form an anti-cheating boundary. Activity timers and one successful retry do not establish mastery.
+

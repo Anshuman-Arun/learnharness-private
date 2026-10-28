@@ -1,23 +1,23 @@
 # Feature delivery and review map
 
-All 15 features are implemented on separate pushed branches and are open as **draft PRs #8–#22**. They form a stack, with each PR based on the preceding feature branch. Main has not been changed or merged. The additional [validation PR #23](https://github.com/Anshuman-Arun/learnharness-private/pull/23), `fix/pre-merge-validation`, carries the tablet reconnect/concurrency/Windows fixes and expanded production regression suite. See [pre-merge-validation.md](pre-merge-validation.md).
+PRs **#8–#18 are merged** after Windows quality and standalone validation. The remaining feature PRs **#19–#22** and [validation PR #23](https://github.com/Anshuman-Arun/learnharness-private/pull/23) remain open. #19 targets main; each later PR targets its preceding feature branch. Merge the remaining stack in order, retargeting the next PR to main after its parent lands. Tablet reconnect/concurrency/Windows fixes are already present from #14; #23 adds validation coverage and evidence. See [pre-merge-validation.md](pre-merge-validation.md).
 
 Descriptions and base/head pairs are in [feature-prs.json](feature-prs.json).
 
 | Feature | Head branch | Base | PR |
 |---|---|---|---|
 | Reversible session Guided / Explain control and answer reveal | `feat/session-teaching-mode` | `main` | [#8](https://github.com/Anshuman-Arun/learnharness-private/pull/8) |
-| Question-linked sketch, dictation and code evidence | `feat/multimodal-learning-evidence` | `feat/session-teaching-mode` | [#9](https://github.com/Anshuman-Arun/learnharness-private/pull/9) |
-| Zetamac-style arithmetic arena | `feat/quant-arithmetic-arena` | `feat/multimodal-learning-evidence` | [#10](https://github.com/Anshuman-Arun/learnharness-private/pull/10) |
-| Persistent multi-file C++ / Monaco workspace | `feat/cpp-workspace` | `feat/quant-arithmetic-arena` | [#11](https://github.com/Anshuman-Arun/learnharness-private/pull/11) |
-| Isolated C++20 compiler, runs, cases and sanitizers | `feat/isolated-cpp-runner` | `feat/cpp-workspace` | [#12](https://github.com/Anshuman-Arun/learnharness-private/pull/12) |
-| Persistent vector scratchpad and question capture | `feat/session-scratchpad` | `feat/isolated-cpp-runner` | [#13](https://github.com/Anshuman-Arun/learnharness-private/pull/13) |
-| Scoped HTTPS Windows/iPad drawing companion | `feat/ipad-companion` | `feat/session-scratchpad` | [#14](https://github.com/Anshuman-Arun/learnharness-private/pull/14) |
-| Estimation and confidence calibration | `feat/estimation-confidence` | `feat/ipad-companion` | [#15](https://github.com/Anshuman-Arun/learnharness-private/pull/15) |
-| Predict-first probability experiment lab | `feat/probability-experiment-lab` | `feat/estimation-confidence` | [#16](https://github.com/Anshuman-Arun/learnharness-private/pull/16) |
-| Finite-horizon optimal stopping and policy comparison | `feat/optimal-stopping-lab` | `feat/probability-experiment-lab` | [#17](https://github.com/Anshuman-Arun/learnharness-private/pull/17) |
-| Timed sectioned quant OA simulator | `feat/timed-quant-oa` | `feat/optimal-stopping-lab` | [#18](https://github.com/Anshuman-Arun/learnharness-private/pull/18) |
-| Source-linked mistake notebook and targeted retries | `feat/mistake-notebook` | `feat/timed-quant-oa` | [#19](https://github.com/Anshuman-Arun/learnharness-private/pull/19) |
+| Question-linked sketch, dictation and code evidence | `feat/multimodal-learning-evidence` | `main` | [#9](https://github.com/Anshuman-Arun/learnharness-private/pull/9) |
+| Zetamac-style arithmetic arena | `feat/quant-arithmetic-arena` | `main` | [#10](https://github.com/Anshuman-Arun/learnharness-private/pull/10) |
+| Persistent multi-file C++ / Monaco workspace | `feat/cpp-workspace` | `main` | [#11](https://github.com/Anshuman-Arun/learnharness-private/pull/11) |
+| Isolated C++20 compiler, runs, cases and sanitizers | `feat/isolated-cpp-runner` | `main` | [#12](https://github.com/Anshuman-Arun/learnharness-private/pull/12) |
+| Persistent vector scratchpad and question capture | `feat/session-scratchpad` | `main` | [#13](https://github.com/Anshuman-Arun/learnharness-private/pull/13) |
+| Scoped HTTPS Windows/iPad drawing companion | `feat/ipad-companion` | `main` | [#14](https://github.com/Anshuman-Arun/learnharness-private/pull/14) |
+| Estimation and confidence calibration | `feat/estimation-confidence` | `main` | [#15](https://github.com/Anshuman-Arun/learnharness-private/pull/15) |
+| Predict-first probability experiment lab | `feat/probability-experiment-lab` | `main` | [#16](https://github.com/Anshuman-Arun/learnharness-private/pull/16) |
+| Finite-horizon optimal stopping and policy comparison | `feat/optimal-stopping-lab` | `main` | [#17](https://github.com/Anshuman-Arun/learnharness-private/pull/17) |
+| Timed sectioned quant OA simulator | `feat/timed-quant-oa` | `main` | [#18](https://github.com/Anshuman-Arun/learnharness-private/pull/18) |
+| Source-linked mistake notebook and targeted retries | `feat/mistake-notebook` | `main` | [#19](https://github.com/Anshuman-Arun/learnharness-private/pull/19) |
 | Spaced retrieval, snooze and explainable intervals | `feat/spaced-retrieval` | `feat/mistake-notebook` | [#20](https://github.com/Anshuman-Arun/learnharness-private/pull/20) |
 | Twelve 4.5-hour quant curricula and exit checks | `feat/quant-study-sprints` | `feat/spaced-retrieval` | [#21](https://github.com/Anshuman-Arun/learnharness-private/pull/21) |
 | Server-owned C++ challenges and hidden checks | `feat/cpp-challenge-judge` | `feat/quant-study-sprints` | [#22](https://github.com/Anshuman-Arun/learnharness-private/pull/22) |

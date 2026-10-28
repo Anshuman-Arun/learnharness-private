@@ -152,6 +152,49 @@ test('pre-merge production browser workflows', { timeout: 600000 }, async t => {
    await pc.click('[data-testid=attach-scratchpad]'); await pc.waitForFunction(() => location.pathname.startsWith('/chat/'), { polling: 100 }); await pc.waitForFunction(() => document.querySelector('[data-testid=evidence-input]')?.textContent.includes('Page-1.png'), { polling: 100 });
    assert.notEqual(first.link.id, second.link.id); await p.close(); await pc.close();
   });
+  await check('pending notebook corrections never silently discard visible text', async () => {
+   await api('/api/training/mistakes', { action: 'manual', prompt: 'Pending correction regression', expected: 42, answer: '43', reasoning: 'Original attempt' });
+   const p = await page('/training/mistakes'); await p.waitForSelector('[name=correction]');
+   let held; await p.setRequestInterception(true); p.on('request', r => { if (r.method() === 'POST' && r.url().endsWith('/api/training/mistakes') && JSON.parse(r.postData()).action === 'edit') held = r; else r.continue(); });
+   await fill(p, '[name=correction]', 'Use distribution.'); await click(p, 'Save correction'); await until(() => !!held);
+   await p.type('[name=correction]', ' Additional reasoning.'); const visible = await p.$eval('[name=correction]', n => n.value);
+   held.continue(); await p.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Save correction' && !b.disabled));
+   assert.equal(await p.$eval('[name=correction]', n => n.value), visible); await p.close();
+  });
+  await check('acknowledged sprint notes do not revive as stale local drafts', async () => {
+   await api('/api/training/sprints', { action: 'start', id: 'beta-binomial' });
+   const p = await page('/training/sprints'); await p.select('[aria-label="Sprint topic"]', 'beta-binomial'); await p.waitForSelector('[name=notes]');
+   await fill(p, '[name=notes]', 'Saved once'); await click(p, 'Save milestone notes');
+   await until(async () => (await api('/api/training/sprints')).sprints.find(v => v.sprint.id === 'beta-binomial').progress.notes.diagnostic === 'Saved once');
+   await p.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Save milestone notes' && !b.disabled));
+   let progress = (await api('/api/training/sprints')).sprints.find(v => v.sprint.id === 'beta-binomial').progress;
+   await api('/api/training/sprints', { action: 'notes', id: 'beta-binomial', revision: progress.revision, phase: 'diagnostic', notes: 'Newer saved notes from another tab' });
+   await p.reload({ waitUntil: 'networkidle2' }); await p.select('[aria-label="Sprint topic"]', 'beta-binomial');
+   assert.equal(await p.$eval('[name=notes]', n => n.value), 'Newer saved notes from another tab');
+   let held; await p.setRequestInterception(true); p.on('request', r => { if (r.method() === 'POST' && r.url().endsWith('/api/training/sprints') && JSON.parse(r.postData()).action === 'notes') held = r; else r.continue(); });
+   await fill(p, '[name=notes]', 'Sent snapshot'); await click(p, 'Save milestone notes'); await until(() => !!held);
+   await p.type('[name=notes]', ' with newer unsaved text'); const newer = await p.$eval('[name=notes]', n => n.value); held.continue();
+   await p.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Save milestone notes' && !b.disabled));
+   await p.reload({ waitUntil: 'networkidle2' }); await p.select('[aria-label="Sprint topic"]', 'beta-binomial'); assert.equal(await p.$eval('[name=notes]', n => n.value), newer); await p.close();
+  });
+  await check('sprint handoffs select Guided teaching and the practice agent', async () => {
+   await api('/api/training/sprints', { action: 'start', id: 'indicators' });
+   const p = await page('/training/sprints'); await click(p, 'Open guided teaching session'); await p.waitForFunction(() => location.pathname.startsWith('/chat/'));
+   const chat = await api(await p.evaluate(() => '/api/chats/' + encodeURIComponent(location.pathname.split('/').pop()))); assert.equal(chat.settings.teachingMode, 'guided'); assert.notEqual(chat.kind, 'practice');
+   await p.waitForSelector('[data-testid=evidence-input] pre'); const payload = JSON.parse(await p.$eval('[data-testid=evidence-input] pre', n => n.textContent));
+   assert.ok(payload.instruction.includes('one targeted hint')); assert.equal(JSON.stringify(payload).includes('"expected":'), false); await p.close();
+   const practice = await page('/training/sprints'); await click(practice, 'Open practice session'); await practice.waitForFunction(() => location.pathname.startsWith('/chat/'));
+   assert.equal((await api(await practice.evaluate(() => '/api/chats/' + encodeURIComponent(location.pathname.split('/').pop())))).kind, 'practice');
+   await practice.waitForSelector('[data-testid=evidence-input] pre'); assert.ok((await practice.$eval('[data-testid=evidence-input] pre', n => n.textContent)).includes('without naming the technique upfront')); await practice.close();
+  });
+  await check('sprint progress clocks use server time despite browser clock skew', async () => {
+   const started = (await api('/api/training/sprints', { action: 'start', id: 'calibration-ev' })).sprint;
+   await api('/api/training/sprints', { action: 'timer', id: 'calibration-ev', revision: started.progress.revision, phase: 'diagnostic', running: true });
+   const p = await browser.newPage(); p.setDefaultTimeout(20000); p.on('pageerror', e => errors.push(e.message));
+   await p.evaluateOnNewDocument(() => { const nativeNow = Date.now.bind(Date); Date.now = () => nativeNow() + 10 * 60 * 60 * 1000; });
+   await p.goto(origin + '/training/sprints', { waitUntil: 'networkidle2' }); await p.select('[aria-label="Sprint topic"]', 'calibration-ev');
+   const text = await p.evaluate(() => document.body.textContent.match(/Tracked: \d+m \d+s/)?.[0] ?? 'no timer'); assert.match(text, /Tracked: 0m \d+s/); await p.close();
+  });
   assert.deepEqual(errors, [], 'production pages have no uncaught browser errors'); completed = true;
  } finally {
   await browser.close(); app.kill('SIGTERM'); await new Promise(resolve => { if (app.exitCode !== null) resolve(); else app.once('exit', resolve); }); fs.closeSync(log);
