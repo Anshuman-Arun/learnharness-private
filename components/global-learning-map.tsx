@@ -6,7 +6,7 @@ import Link from "next/link";
 import { MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { PlanDiagram, blockLayout, GRAPH_PAD } from "@/components/plan-block";
 import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/components/pan-zoom";
-import type { GlobalLearningGraph, LearningConcept } from "@/src/core/global-learning.ts";
+import type { GlobalLearningGraph } from "@/src/core/global-learning.ts";
 
 /** The same Dagre + hand-built SVG skin as the original mini lesson DAGs.
  * Do not replace it with React Flow, circles, or a second diagram engine.
@@ -28,7 +28,6 @@ export function GlobalLearningMap() {
   const [view,setView]=useState<Viewport>({x:0,y:0,zoom:1});
   const dragRef=useRef<{x:number;y:number;startX:number;startY:number;moved:boolean}|null>(null);
   const [dragging,setDragging]=useState(false);
-  const userAdjusted=useRef(false);
   useEffect(()=>{
     const c=new AbortController();
     void fetch("/api/learning-map",{signal:c.signal,cache:"no-store"})
@@ -62,16 +61,15 @@ export function GlobalLearningMap() {
     }
     return items;
   },[data,session,query]);
-  const shown=all?relevant:relevant.slice(0,INITIAL_LIMIT);
-  const ids=new Set(shown.map(c=>c.id));
+  const shown=useMemo(()=>all?relevant:relevant.slice(0,INITIAL_LIMIT),[relevant,all]);
+  const ids=useMemo(()=>new Set(shown.map(c=>c.id)),[shown]);
   const edges=useMemo(()=>data.dependencies.filter(e=>ids.has(e.from)&&ids.has(e.to))
-    .map(e=>({from:e.from,to:e.to})),[data,shown]);
+    .map(e=>({from:e.from,to:e.to})),[data,ids]);
   const nodes=useMemo(()=>shown.map(c=>({id:c.id,title:c.title})),[shown]);
   const layout=useMemo(()=>blockLayout(nodes,edges),[nodes,edges]);
   const box=useMemo(()=>({w:layout.width+2*PAD,h:layout.height+2*PAD}),[layout]);
   const floor=useMemo(()=>fitZoomFor(box,size),[box,size]);
   useEffect(()=>{
-    userAdjusted.current=false;
     if(size.w>0&&size.h>0)setView(fitGraphView(box,size,floor));
   },[box,size,floor]);
   useEffect(()=>{
@@ -84,7 +82,6 @@ export function GlobalLearningMap() {
       const factor=Math.exp(-dy*.0015);
       setView(v=>zoomedGraphView(v,factor,floor,
         {x:event.clientX-rect.left,y:event.clientY-rect.top},box,size));
-      userAdjusted.current=true;
     };
     el.addEventListener("wheel",wheel,{passive:false});
     return ()=>el.removeEventListener("wheel",wheel);
