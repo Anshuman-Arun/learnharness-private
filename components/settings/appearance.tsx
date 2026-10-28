@@ -174,6 +174,7 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 		const root = document.documentElement;
 		root.classList.toggle("dark", mode === "dark");
 		root.dataset.theme = mode;
+		window.lh?.setTitlebarTheme?.(mode);
 		root.dataset.themeMode = resolved.mode;
 		root.dataset.accent = resolved.accent;
 		root.dataset.corners = resolved.corners;
