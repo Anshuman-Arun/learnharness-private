@@ -72,6 +72,9 @@ try {
     });
     await page.goto(base,{waitUntil:"networkidle2",timeout:60000});
     await page.waitForSelector("canvas",{timeout:30000});
+    // The original PlanDiagram SVG, not a field of circle glyphs, must be
+    // the first-frame/default home graph. The canvas remains as Atlas.
+    await page.waitForSelector('svg[aria-label="Plan diagram"]',{timeout:30000});
     await new Promise(r=>setTimeout(r,1200)); // allow graph bitmap and fonts to settle
     await page.evaluate(()=>document.fonts.ready);
     for(const theme of ["dark","light"]) {
@@ -92,6 +95,23 @@ try {
       assert.ok(result.canvasSize?.[0] > 200 && result.canvasSize?.[1]>150, `graph canvas size in ${theme}`);
       assert.ok(result.rect?.[0] > 200, "canvas CSS box");
       assert.ok(result.background && result.foreground && result.background!==result.foreground, `theme foreground contrast ${theme}`);
+      const diagram=await page.evaluate(()=>{
+        const svg=document.querySelector('svg[aria-label="Plan diagram"]');
+        const rects=[...document.querySelectorAll('svg[aria-label="Plan diagram"] [data-testid^="plan-node-"] > rect')]
+          .map(el=>el.getBoundingClientRect());
+        const overlaps=[];
+        for(let i=0;i<rects.length;i++)for(let j=i+1;j<rects.length;j++){
+          const a=rects[i],b=rects[j];
+          if(Math.min(a.right,b.right)-Math.max(a.left,b.left)>1 &&
+            Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1) overlaps.push([i,j]);
+        }
+        return {svg:!!svg,nodes:rects.length,overlaps,
+          curves:[...(svg?.querySelectorAll("path[d]")??[])].filter(p=>/[Cc]/.test(p.getAttribute("d")??"")).length};
+      });
+      assert.equal(diagram.svg,true,"home graph uses original mini DAG renderer");
+      assert.equal(diagram.nodes,6,"all six synthetic propositions rendered");
+      assert.deepEqual(diagram.overlaps,[],"original DAG box placement is collision free");
+      assert.ok(diagram.curves>0,"original DAG curved connectors visible");
       await page.screenshot({path:join(outDir,`home-${theme}-${size.width}x${size.height}.png`),fullPage:false});
       const controls = await page.evaluate(() => {
         const selectors = {
