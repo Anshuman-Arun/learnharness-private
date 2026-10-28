@@ -6,6 +6,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 import { ChatGPTBrokerCredentialStore } from "../src/agent/chatgpt-broker.ts";
+import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { piChatGPTModels } from "../src/agent/models.ts";
 
 const require = createRequire(import.meta.url);
@@ -42,6 +43,124 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+
+  it("completes a synthetic PKCE + state + nonce + signed OIDC sign-in without a paid API key", async () => {
+    await scratch(async dir => {
+      const { publicKey, privateKey } = await generateKeyPair("RS256");
+      const publicJwk = { ...(await exportJWK(publicKey)), kid: "local-test-kid", alg: "RS256", use: "sig" };
+      const oldFetch = globalThis.fetch;
+      const savedKey = process.env.OPENAI_API_KEY;
+      process.env.OPENAI_API_KEY = "sk-must-not-be-consumed-by-plan";
+      const safeStorage = encryptedBackend();
+      const handlers = new Map<string,(event?:unknown)=>Promise<unknown>>();
+      const trustedEvent = {trusted:true};
+      const mockClient = "lh-test-client";
+      let authorizationUrl:URL | undefined;
+      let callbackStatus:number | undefined;
+      let tokenRequests = 0;
+      let revokedToken:string | undefined;
+      globalThis.fetch = async (input, init) => {
+        const target = input instanceof Request ? input.url : String(input);
+        if (target.startsWith("http://127.0.0.1:")) return oldFetch(input, init);
+        if (target === "https://auth.openai.com/.well-known/openid-configuration") {
+          return Response.json({
+            issuer:"https://auth.openai.com",
+            authorization_endpoint:"https://auth.openai.com/api/accounts/authorize",
+            token_endpoint:"https://auth.openai.com/api/accounts/oauth/token",
+            jwks_uri:"https://auth.openai.com/.well-known/jwks.json",
+            revocation_endpoint:"https://auth.openai.com/api/accounts/oauth/revoke",
+          });
+        }
+        if (target === "https://auth.openai.com/.well-known/jwks.json") {
+          return Response.json({ keys:[publicJwk] });
+        }
+        if (target === "https://auth.openai.com/api/accounts/oauth/token") {
+          tokenRequests++;
+          assert.ok(authorizationUrl);
+          const body = init?.body as URLSearchParams;
+          assert.equal(body.get("client_id"),mockClient);
+          assert.equal(body.get("grant_type"),"authorization_code");
+          assert.equal(body.get("code"),"synthetic-code");
+          assert.equal(body.get("redirect_uri"),authorizationUrl!.searchParams.get("redirect_uri"));
+          assert.equal(
+            crypto.createHash("sha256").update(body.get("code_verifier")!).digest("base64url"),
+            authorizationUrl!.searchParams.get("code_challenge")
+          );
+          const idToken = await new SignJWT({nonce: authorizationUrl!.searchParams.get("nonce")})
+            .setProtectedHeader({alg:"RS256",kid:"local-test-kid"})
+            .setIssuer("https://auth.openai.com")
+            .setAudience(mockClient)
+            .setSubject("synthetic-account")
+            .setIssuedAt()
+            .setExpirationTime("10m")
+            .sign(privateKey);
+          return Response.json({
+            access_token:"synthetic-oauth-access",
+            refresh_token:"synthetic-refresh",
+            token_type:"bearer",
+            expires_in:3600,
+            scope:"openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
+            id_token:idToken,
+          });
+        }
+        if (target === "https://auth.openai.com/api/accounts/oauth/revoke") {
+          revokedToken = (init?.body as URLSearchParams).get("token") ?? undefined;
+          return new Response(null,{status:200});
+        }
+        throw new Error("Unexpected OAuth request: "+target);
+      };
+      const runtime = await native.createChatGPTOAuthRuntime({
+        userDataDir:dir,safeStorage,
+        shell:{
+          openExternal:async (url:string) => {
+            authorizationUrl = new URL(url);
+            assert.equal(authorizationUrl.origin,"https://auth.openai.com");
+            assert.equal(authorizationUrl.searchParams.get("code_challenge_method"),"S256");
+            const callback = new URL(authorizationUrl.searchParams.get("redirect_uri")!);
+            callback.searchParams.set("state","wrong-state");
+            callback.searchParams.set("code","synthetic-code");
+            callback.searchParams.set("client_id",mockClient);
+            assert.equal((await oldFetch(callback)).status,400);
+            callback.searchParams.set("state",authorizationUrl.searchParams.get("state")!);
+            callbackStatus = (await oldFetch(callback)).status;
+          },
+        },
+        ipcMain:{handle:(channel:string,fn:(event?:unknown)=>Promise<unknown>)=>{handlers.set(channel,fn);}},
+        authorizeIpc:(event:unknown)=>event===trustedEvent,
+        log:()=>undefined,
+      });
+      try {
+        const before = await handlers.get("lh:chatgpt:status")!(trustedEvent) as {connected:boolean};
+        assert.equal(before.connected,false);
+        await handlers.get("lh:chatgpt:sign-in")!(trustedEvent);
+        let status:{connected:boolean;phase?:string;error?:string} = {connected:false};
+        for (let i=0; i<100; i++) {
+          status = await handlers.get("lh:chatgpt:status")!(trustedEvent) as typeof status;
+          if (status.connected || status.phase === "error") break;
+          await new Promise(resolve=>setTimeout(resolve,25));
+        }
+        assert.equal(callbackStatus,200);
+        assert.equal(status.error,undefined);
+        assert.equal(status.connected,true);
+        assert.equal(tokenRequests,1);
+        const headers={authorization:`Bearer ${runtime.brokerSecret}`};
+        const credential=await oldFetch(runtime.brokerUrl+"/v1/token",{method:"POST",headers});
+        assert.equal((await credential.json()).accessToken,"synthetic-oauth-access");
+        const stored=await fs.readFile(path.join(dir,"chatgpt-oauth.enc.json"),"utf8");
+        assert.doesNotMatch(stored,/synthetic-oauth-access|synthetic-refresh|sk-must/);
+        const removed=await handlers.get("lh:chatgpt:disconnect")!(trustedEvent) as {connected:boolean};
+        assert.equal(removed.connected,false);
+        assert.equal(revokedToken,"synthetic-refresh");
+      } finally {
+        runtime.close();
+        globalThis.fetch=oldFetch;
+        if (savedKey===undefined) delete process.env.OPENAI_API_KEY;
+        else process.env.OPENAI_API_KEY=savedKey;
+      }
+    });
+  });
+
+
   it("retries one transient account-catalog failure but never caches a failing result", async()=>{
     await scratch(async dir=>{
       const safeStorage=encryptedBackend();
