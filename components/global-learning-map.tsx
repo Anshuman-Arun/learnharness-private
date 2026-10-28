@@ -23,6 +23,19 @@ export function GlobalLearningMap() {
   const [session,setSession]=useState("");
   const [all,setAll]=useState(false);
   const [selected,setSelected]=useState<string|null>(null);
+  // This page uses a route-scoped mobile drawer rather than squeezing a
+  // 288px inline sidebar into a 390px viewport. Desktop shell is untouched.
+  const [mobileMenuOpen,setMobileMenuOpen]=useState(false);
+  useEffect(()=>{
+    document.documentElement.classList.add("lh-global-map-page");
+    return ()=>{
+      document.documentElement.classList.remove("lh-global-map-page","lh-global-map-menu-open");
+    };
+  },[]);
+  useEffect(()=>{
+    document.documentElement.classList.toggle("lh-global-map-menu-open",mobileMenuOpen);
+    return ()=>document.documentElement.classList.remove("lh-global-map-menu-open");
+  },[mobileMenuOpen]);
   const viewportRef=useRef<HTMLDivElement>(null);
   const [size,setSize]=useState({w:0,h:0});
   const [view,setView]=useState<Viewport>({x:0,y:0,zoom:1});
@@ -109,10 +122,18 @@ export function GlobalLearningMap() {
     dragRef.current=null;setDragging(false);
     if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);
   };
-  return <main className="flex h-[calc(100dvh-24px)] min-h-[460px] flex-col gap-3 px-4 pb-4 pt-3 text-foreground">
+  return <main data-global-learning-page className="flex h-[calc(100dvh-24px)] min-h-[460px] flex-col gap-3 px-4 pb-4 pt-3 text-foreground">
+    {mobileMenuOpen&&<button type="button"
+      aria-label="Close navigation menu" onClick={()=>setMobileMenuOpen(false)}
+      className="fixed inset-0 z-[70] bg-black/45 sm:hidden" />}
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <div className="flex items-center gap-3"><Link href="/" className="text-sm text-muted-foreground underline underline-offset-4">← Home</Link>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={()=>setMobileMenuOpen(v=>!v)}
+            aria-label="Open navigation menu" aria-expanded={mobileMenuOpen}
+            data-testid="global-map-mobile-menu"
+            className="rounded-md border border-border px-2 py-1 text-xs sm:hidden">Menu</button>
+          <Link href="/" className="text-sm text-muted-foreground underline underline-offset-4">← Home</Link>
           <h1 className="text-xl font-semibold tracking-tight">Global learning map</h1></div>
         <p className="mt-1 text-xs text-muted-foreground">The same diagram used by your lesson plans, now combining their objectives and prerequisites across sessions.</p>
       </div>
