@@ -30,7 +30,24 @@
 - Typography: Newsreader/serif display, IBM Plex Sans/Source Sans UI, existing readable prose and mono fallback.
 - Other: restrained shadows, 2–8px corner scale, thin rules, no dashboard-like over-decoration.
 
-This port initially uses the reference's **dark** palette. LearnHarness's persistent appearance contract is currently dark-only, so shipping the cream theme without a genuine appearance-mode implementation would produce an inconsistent and deceptive settings experience. A light-mode integration is a separate feature, not part of this presentation-safe port. A custom saved background will still override the base palette, as before. Exact font appearance depends on installed font availability; no new external font files or remote stylesheet dependencies were introduced.
+## Light mode and the complete appearance-settings audit
+The approved source has **both themes**, not dark-only:
+- **Light/cream**: background `#f2eddf`, panel `#fbf8ef`, raised `#f5f0e4`, ink `#1a1815`, vermilion primary `#a74733`, edge `#cec5b3`.
+- **Dark**: background `#2a2825`, panel `#34312d`, primary `#d47760`, ink `#f3eee5`.
+- **System / Light / Dark**: the existing LearnHarness mode schema and persisted settings provider now control the Tailwind dark class and follow OS preference when selected. Default remains Dark for existing installations.
+- **Accent**: seven source options (Ink, Indigo, Teal, Amber, Vermilion, Violet, Rose) with a persisted intensity (8–28).
+- **Zoom**: 25–500% (browser/Electron Chromium CSS zoom, default 100%), plus reset.
+- **Corners**: Square / Soft / Round / Generous; **borders**: Quiet / Regular / Strong / Contrast.
+- All new fields live in the existing versioned LearnHarness appearance delta record. No second storage scheme, provider, or migration is introduced.
+
+### Existing LearnHarness settings protected
+- **Appearance**: custom background hex, installed reading-font picker, reading font size, serif session-title toggle, Markdown heading weight, bold color, italic color.
+- **Graph**: extraction, graph rendering, extraction chunk budget; separate render controls remain owned by the graph.
+- **Agent/models**: model tiers, tools and prompt controls, search engine, compaction.
+- **General / keys / keyboard**: updater preference, credentials, keyboard shortcuts.
+- **Interface behavior**: sidebar collapse, session history, search/filter, dictation and chat controls are unchanged.
+
+The app's default stylesheet preserves the new editorial palettes. Explicitly saved background colors still override them using mode-aware surface derivation. Existing custom font and Markdown overrides remain live. Exact typeface appearance depends on local font availability; no CDN dependencies or new font files were introduced. Screenshot-level verification is still necessary.
 
 ## Functional preservation
 - The original sidebar search/filter, session creation, keyboard shortcuts and settings actions remain.
@@ -42,5 +59,5 @@ This port initially uses the reference's **dark** palette. LearnHarness's persis
 - Automated: run `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build`.
 - Manual visual: Home graph ON/OFF, new chat, teach/practice, active chat + long transcript + math, sidebar expanded/collapsed, session search/filter, settings, graph context menus, text overflow, keyboard focus and dictation.
 - Screen/zoom matrix: 1366x768, 1920x1080, 2560x1440, ultrawide; Windows at 100%/125%.
-- Verify existing user background/font settings, desktop titlebar dragging, and light/dark *claims* (still dark-only).
+- Verify saved user background/font settings, accent changes, light/dark/system switching, 25–500% zoom, desktop titlebar dragging, foreground contrast and graph readability in both palettes.
 - Compare actual Electron screenshots with PR #125. Passing static tests or checking the diff does not constitute screenshot-level verification.
