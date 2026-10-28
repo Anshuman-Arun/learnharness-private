@@ -4,7 +4,6 @@ import { invalidInputResult, questionResult, serverExecute } from "./tool-execut
 import {
 	askInputSchema,
 	askOptionProblems,
-	explainInputBase,
 	probeExplainInputSchema,
 	explainInputObject,
 	explainInputProblems,
