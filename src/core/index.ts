@@ -84,3 +84,5 @@ export * from "./session-markdown.ts";
 export * from "./estimation";
 export * from "./probability-lab";
 export * from "./stopping";
+export * from "./quant-questions";
+export * from "./quant-exam";
