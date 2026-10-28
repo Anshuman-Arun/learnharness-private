@@ -90,7 +90,7 @@ export function StatsBar({
 	// Honest cost: show dollars only when at least one turn priced;
 	// otherwise "—" (never a fake $0.0000).
 	const pricedCount = apiTurns.length - unpriced;
-	const costLabel = pricedCount > 0 ? formatUsd(cost) : planCount > 0 ? "Plan" : "—";
+	const costLabel = pricedCount > 0 ? formatUsd(cost) : "—";
 	const lastModel = turns.at(-1)?.model;
 	const chatGPTConnected = catalog?.providers.some((provider) =>
 		provider.id === "openai-chatgpt" && provider.keyPresent,
