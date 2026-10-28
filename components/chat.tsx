@@ -57,6 +57,7 @@ import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
+import { TeachingModeControl } from "@/components/teaching-mode-control";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, TurnUsage } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
@@ -202,9 +203,11 @@ export function Chat({
 	initiallyInFlight,
 	initiallyCompacting = false,
 	initialConfigured = false,
+	initialTeachingMode,
 	kind = "teach",
 }: {
 	chatId: string;
+	initialTeachingMode?: ChatSettings["teachingMode"];
 	title: string;
 	initialMessages: LhMessage[];
 	/** The session kind (practice sessions, owner 2026-10-04): practice
@@ -229,6 +232,7 @@ export function Chat({
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
 	const reattachSettledRef = useRef<() => void>(() => {});
+	const [teachingMode, setTeachingMode] = useState(initialTeachingMode);
 
 	// THE SESSION HOOK (Wave D, owner-approved 2026-09-26): the app-owned
 	// replacement for useChat + the AI-SDK transport. The record is native
@@ -717,7 +721,8 @@ export function Chat({
 	const syncFromServer = useCallback(async () => {
 		const res = await fetch(`/api/chats/${chatId}`);
 		if (!res.ok) return;
-		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[] };
+		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[]; settings?: ChatSettings };
+		setTeachingMode(record.settings?.teachingMode);
 		if (Array.isArray(record.turns)) setTurns(record.turns);
 		if (!Array.isArray(record.messages)) return;
 		setMessages(record.messages);
@@ -755,7 +760,8 @@ export function Chat({
 		try {
 			const res = await fetch(`/api/chats/${chatId}`);
 			if (!res.ok) return;
-			const record = (await res.json()) as { messages?: LhMessage[] };
+			const record = (await res.json()) as { messages?: LhMessage[]; settings?: ChatSettings };
+			setTeachingMode(record.settings?.teachingMode);
 			if (!Array.isArray(record.messages)) return;
 			adoptRecord(record.messages);
 		} catch {
@@ -1269,6 +1275,7 @@ export function Chat({
 					{/* The plan chip (owner, plan-placement round): session-level
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
+					{kind !== "practice" && <TeachingModeControl chatId={chatId} mode={teachingMode} onChange={setTeachingMode} />}
 					{planTree && (
 						<Hint label="Open the full plan" side="bottom">
 <button
@@ -1506,7 +1513,7 @@ export function Chat({
 														// transcript; answered ones render as graded records.
 														if (part.state === "output-available") {
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} />
+																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} teachingMode={teachingMode} />
 															);
 														}
 														return null;

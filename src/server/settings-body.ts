@@ -38,8 +38,15 @@ export function parseSettingsBody(body: unknown): SettingsBodyResult<ChatSetting
 	const raw = body as {
 		model?: { provider?: unknown; id?: unknown };
 		thinkingLevel?: unknown;
+		teachingMode?: unknown;
 	};
 	const settings: ChatSettings = {};
+	if (raw.teachingMode !== undefined) {
+		if (raw.teachingMode !== "guided" && raw.teachingMode !== "explain") {
+			return { ok: false, error: "teachingMode must be guided or explain" };
+		}
+		settings.teachingMode = raw.teachingMode;
+	}
 	if (raw.model !== undefined) {
 		if (
 			typeof raw.model !== "object" ||

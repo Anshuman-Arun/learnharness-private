@@ -340,6 +340,7 @@ export async function handleChatInput(
 	// sub-agent JOB tools (research/demo/visual/pdf; adjudicated with the
 	// user: quiz/ask/fs/plan/probe_done are always-on).
 	const agentOpts: AgentBuildOptions = {
+		teachingMode: record.settings?.teachingMode,
 		engine,
 		messages: asAgentMessages(merged),
 		onUsage: collectUsage,
