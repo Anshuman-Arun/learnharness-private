@@ -51,15 +51,20 @@ function ChatGPTPlanRow() {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [copied, setCopied] = useState(false);
 	const wasConnected = useRef(false);
+	const requestEpoch = useRef(0);
+	const busyRef = useRef(false);
 
 	async function reload() {
+		const epoch = ++requestEpoch.current;
 		if (!window.lh?.getChatGPTStatus) {
 			setStatus({ available: false, connected: false });
 			return;
 		}
 		try {
-			setStatus(await window.lh.getChatGPTStatus());
+			const next = await window.lh.getChatGPTStatus();
+			if (epoch === requestEpoch.current) setStatus(next);
 		} catch (cause) {
+			if (epoch !== requestEpoch.current) return;
 			setStatus({ available: true, connected: false });
 			setError(cause instanceof Error ? cause.message : "Could not read ChatGPT connection status.");
 		}
@@ -83,13 +88,16 @@ function ChatGPTPlanRow() {
 
 	async function connect() {
 		if (!window.lh?.chatGPTSignIn) return;
+		const epoch = ++requestEpoch.current;
 		setDialogOpen(true);
 		setCopied(false);
 		setError(null);
 		setStatus({ available: true, connected: false, connecting: true, phase: "preparing" });
 		try {
-			setStatus(await window.lh.chatGPTSignIn());
+			const next = await window.lh.chatGPTSignIn();
+			if (epoch === requestEpoch.current) setStatus(next);
 		} catch (cause) {
+			if (epoch !== requestEpoch.current) return;
 			setStatus({
 				available: true,
 				connected: false,
@@ -101,10 +109,17 @@ function ChatGPTPlanRow() {
 	}
 
 	function closeDialog() {
+		const epoch = ++requestEpoch.current;
 		setDialogOpen(false);
 		setCopied(false);
 		if (status?.connecting) {
-			void window.lh?.chatGPTCancelSignIn?.().then(setStatus).catch(() => void reload());
+			void window.lh?.chatGPTCancelSignIn?.()
+				.then((next) => {
+					if (epoch === requestEpoch.current) setStatus(next);
+				})
+				.catch(() => {
+					if (epoch === requestEpoch.current) void reload();
+				});
 		}
 	}
 
@@ -119,24 +134,36 @@ function ChatGPTPlanRow() {
 	}
 
 	async function openBrowser() {
+		const epoch = ++requestEpoch.current;
 		try {
-			if (window.lh?.chatGPTOpenAuthorization) setStatus(await window.lh.chatGPTOpenAuthorization());
+			if (window.lh?.chatGPTOpenAuthorization) {
+				const next = await window.lh.chatGPTOpenAuthorization();
+				if (epoch === requestEpoch.current) setStatus(next);
+			}
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : "Could not open the authorization link.");
+			if (epoch === requestEpoch.current) setError(cause instanceof Error ? cause.message : "Could not open the authorization link.");
 		}
 	}
 
 	async function change(action: (() => Promise<ChatGPTStatus>) | undefined) {
-		if (!action || busy) return;
+		if (!action || busyRef.current) return;
+		busyRef.current = true;
+		const epoch = ++requestEpoch.current;
 		setBusy(true);
 		setError(null);
 		try {
-			setStatus(await action());
-			notifySettingsSaved("keys");
+			const next = await action();
+			if (epoch === requestEpoch.current) {
+				setStatus(next);
+				notifySettingsSaved("keys");
+			}
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : "ChatGPT connection failed.");
-			await reload();
+			if (epoch === requestEpoch.current) {
+				setError(cause instanceof Error ? cause.message : "ChatGPT connection failed.");
+				await reload();
+			}
 		} finally {
+			busyRef.current = false;
 			setBusy(false);
 		}
 	}
@@ -149,11 +176,11 @@ function ChatGPTPlanRow() {
 				<span className="flex items-center gap-2">
 					<span data-testid="chatgpt-plan-status" className="font-mono text-[11px] text-muted-foreground">
 						{status === null
-							? "checkingâ€¦"
+							? "checking…"
 							: connected
 								? "connected"
 								: status.connecting
-									? "connectingâ€¦"
+									? "connecting…"
 								: status.available
 									? "not connected"
 									: "desktop app only"}
@@ -166,7 +193,7 @@ function ChatGPTPlanRow() {
 							onClick={() => connected ? void change(window.lh?.chatGPTDisconnect) : status?.connecting ? setDialogOpen(true) : void connect()}
 							className="text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40"
 						>
-							{busy ? "Workingâ€¦" : connected ? "Disconnect" : status?.connecting ? "View progress" : "Connect"}
+							{busy ? "Working…" : connected ? "Disconnect" : status?.connecting ? "View progress" : "Connect"}
 						</button>
 					)}
 				</span>
