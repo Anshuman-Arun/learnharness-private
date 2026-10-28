@@ -61,6 +61,28 @@ function validCredential(c) {
 		REQUIRED_SCOPES.every((scope) => c.scopes.includes(scope)));
 }
 
+/** Expired/invalid grants are not active credentials, but their issued
+ * public OAuth registration and verified identity should survive. Otherwise
+ * the next sign-in creates a redundant dynamic_agent_client registration. */
+function reconnectMetadata(c) {
+	return c && (c.type === "reconnect" || c.type === "oauth") &&
+		typeof c.clientId === "string" &&
+		/^[a-zA-Z0-9_-]{1,200}$/.test(c.clientId) &&
+		c.clientId !== DYNAMIC_CLIENT_ID &&
+		typeof c.subject === "string" && c.subject.length > 0 &&
+		(c.idToken === undefined || typeof c.idToken === "string") &&
+		(c.backgroundUseAllowed === undefined || typeof c.backgroundUseAllowed === "boolean")
+		? {
+			type: "reconnect",
+			clientId: c.clientId,
+			subject: c.subject,
+			...(c.identity ? { identity: c.identity } : {}),
+			...(c.idToken ? { idToken: c.idToken } : {}),
+			backgroundUseAllowed: c.backgroundUseAllowed === true,
+		}
+		: undefined;
+}
+
 function createEncryptedCredentialStore(filePath, safeStorage) {
 	const chains = new Map();
 
@@ -504,8 +526,17 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 			});
 		} catch (error) {
 			if (error?.oauthCode === "invalid_grant" && attemptedRefresh) {
-				const removed = await credentials.delete(PROVIDER_ID, { expectedRefresh: attemptedRefresh });
-				if (removed) {
+				let invalidated = false;
+				await credentials.modify(PROVIDER_ID, async (current) => {
+					// Another refresh/sign-in may have replaced this grant.
+					// In that case, leave the newer account alone.
+					if (current?.refresh !== attemptedRefresh) return undefined;
+					const metadata = reconnectMetadata(current);
+					if (!metadata) return undefined;
+					invalidated = true;
+					return metadata;
+				});
+				if (invalidated) {
 					invalidateCatalog();
 					loginState = { connecting: false, phase: "error",
 						error: "Your ChatGPT authorization expired. Reconnect to continue." };
@@ -626,7 +657,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 		pendingLogin = (async () => {
 			const deviceId = await loadOrCreateDeviceId(deviceFile);
 			const stored = await credentials.read(PROVIDER_ID);
-			const previous = validCredential(stored) ? stored : undefined;
+			const previous = validCredential(stored) ? stored : reconnectMetadata(stored);
 			const credential = await authorize(
 				previous,
 				deviceId,

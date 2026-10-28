@@ -54,3 +54,13 @@ and custom tools into a developer `additional_tools` input item. It strips
 unsupported sampling/state fields and forces `store:false, stream:true`.
 Unsupported hosted tools and malformed histories fail before any request.
 Normal OpenAI API-key provider calls are unchanged.
+
+## Invalid-grant refresh recovery
+On a confirmed OAuth `invalid_grant`, the app clears the active access
+and refresh tokens and fails closed for requests. It retains only encrypted,
+validated non-token registration metadata (issued `clientId`, verified
+account identity, and optional ID-token hint) so the next authorization uses
+the existing issued client ID. Explicit Disconnect deletes even that dormant
+registration. A competing later token rotation cannot be erased by a stale
+invalid-grant error. This is required for the intended reauthorization
+flow and prevents accidental duplicate agent registration.

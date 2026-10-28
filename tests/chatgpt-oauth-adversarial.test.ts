@@ -399,12 +399,19 @@ describe("adversarial ChatGPT private-provider checks", () => {
         const headers={authorization:`Bearer ${runtime.brokerSecret}`};
         const denied=await fetch(runtime.brokerUrl+"/v1/token",{method:"POST",headers});
         assert.equal(denied.status,500);
-        assert.equal(await store.read("openai"),undefined);
+        const dormant=await store.read("openai");
+        assert.equal(dormant?.type,"reconnect","invalid grants keep safe registration metadata");
+        assert.equal(dormant?.clientId,"client");
+        assert.equal(dormant?.subject,"test-user");
+        assert.equal(dormant?.access,undefined);
+        assert.equal(dormant?.refresh,undefined);
         const status=await (await fetch(runtime.brokerUrl+"/v1/status",{headers})).json();
         assert.equal(status.connected,false);
         assert.match(status.error,/Reconnect/);
         const noToken=await fetch(runtime.brokerUrl+"/v1/token",{method:"POST",headers});
         assert.equal(noToken.status,401);
+        const persisted=await fs.readFile(path.join(dir,"chatgpt-oauth.enc.json"),"utf8");
+        assert.doesNotMatch(persisted,/test-user|client|expired|revoked/,"registration metadata remains encrypted");
       } finally {runtime.close();globalThis.fetch=oldFetch;}
     });
   });
