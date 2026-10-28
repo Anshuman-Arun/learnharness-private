@@ -41,6 +41,84 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+  it("filters available ChatGPT models to the signed-in account's visible roster, never leaking bearer tokens", async () => {
+    await scratch(async dir => {
+      const oldFetch = globalThis.fetch;
+      const safeStorage = encryptedBackend();
+      const file = path.join(dir, "chatgpt-oauth.enc.json");
+      const store = native.createEncryptedCredentialStore(file, safeStorage);
+      await store.modify("openai", async () => ({
+        type: "oauth", access: "test-oauth-bearer", refresh: "refresh",
+        clientId: "client", expires: Date.now() + 3600000,
+      }));
+      let networkCalls = 0;
+      globalThis.fetch = async (input, init) => {
+        const url = String(input);
+        if (url.startsWith("http://127.0.0.1:")) return oldFetch(input, init);
+        if (url === "https://api.openai.com/v1/models") {
+          networkCalls++;
+          assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-oauth-bearer");
+          assert.equal(process.env.OPENAI_API_KEY === "test-oauth-bearer", false);
+          return Response.json({
+            models: [
+              {slug:"gpt-4o",display_name:"Account GPT 4o",visibility:"list"},
+              {slug:"gpt-4o",display_name:"duplicate",visibility:"list"},
+              {slug:"secret-hidden",display_name:"Hidden",visibility:"hidden"},
+              {slug:"../bad",display_name:"Invalid",visibility:"list"},
+              {slug:"gpt-6.1-sol",display_name:"Supported",visibility:"list"},
+            ],
+          });
+        }
+        throw new Error("Unexpected token request: " + url);
+      };
+      const runtime = await native.createChatGPTOAuthRuntime({
+        userDataDir: dir, safeStorage,
+        shell:{openExternal:async()=>undefined},
+        ipcMain:{handle:()=>undefined},
+        authorizeIpc:()=>true, log:()=>undefined,
+      });
+      try {
+        const headers = { authorization: `Bearer ${runtime.brokerSecret}` };
+        const one = await fetch(runtime.brokerUrl + "/v1/models", {headers});
+        assert.equal(one.status, 200);
+        const data = await one.json() as {models: {id:string;name:string}[]};
+        assert.deepEqual(data.models, [
+          {id:"gpt-4o",name:"Account GPT 4o"},
+          {id:"gpt-6.1-sol",name:"Supported"},
+        ]);
+        assert.doesNotMatch(JSON.stringify(data), /test-oauth-bearer|secret-hidden|refresh/);
+        const two = await fetch(runtime.brokerUrl + "/v1/models", {headers});
+        assert.equal(two.status, 200);
+        assert.equal(networkCalls, 1, "repeated model requests should hit one-minute authenticated cache");
+        assert.equal((await fetch(runtime.brokerUrl + "/v1/models")).status,404);
+      } finally { runtime.close(); globalThis.fetch = oldFetch; }
+    });
+  });
+
+  it("fails account model discovery closed rather than guessing the static provider catalog", async () => {
+    await scratch(async dir => {
+      const oldFetch = globalThis.fetch;
+      const safeStorage = encryptedBackend();
+      const store = native.createEncryptedCredentialStore(path.join(dir, "chatgpt-oauth.enc.json"), safeStorage);
+      await store.modify("openai", async()=>({type:"oauth", access:"synthetic",refresh:"refresh",clientId:"client",expires:Date.now()+3600000}));
+      globalThis.fetch = async (input,init) => {
+        const url = String(input);
+        if(url.startsWith("http://127.0.0.1:"))return oldFetch(input,init);
+        return Response.json({models:"not-an-array"});
+      };
+      const runtime = await native.createChatGPTOAuthRuntime({
+        userDataDir:dir,safeStorage,shell:{openExternal:async()=>undefined},
+        ipcMain:{handle:()=>undefined},authorizeIpc:()=>true,log:()=>undefined,
+      });
+      try {
+        const response = await fetch(runtime.brokerUrl + "/v1/models", {headers:{authorization:`Bearer ${runtime.brokerSecret}`}});
+        assert.equal(response.status,503);
+        assert.deepEqual(await response.json(),{error:"chatgpt_models_unavailable"});
+      } finally {runtime.close();globalThis.fetch=oldFetch;}
+    });
+  });
+
+
   it("refuses insecure Linux-style basic_text key storage even when encryption reports available", async () => {
     const { storageSecure } = native as unknown as {storageSecure: (backend: RecordValue) => boolean};
     assert.equal(storageSecure({
