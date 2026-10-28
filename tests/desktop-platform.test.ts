@@ -215,7 +215,7 @@ describe("desktop release workflow", () => {
 		}
 	});
 
-	it("pairs Icon Composer packaging with macOS 26 and Xcode selection, retaining macOS 15 CI", () => {
+	it("pairs Icon Composer release packaging with macOS 26 and Xcode selection", () => {
 		const mac = packaging.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
 		assert.equal(mac?.os, "macos-26", "actool's .icon compiler needs macOS 26 host frameworks, not just newer Xcode");
 		assert.equal(mac?.builder_args, "--mac --arm64");
@@ -229,8 +229,13 @@ describe("desktop release workflow", () => {
 		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
 
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
-		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
-		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
+		assert.deepEqual(ci.jobs.standalone?.strategy?.matrix.include, [{ os: "windows-2025", platform: "windows-x64" }]);
+		assert.equal(ci.jobs.quality["runs-on"], "windows-2025");
+		assert.equal(ci.jobs.quality.defaults.run.shell, "bash");
+		assert.equal(ci.jobs.quality.env.npm_config_script_shell, String.raw`C:\Program Files\Git\bin\bash.exe`);
+		for (const command of ["npm run typecheck", "npm test", "npm run lint"]) {
+			assert.ok(ci.jobs.quality.steps.some(step => step.run === command), `${command} remains a required quality gate`);
+		}
 	});
 
 	it("creates exactly one unpublished draft when none matches", async () => {
