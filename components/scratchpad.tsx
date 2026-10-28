@@ -76,7 +76,7 @@ export function ScratchpadView({ sessionId, questionId }: { sessionId?: string; 
 		return () => { window.removeEventListener("beforeunload", preserve); preserve(); };
 	}, [scope]);
 	function choose(next: Scratchpad) {
-		if (!keepDraft()) return;
+		if (dirty && !keepDraft()) return;
 		const previous = current.current;
 		if (previous && dirty) setPads((saved) => [previous, ...saved.filter((item) => item.id !== previous.id)]);
 		let recovered: Scratchpad | undefined;
