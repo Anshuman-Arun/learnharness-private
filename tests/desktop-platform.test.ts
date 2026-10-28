@@ -155,6 +155,7 @@ describe("desktop release workflow", () => {
 		concurrency: { group: string; "cancel-in-progress": boolean };
 		jobs: Record<string, {
 			needs?: string | string[]; steps: Step[]; "runs-on"?: string;
+			defaults?: { run: { shell: string } }; env?: Record<string, string>;
 			strategy?: { matrix: { include: { os: string; platform: string; builder_args?: string }[] } };
 		}>;
 	};
@@ -227,14 +228,17 @@ describe("desktop release workflow", () => {
 		assert.equal(xcode?.with?.["xcode-version"], "latest-stable");
 		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
 		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
-
+	});
+	it("keeps Windows-only PR CI with full quality gates and standalone checks", () => {
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
 		assert.deepEqual(ci.jobs.standalone?.strategy?.matrix.include, [{ os: "windows-2025", platform: "windows-x64" }]);
-		assert.equal(ci.jobs.quality["runs-on"], "windows-2025");
-		assert.equal(ci.jobs.quality.defaults.run.shell, "bash");
-		assert.equal(ci.jobs.quality.env.npm_config_script_shell, String.raw`C:\Program Files\Git\bin\bash.exe`);
+		const quality = ci.jobs.quality;
+		assert.ok(quality);
+		assert.equal(quality["runs-on"], "windows-2025");
+		assert.equal(quality.defaults?.run.shell, "bash");
+		assert.equal(quality.env?.npm_config_script_shell, String.raw`C:\Program Files\Git\bin\bash.exe`);
 		for (const command of ["npm run typecheck", "npm test", "npm run lint"]) {
-			assert.ok(ci.jobs.quality.steps.some(step => step.run === command), `${command} remains a required quality gate`);
+			assert.ok(quality.steps.some(step => step.run === command), `${command} remains a required quality gate`);
 		}
 	});
 
