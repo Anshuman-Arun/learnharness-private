@@ -3,6 +3,7 @@ import { TrainingShell } from "@/components/training-shell";
 
 export default function TrainingPage() {
 	return <TrainingShell title="Quant training" description="Practice skills, inspect your reasoning, and take the gaps back to your learning sessions.">
+		<Link href="/training/sprints" className="block rounded-xl border p-5 hover:bg-accent"><h2 className="font-semibold">4.5-hour quant sprints</h2><p>Twelve deep, bounded modules with derivations, coding, progress and unseen exit checks.</p></Link>
 		<Link href="/training/retrieval" className="block rounded-xl border p-5 hover:bg-accent"><h2 className="font-semibold">Spaced retrieval</h2><p>A due queue with fresh recall, explicit difficulty, snoozes and explainable intervals.</p></Link>
 		<Link href="/training/mistakes" className="block rounded-xl border p-5 hover:bg-accent"><h2 className="font-semibold">Mistake notebook</h2><p>Classify errors, preserve reasoning and demonstrate corrections on targeted retries.</p></Link>
 		<Link href="/training/exam" className="block rounded-xl border p-5 hover:bg-accent"><h2 className="font-semibold">Timed quant OA</h2><p>Sectioned exams with flags, reload recovery, a firm deadline and delayed debrief.</p></Link>
