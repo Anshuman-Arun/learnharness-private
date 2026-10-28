@@ -1,0 +1,233 @@
+/*
+ * Editorial v10 design language adapted from Interview-App PR #125.
+ * All behavior stays with existing LearnHarness React components.
+ * Source: Interview-App/apps/web/src/styles/theme.css, editorial-v10.css,
+ * ProductFrame.css (bf7ef65ae44f13b34063b5c409eb658c04cd1447).
+ */
+.dark[data-lh-editorial="v10"] {
+  color-scheme: dark;
+  --lh-font-ui: "IBM Plex Sans", var(--font-sans3), "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --lh-font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --background: #2a2825;
+  --foreground: #f3eee5;
+  --card: #34312d;
+  --card-foreground: #f3eee5;
+  --popover: #34312d;
+  --popover-foreground: #f3eee5;
+  --primary: #d47760;
+  --primary-foreground: #211b18;
+  --secondary: #3a3732;
+  --secondary-foreground: #cbc3b8;
+  --muted: #3a3732;
+  --muted-foreground: #a9a095;
+  --accent: #403c37;
+  --accent-foreground: #f3eee5;
+  --destructive: #d37875;
+  --border: #585148;
+  --input: #585148;
+  --ring: #d47760;
+  --lh-editorial-border-subtle: rgba(243, 238, 229, .12);
+  --lh-editorial-surface-hover: #403c37;
+  --lh-ink-strong: var(--foreground);
+  --lh-ink-italic: var(--foreground);
+  --lh-heading-weight: 650;
+}
+[data-lh-editorial="v10"] body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--lh-font-ui);
+  letter-spacing: -.006em;
+}
+[data-lh-editorial="v10"] .font-title {
+  font-family: var(--font-title);
+  font-weight: 600;
+  letter-spacing: -.027em;
+}
+[data-lh-editorial="v10"] .lh-prose {letter-spacing: 0;}
+/* The old no-outline reset is retained for pointers, but keyboard users
+   get a visible warm-rust focus affordance in the new skin. */
+[data-lh-editorial="v10"] :is(button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+[data-lh-editorial="v10"] :is(button, input, textarea, select):disabled {cursor: not-allowed;}
+[data-lh-editorial="v10"] button[data-slot="button"] {border-radius: 3px;}
+[data-lh-editorial="v10"] :is([role="dialog"], [role="menu"], [data-lh-menu]) {
+  border-color: var(--border);
+  border-radius: 5px;
+  background-color: var(--card);
+  box-shadow: 0 20px 48px rgb(0 0 0 / .28);
+}
+[data-lh-editorial="v10"] .lh-editorial-rail {
+  background: color-mix(in srgb, var(--card) 74%, var(--background));
+  border-color: var(--lh-editorial-border-subtle);
+}
+[data-lh-editorial="v10"] .lh-editorial-rail > .lh-drag {
+  min-height: 65px;
+  border-bottom: 1px solid var(--lh-editorial-border-subtle);
+  margin-bottom: 13px;
+}
+[data-lh-editorial="v10"] .lh-editorial-brand {
+  min-width: 0;
+  color: var(--foreground);
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+[data-lh-editorial="v10"] .lh-editorial-brand:hover {
+  border-color: var(--lh-editorial-border-subtle);
+}
+[data-lh-editorial="v10"] .lh-editorial-brand-label {
+  font-family: var(--lh-font-display);
+  font-weight: 500;
+  font-size: 19px;
+  letter-spacing: -.035em;
+  white-space: nowrap;
+}
+[data-lh-editorial="v10"] [data-testid="new-session"] {
+  min-height: 41px;
+  padding: 0 13px;
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 2px;
+  font-family: var(--lh-font-ui);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .012em;
+  text-transform: none;
+  box-shadow: 3px 3px 0 rgb(0 0 0 / .14);
+}
+[data-lh-editorial="v10"] [data-testid="new-session"]:hover {
+  background: #e28a73;
+  color: var(--primary-foreground);
+  transform: translate(-1px, -1px);
+}
+[data-lh-editorial="v10"] [data-testid="new-session-practice"] {
+  min-height: 39px;
+  padding: 0 13px;
+  border: 1px solid var(--lh-editorial-border-subtle);
+  border-radius: 2px;
+  color: var(--foreground);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  text-transform: none;
+}
+[data-lh-editorial="v10"] [data-testid="new-session-practice"]:hover {
+  background: var(--accent);
+  border-color: var(--border);
+}
+[data-lh-editorial="v10"] [data-testid="session-search"] {
+  height: 29px;
+  padding-left: 25px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--background);
+}
+[data-lh-editorial="v10"] [data-testid="session-kind-filter"],
+[data-lh-editorial="v10"] [data-testid="home-mode-switch"] {
+  border: 1px solid var(--lh-editorial-border-subtle);
+  border-radius: 2px;
+  background: var(--background);
+}
+[data-lh-editorial="v10"] [data-testid="session-kind-filter"] button,
+[data-lh-editorial="v10"] [data-testid="home-mode-switch"] button {border-radius: 2px;}
+[data-lh-editorial="v10"] [data-testid="session-row"],
+[data-lh-editorial="v10"] [data-testid="session-row-kbd"] {
+  min-height: 51px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+[data-lh-editorial="v10"] [data-testid="session-row"]:hover,
+[data-lh-editorial="v10"] [data-testid="session-row-kbd"]:hover {
+  border-color: var(--lh-editorial-border-subtle);
+  background: var(--lh-editorial-surface-hover);
+}
+[data-lh-editorial="v10"] [data-active="true"][data-testid^="session-row"] {
+  border-color: var(--border);
+  background: var(--card);
+  box-shadow: 3px 3px 0 rgb(0 0 0 / .10);
+}
+[data-lh-editorial="v10"] [data-testid="settings-entry"] {
+  width: 100%;
+  min-height: 36px;
+  border-top: 1px solid var(--lh-editorial-border-subtle);
+  border-radius: 2px;
+  text-transform: none;
+  font-size: 12px;
+  letter-spacing: .02em;
+}
+[data-lh-editorial="v10"] .lh-editorial-topbar {
+  background: color-mix(in srgb, var(--background) 90%, var(--card));
+  border-bottom: 1px solid var(--lh-editorial-border-subtle);
+}
+[data-lh-editorial="v10"] .lh-editorial-topbar .font-title {
+  font-size: clamp(22px, 2vw, 31px);
+}
+[data-lh-editorial="v10"] .lh-editorial-home-masthead {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .11em;
+  color: var(--muted-foreground);
+  user-select: none;
+}
+[data-lh-editorial="v10"] .lh-editorial-home-masthead span {
+  color: var(--primary);
+  margin: 0 8px;
+}
+[data-lh-editorial="v10"] .lh-editorial-home-composer {
+  border-radius: 5px;
+  background: var(--card);
+  border-color: var(--border);
+  box-shadow: 0 9px 28px rgb(0 0 0 / .18);
+}
+[data-lh-editorial="v10"] .lh-editorial-session-composer {background: transparent;}
+[data-lh-editorial="v10"] :is(.lh-editorial-home-composer, .lh-editorial-session-composer) textarea {
+  color: var(--foreground);
+  caret-color: var(--primary);
+}
+[data-lh-editorial="v10"] :is(.lh-editorial-home-composer, .lh-editorial-session-composer) button[type="submit"]:not([data-testid="next-problem-button"]) {
+  border-radius: 3px;
+}
+[data-lh-editorial="v10"] .lh-editorial-knowledge-summary {
+  width: min(85vw, 440px);
+  padding: 28px 36px 34px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--lh-editorial-border-subtle);
+  background: color-mix(in srgb, var(--card) 42%, transparent);
+}
+[data-lh-editorial="v10"] .lh-editorial-eyebrow {
+  margin-bottom: 12px;
+  color: var(--primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .14em;
+}
+[data-lh-editorial="v10"] .lh-editorial-summary-heading {
+  margin-bottom: 22px;
+  font-family: var(--lh-font-display);
+  font-size: clamp(25px, 3vw, 35px);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -.04em;
+  text-wrap: balance;
+}
+[data-lh-editorial="v10"] .lh-editorial-knowledge-summary p {line-height: 1.55;}
+[data-lh-editorial="v10"] .lh-prose blockquote {border-left-color: var(--primary);}
+[data-lh-editorial="v10"] .lh-prose a {
+  text-decoration-color: var(--primary);
+  text-underline-offset: 3px;
+}
+@media (max-width: 640px) {
+  [data-lh-editorial="v10"] .lh-editorial-brand-label {font-size: 17px;}
+  [data-lh-editorial="v10"] .lh-editorial-home-masthead {font-size: 8px; letter-spacing: .04em;}
+  [data-lh-editorial="v10"] .lh-editorial-knowledge-summary {padding: 24px;}
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-lh-editorial="v10"] [data-testid="new-session"]:hover {transform: none;}
+}

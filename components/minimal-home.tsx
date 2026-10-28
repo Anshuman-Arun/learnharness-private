@@ -45,7 +45,9 @@ export function KnowledgeSummary({
 	const empty =
 		propositions === 0 && chains === 0 && teachSessions === 0 && practiceSessions === 0 && importedNotes === 0;
 	return (
-		<div data-testid="knowledge-summary" className="flex flex-col items-center text-center">
+		<div data-testid="knowledge-summary" className="lh-editorial-knowledge-summary flex flex-col items-center text-center">
+			<div className="lh-editorial-eyebrow">YOUR LEARNING, MAPPED</div>
+			<h1 className="lh-editorial-summary-heading">A living record of what you know.</h1>
 			{/* Own-line law (owner, 2026-10-06): every count sits on its own
 			    row — no dot separators; the two blocks (graph, sessions)
 			    part with one empty line; the notes COUNT (never the file

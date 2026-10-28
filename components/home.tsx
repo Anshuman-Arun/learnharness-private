@@ -157,7 +157,7 @@ export function Home({
 	};
 
 	return (
-		<div className="relative h-dvh">
+		<div className="lh-editorial-home relative h-dvh">
 			{/* Window-drag strip (merged chrome, owner 2026-09-17): a dedicated
 			    mask element, deliberately FIRST in the DOM. Electron's app-region
 			    mask resolves by DOM order — a no-drag element subtracts only drag
@@ -200,6 +200,7 @@ export function Home({
 			    div above, and the toggle's lh-no-drag subtracts from it (it is
 			    later in the tree, so the subtraction sticks). */}
 			<header className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
+				<span className="lh-editorial-home-masthead">LEARNHARNESS <span aria-hidden="true">/</span> KNOWLEDGE ATLAS</span>
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>
@@ -242,7 +243,7 @@ export function Home({
 						)}
 					/>
 					<form
-						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
+						className="lh-editorial-home-composer flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
 					onSubmit={(e) => {
 						e.preventDefault();
 						void start();
