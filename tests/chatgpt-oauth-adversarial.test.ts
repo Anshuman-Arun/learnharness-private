@@ -98,8 +98,9 @@ describe("adversarial ChatGPT private-provider checks", () => {
         clientId: "local-test",
         expires: Date.now() + 3600000,
       }));
-      globalThis.fetch = async (input) => {
+      globalThis.fetch = async (input, init) => {
         const target = String(input);
+        if (target.startsWith("http://127.0.0.1:")) return oldFetch(input, init);
         if (target.endsWith("/.well-known/openid-configuration")) {
           return Response.json({
             issuer: "https://auth.openai.com",
