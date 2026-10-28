@@ -39,7 +39,7 @@ const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]
 /** Local agent tools must never ingest application secrets, OAuth vaults,
  * private session data, or common OS credentials. The model can be exposed
  * to untrusted web/PDF text that attempts prompt-injection exfiltration. */
-const PRIVATE_DIR_PARTS = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", ".configstore", ".local/share/keyrings"]);
+const PRIVATE_DIR_PARTS = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", ".configstore"]);
 const PRIVATE_FILENAMES = new Set([
 	"auth.json", ".netrc", ".npmrc", ".pypirc", ".git-credentials",
 	"chatgpt-oauth.enc.json", "chatgpt-device-id", "id_rsa", "id_ed25519",
@@ -60,6 +60,10 @@ export function isPrivateSourcePath(p: string): boolean {
 		["/proc", "/sys", "/dev", "/run/secrets"].some((root) => pathWithin(resolved, root))) return true;
 	const parts = resolved.split(/[\\/]+/).map((x) => x.toLowerCase());
 	const base = parts[parts.length - 1] ?? "";
+	// A slash-containing directory name cannot match path segments.
+	// Check the actual Linux secret-store ancestry instead.
+	const keyring = path.join(os.homedir(), ".local", "share", "keyrings");
+	if (pathWithin(resolved, keyring)) return true;
 	if (PRIVATE_DIR_PARTS.has(base) || parts.some((part) => PRIVATE_DIR_PARTS.has(part))) return true;
 	if (PRIVATE_FILENAMES.has(base) || base === ".env" || base.startsWith(".env.")) return true;
 	const roots = [

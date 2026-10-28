@@ -77,7 +77,7 @@ describe("desktop window chrome", () => {
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"chatGPTCancelSignIn", "chatGPTDisconnect", "chatGPTOpenAuthorization", "chatGPTSignIn",
+			"chatGPTCancelSignIn", "chatGPTDisconnect", "chatGPTOpenAuthorization", "chatGPTSetBackgroundUse", "chatGPTSignIn",
 			"expandWindow", "getChatGPTStatus", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform",
 		]);
 	});

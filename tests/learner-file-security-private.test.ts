@@ -31,6 +31,7 @@ describe("adversarial local learner-file security policy", () => {
       }
       assert.equal(isPrivateSourcePath(path.join(tmp,"auth.json")),true);
       assert.equal(isPrivateSourcePath(path.join(pub,".npmrc")),true);
+      assert.equal(isPrivateSourcePath(path.join(os.homedir(),".local","share","keyrings","login.keyring")),true);
       if (process.platform !== "win32") {
         assert.equal(isPrivateSourcePath("/proc/self/environ"),true);
         assert.equal(isPrivateSourcePath("/proc/self/fd/3"),true);
