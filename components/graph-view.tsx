@@ -69,7 +69,6 @@ import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
-import { useAppearance } from "@/components/settings/appearance";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
@@ -964,8 +963,6 @@ export function GraphView({
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
 	onChainSelectClose?: () => void;
 }) {
-	// A changed appearance re-colors the canvas without replacing graph data.
-	const { appearance } = useAppearance();
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const cardRef = useRef<HTMLDivElement | null>(null);
@@ -1429,19 +1426,38 @@ export function GraphView({
 		});
 	}, [snapshot, isEmpty]);
 
-	// Feed #1b — theme/highlight/reading-font changes are presentation-only.
-	// The previous [snapshot]-only feed left the canvas with dark-era colors
-	// after a Light/Accent switch until the NEXT graph refetch. Calling
-	// setData here would also reset drag positions and physics; use the
-	// dedicated lightweight canvas repaint channel instead.
+	// Feed #1b — palette/font changes repaint only, never reset graph physics.
+	// Observe the actual root attributes/styles, not only saved settings:
+	// "System" mode switches when the OS scheme changes without any settings
+	// record edit, and the AppearanceProvider writes CSS variables AFTER this
+	// child may have committed. rAF coalesces all token changes into one
+	// post-style read and prevents stale light/dark canvas colors.
 	useEffect(() => {
-		rendererRef.current?.setAppearance({
-			node: tokenHex(NODE_COLOR_TOKEN),
-			edge: tokenHex("--ring"),
-			label: tokenHex("--muted-foreground"),
-			hoverText: tokenHex("--foreground"),
-		}, getComputedStyle(document.body).fontFamily);
-	}, [appearance, isEmpty]);
+		const root = document.documentElement;
+		let frame: number | null = null;
+		const repaint = () => {
+			if (frame !== null) return;
+			frame = requestAnimationFrame(() => {
+				frame = null;
+				rendererRef.current?.setAppearance({
+					node: tokenHex(NODE_COLOR_TOKEN),
+					edge: tokenHex("--ring"),
+					label: tokenHex("--muted-foreground"),
+					hoverText: tokenHex("--foreground"),
+				}, getComputedStyle(document.body).fontFamily);
+			});
+		};
+		const observer = new MutationObserver(repaint);
+		observer.observe(root, {
+			attributes: true,
+			attributeFilter: ["class", "style", "data-theme", "data-accent", "data-borders", "data-corners"],
+		});
+		repaint();
+		return () => {
+			observer.disconnect();
+			if (frame !== null) cancelAnimationFrame(frame);
+		};
+	}, [isEmpty]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
