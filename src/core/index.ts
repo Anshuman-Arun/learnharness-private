@@ -75,3 +75,6 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+
+// Read-only canonical cross-session learning map (pure; browser-safe).
+export * from "./global-learning.ts";
