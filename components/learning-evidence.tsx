@@ -73,6 +73,7 @@ export function EvidenceInput({ value, onChange, disabled = false, onBusyChange 
 				{value?.images?.map((image, index) => <li key={`image-${index}`} className="flex gap-2"><span>{image.name}</span><button type="button" disabled={disabled || reading} aria-label={`Remove ${image.name}`} onClick={() => onChange(parseLearningEvidence({ ...value, images: value.images?.filter((_, i) => i !== index) }))}>Remove</button></li>)}
 				{value?.code?.map((code, index) => <li key={`code-${index}`} className="flex gap-2"><span>{code.name}</span><button type="button" disabled={disabled || reading} aria-label={`Remove ${code.name}`} onClick={() => onChange(parseLearningEvidence({ ...value, code: value.code?.filter((_, i) => i !== index) }))}>Remove</button></li>)}
 			</ul>
+			<details><summary>Preview attached work</summary><EvidencePreview evidence={value} /></details>
 			<p className="text-muted-foreground">Included with your next submission. Images require an image-capable model.</p>
 		</>}
 		{error && <p role="alert" className="text-destructive">{error}</p>}

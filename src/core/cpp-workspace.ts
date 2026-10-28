@@ -4,6 +4,8 @@ import type { CodeEvidence, LearningEvidence } from "./learning-evidence.ts";
 export interface CppWorkspace {
 	version: 1; id: string; revision: number; title: string; problem: string;
 	files: Array<{ name: string; source: string }>; stdin: string; updatedAt: number;
+	cases?: Array<{ name: string; stdin: string; expected: string }>;
+	sanitize?: boolean;
 }
 export function parseCppWorkspace(raw: unknown): Omit<CppWorkspace, "revision" | "updatedAt"> {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Workspace must be an object");
@@ -20,7 +22,16 @@ export function parseCppWorkspace(raw: unknown): Omit<CppWorkspace, "revision" |
 		return { name: file.name, source: file.source };
 	});
 	if (new Set(files.map((file) => file.name.toLowerCase())).size !== files.length || total > 262144) throw new Error("Filenames must be unique; total source must be at most 256 KB");
-	return { version: 1, id: w.id, title: w.title.trim(), problem: w.problem, files, stdin: w.stdin };
+	if (w.sanitize !== undefined && typeof w.sanitize !== "boolean") throw new Error("sanitize must be boolean");
+	let cases: CppWorkspace["cases"];
+	if (w.cases !== undefined) {
+		if (!Array.isArray(w.cases) || w.cases.length > 8) throw new Error("Use up to eight test cases");
+		cases = w.cases.map((item) => {
+			if (!item || typeof item.name !== "string" || !item.name.trim() || item.name.length > 80 || typeof item.stdin !== "string" || item.stdin.length > 65536 || typeof item.expected !== "string" || item.expected.length > 16384) throw new Error("Invalid test case");
+			return { name: item.name, stdin: item.stdin, expected: item.expected };
+		});
+	}
+	return { version: 1, id: w.id, title: w.title.trim(), problem: w.problem, files, stdin: w.stdin, ...(cases ? { cases } : {}), ...(w.sanitize !== undefined ? { sanitize: w.sanitize } : {}) };
 }
 export function workspaceEvidence(workspace: CppWorkspace, names: readonly string[]): LearningEvidence {
 	const code: CodeEvidence[] = workspace.files.filter((file) => names.includes(file.name) && file.source.trim()).map((file) => ({ name: file.name, language: "cpp", source: file.source }));
