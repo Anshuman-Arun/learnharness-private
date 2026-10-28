@@ -59,7 +59,7 @@ describe("PR20 real localhost broker (no account/network required)", () => {
       await store.modify("openai",async()=>({
         type:"oauth",access:"private-test-access-should-not-leak",
         refresh:"private-test-refresh-should-not-leak",expires:Date.now()+3_600_000,
-        scopes:["chatgpt.tokens.use.direct"],clientId:"local-test"
+        scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"],clientId:"local-test",subject:"test-user"
       }));
       const saved=await fs.readFile(path.join(directory,"chatgpt-oauth.enc.json"),"utf8");
       assert.doesNotMatch(saved,/private-test-(access|refresh)/,"Credentials must be encrypted at rest");

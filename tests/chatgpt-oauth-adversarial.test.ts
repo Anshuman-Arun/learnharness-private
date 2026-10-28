@@ -41,13 +41,52 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+  it("fails closed for malformed saved OAuth credentials and API keys masquerading as OAuth", async () => {
+    const {validCredential}=native as unknown as {validCredential:(value:unknown)=>boolean};
+    const baseline = {
+      type:"oauth",access:"eyJ.test",refresh:"refresh-token",
+      clientId:"client-test",subject:"verified-subject",
+      expires:Date.now()+3600000,
+      scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"],
+    };
+    assert.equal(validCredential(baseline),true);
+    for(const broken of [
+      {...baseline,access:"sk-platform-api-key"},
+      {...baseline,clientId:"dynamic_agent_client"},
+      {...baseline,scopes:["chatgpt.tokens.use.direct"]},
+      {...baseline,refresh:""},
+      {...baseline,subject:""},
+      {...baseline,expires:Infinity},
+      {...baseline,expires:-1},
+      {...baseline,type:"api-key"},
+    ]) assert.equal(validCredential(broken),false);
+    await scratch(async dir => {
+      const safeStorage=encryptedBackend();
+      const file=path.join(dir,"chatgpt-oauth.enc.json");
+      const store=native.createEncryptedCredentialStore(file,safeStorage);
+      await store.modify("openai",async()=>({...baseline,access:"sk-platform-api-key"}));
+      const runtime=await native.createChatGPTOAuthRuntime({
+        userDataDir:dir,safeStorage,shell:{openExternal:async()=>undefined},
+        ipcMain:{handle:()=>undefined},authorizeIpc:()=>true,log:()=>undefined,
+      });
+      try{
+        const headers={authorization:`Bearer ${runtime.brokerSecret}`};
+        const status=await (await fetch(runtime.brokerUrl+"/v1/status",{headers})).json();
+        assert.equal(status.connected,false);
+        const token=await fetch(runtime.brokerUrl+"/v1/token",{method:"POST",headers});
+        assert.equal(token.status,401);
+      }finally{runtime.close();}
+    });
+  });
+
+
   it("invalid_grant refresh invalidates the saved connection rather than retrying forever", async () => {
     await scratch(async dir => {
       const safeStorage=encryptedBackend();
       const store=native.createEncryptedCredentialStore(path.join(dir,"chatgpt-oauth.enc.json"),safeStorage);
       await store.modify("openai",async()=>({
         type:"oauth", access:"expired",refresh:"revoked",clientId:"client",
-        expires:Date.now()-5000,scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"],
+        expires:Date.now()-5000,subject:"test-user",scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"],
       }));
       const oldFetch=globalThis.fetch;
       globalThis.fetch=async(input,init)=>{
@@ -91,7 +130,8 @@ describe("adversarial ChatGPT private-provider checks", () => {
       const store = native.createEncryptedCredentialStore(file, safeStorage);
       await store.modify("openai", async () => ({
         type: "oauth", access: "test-oauth-bearer", refresh: "refresh",
-        clientId: "client", expires: Date.now() + 3600000,
+        clientId: "client", expires: Date.now() + 3600000, subject:"test-user",
+        scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"],
       }));
       let networkCalls = 0;
       globalThis.fetch = async (input, init) => {
@@ -142,7 +182,7 @@ describe("adversarial ChatGPT private-provider checks", () => {
       const oldFetch = globalThis.fetch;
       const safeStorage = encryptedBackend();
       const store = native.createEncryptedCredentialStore(path.join(dir, "chatgpt-oauth.enc.json"), safeStorage);
-      await store.modify("openai", async()=>({type:"oauth", access:"synthetic",refresh:"refresh",clientId:"client",expires:Date.now()+3600000}));
+      await store.modify("openai", async()=>({type:"oauth", access:"synthetic",refresh:"refresh",clientId:"client",expires:Date.now()+3600000,subject:"test-user",scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"]}));
       globalThis.fetch = async (input,init) => {
         const url = String(input);
         if(url.startsWith("http://127.0.0.1:"))return oldFetch(input,init);

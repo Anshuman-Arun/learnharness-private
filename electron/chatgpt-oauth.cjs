@@ -43,6 +43,19 @@ function storageSecure(safeStorage) {
 	}
 }
 
+function validCredential(c) {
+	return !!(c && c.type === "oauth" &&
+		typeof c.access === "string" && c.access.length > 0 &&
+		!c.access.startsWith("sk-") &&
+		typeof c.refresh === "string" && c.refresh.length > 0 &&
+		typeof c.clientId === "string" && /^[a-zA-Z0-9_-]{1,200}$/.test(c.clientId) &&
+		c.clientId !== DYNAMIC_CLIENT_ID &&
+		typeof c.subject === "string" && c.subject.length > 0 &&
+		Number.isFinite(c.expires) && c.expires > 0 &&
+		Array.isArray(c.scopes) &&
+		REQUIRED_SCOPES.every((scope) => c.scopes.includes(scope)));
+}
+
 function createEncryptedCredentialStore(filePath, safeStorage) {
 	const chains = new Map();
 
@@ -446,7 +459,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 		let attemptedRefresh;
 		try {
 			return await credentials.modify(PROVIDER_ID, async (current) => {
-				if (current?.type !== "oauth") return undefined;
+				if (!validCredential(current)) return undefined;
 				if (current.expires > Date.now() + 10 * 60_000) return undefined;
 				attemptedRefresh = current.refresh;
 				return refreshCredential(current);
@@ -468,7 +481,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 		// Refresh/validate account authority before accepting a cached
 		// catalog. Otherwise a revoked token could show selectable models.
 		const credential = await accessCredential();
-		if (credential?.type !== "oauth" || !credential.access) throw new Error("ChatGPT is not connected.");
+		if (!validCredential(credential)) throw new Error("ChatGPT is not connected.");
 		if (catalogCache && catalogCache.expires > Date.now()) return catalogCache.models;
 		if (catalogPending) return catalogPending;
 		const pending = (async () => {
@@ -524,7 +537,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 		}
 		try {
 			const credential = await credentials.read(PROVIDER_ID);
-			const connected = credential?.type === "oauth";
+			const connected = validCredential(credential);
 			return {
 				available: true,
 				connected,
@@ -645,7 +658,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 			}
 			if (req.method === "POST" && req.url === "/v1/token") {
 				const credential = await accessCredential();
-				if (credential?.type !== "oauth" || !credential.access) {
+				if (!validCredential(credential)) {
 					json(res, 401, { error: "chatgpt_not_connected" });
 					return;
 				}
@@ -692,4 +705,4 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 	};
 }
 
-module.exports = { createChatGPTOAuthRuntime, createEncryptedCredentialStore, loadOrCreateDeviceId, storageSecure };
+module.exports = { createChatGPTOAuthRuntime, createEncryptedCredentialStore, loadOrCreateDeviceId, storageSecure, validCredential };
