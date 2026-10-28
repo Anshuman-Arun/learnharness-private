@@ -93,7 +93,7 @@ async function* sseEvents(
 	let pendingCR = false;
 	for (;;) {
 		const { done, value } = await reader.read();
-		let chunk = (pendingCR ? "\r" : "") +
+		let chunk: string = (pendingCR ? "\r" : "") +
 			(done ? decoder.decode() : decoder.decode(value, { stream: true }));
 		pendingCR = !done && chunk.endsWith("\r");
 		if (pendingCR) chunk = chunk.slice(0, -1);
