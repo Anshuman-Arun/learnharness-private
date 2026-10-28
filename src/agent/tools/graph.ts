@@ -53,10 +53,12 @@ export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentToo
 				"question to a narrow node. Historical probe results without concept IDs remain unlinked.",
 			parameters: Type.Object({
 				query: Type.Optional(Type.String({description:"Optional search term for a canonical learning objective."})),
+				includeEvidence: Type.Optional(Type.Boolean({description:"Include up to 3 past question results and learner reasoning per concept."})),
 			}),
 			execute: serverExecute("list_learning_concepts", Type.Object({
 				query: Type.Optional(Type.String()),
-			}),async ({query}) => {
+				includeEvidence: Type.Optional(Type.Boolean()),
+			}),async ({query,includeEvidence}) => {
 				const records=ctx.chatStore.listChats().map(s=>ctx.chatStore.getChat(s.id)).filter(
 					(r):r is NonNullable<typeof r>=>r!==null,
 				);
@@ -66,9 +68,19 @@ export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentToo
 					!term||c.title.toLocaleLowerCase("en-US").includes(term)||
 					c.sources.some(s=>(s.summary??"").toLocaleLowerCase("en-US").includes(term)));
 				if(!matches.length)return "No matching canonical lesson concepts. Probe normally, without conceptId.";
-				return matches.slice(0,25).map(c=>
-					`${c.id} :: ${c.title} | ${c.correctChecks} correct / ${c.incorrectChecks} incorrect / ${c.ungradedChecks} ungraded check(s) in ${c.sources.length} lesson(s)`
-				).join("\n")+(matches.length>25?"\nRefine query for more.":"");
+				return matches.slice(0,25).map(c=>{
+					const heading=`${c.id} :: ${c.title} | ${c.correctChecks} correct / ${c.incorrectChecks} incorrect / ${c.ungradedChecks} ungraded check(s) in ${c.sources.length} lesson(s)`;
+					if(!includeEvidence) return heading;
+					const examples=c.evidence.slice(-3).reverse().map(e=>{
+						const question=e.question.slice(0,200);
+						const answer=(e.answerText??"").slice(0,200);
+						const reasoning=(e.reasoning??"").slice(0,300);
+						return `  - ${e.kind}, ${e.outcome}, ${e.answeredAt??"date unknown"}: ${question}`+
+							(answer?` | learner answer: ${answer}`:"")+
+							(reasoning?` | reasoning: ${reasoning}`:"");
+					});
+					return [heading,...examples].join("\n");
+				}).join("\n")+(matches.length>25?"\nRefine query for more.":"");
 			}),
 		},
 		list_sessions: {
