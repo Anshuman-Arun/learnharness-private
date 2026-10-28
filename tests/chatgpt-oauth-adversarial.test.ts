@@ -18,6 +18,7 @@ type Store = {
 };
 const native = require("../electron/chatgpt-oauth.cjs") as {
   createEncryptedCredentialStore(file: string, backend: RecordValue): Store;
+  unusableGrant(status: number, code: unknown): boolean;
   createChatGPTOAuthRuntime(options: RecordValue): Promise<{brokerUrl: string; brokerSecret: string; close(): void}>;
 };
 function encryptedBackend() {
