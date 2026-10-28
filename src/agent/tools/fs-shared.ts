@@ -35,6 +35,56 @@ export const WALK_TIMEOUT_MS = 10_000;
  */
 const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]);
 
+
+/** Local agent tools must never ingest application secrets, OAuth vaults,
+ * private session data, or common OS credentials. The model can be exposed
+ * to untrusted web/PDF text that attempts prompt-injection exfiltration. */
+const PRIVATE_DIR_PARTS = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", ".configstore"]);
+const PRIVATE_FILENAMES = new Set([
+	"auth.json", ".netrc", ".npmrc", ".pypirc", ".git-credentials",
+	"chatgpt-oauth.enc.json", "chatgpt-device-id", "id_rsa", "id_ed25519",
+	"credentials.json", "credentials", "known_hosts",
+]);
+
+function pathWithin(candidate: string, root: string): boolean {
+	const rel = path.relative(path.resolve(root), path.resolve(candidate));
+	return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
+/** Pure lexical check. Call on the real path, not just a symlink alias. */
+export function isPrivateSourcePath(p: string): boolean {
+	const resolved = path.resolve(p);
+	const parts = resolved.split(/[\\/]+/).map((x) => x.toLowerCase());
+	const base = parts[parts.length - 1] ?? "";
+	if (PRIVATE_DIR_PARTS.has(base) || parts.some((part) => PRIVATE_DIR_PARTS.has(part))) return true;
+	if (PRIVATE_FILENAMES.has(base) || base === ".env" || base.startsWith(".env.")) return true;
+	const roots = [
+		process.env.LH_DATA_DIR,
+		process.env.LH_AUTH_FILE && path.dirname(process.env.LH_AUTH_FILE),
+		process.env.LH_AUTH_FILE,
+		path.join(process.cwd(), "data"),
+		path.join(process.cwd(), ".env.local"),
+		path.join(process.cwd(), "auth.json"),
+		path.join(os.homedir(), ".config", "LearnHarness Private"),
+		path.join(os.homedir(), "Library", "Application Support", "LearnHarness Private"),
+		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness Private"),
+		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness PR20 Test"),
+		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness"),
+	].filter((item): item is string => Boolean(item));
+	return roots.some((root) => pathWithin(resolved, root));
+}
+
+/** Fail closed if a symlink reaches a secret. Return the checked real path,
+ * so readers never reopen the unvalidated alias. */
+export async function guardSourcePath(p: string): Promise<string> {
+	const absolute = path.resolve(p);
+	const real = await fs.realpath(absolute);
+	if (isPrivateSourcePath(absolute) || isPrivateSourcePath(real)) {
+		throw new Error("Access denied: application credentials and private OS files cannot be read by the learner's tutor.");
+	}
+	return real;
+}
+
 /** Resolve a tool path argument: absolute stays, relative/absent → home.
  *  (pi resolves against the project cwd; the harness's "project" is the
  *  learner's life, so the home directory is the anchor.) */
@@ -143,6 +193,7 @@ export async function walkFiles(
 	if (signal?.aborted) return { timedOut: false, aborted: true };
 
 	const walkDir = async (dir: string): Promise<boolean> => {
+		if (isPrivateSourcePath(dir) || isPrivateSourcePath(await fs.realpath(dir).catch(() => dir))) return false;
 		if (Date.now() > deadline) {
 			timedOut = true;
 			return true; // stop
@@ -167,6 +218,7 @@ export async function walkFiles(
 				return true;
 			}
 			const full = path.join(dir, entry.name);
+			if (isPrivateSourcePath(full)) continue;
 			if (entry.isDirectory()) {
 				if (EXCLUDED_DIR_NAMES.has(entry.name)) continue;
 				if (await walkDir(full)) return true;
