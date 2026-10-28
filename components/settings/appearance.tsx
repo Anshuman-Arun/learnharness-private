@@ -156,6 +156,7 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 	const resolved = useMemo(() => resolveAppearance(delta), [delta]);
 	const mode = resolved.mode === "system" ? (prefersDark ? "dark" : "light") : resolved.mode;
 	const appliedRef = useRef<string>("");
+	const lastModeRef = useRef<"dark" | "light" | null>(null);
 
 	// Match the OS only in System mode. Leaving this subscription mounted
 	// allows the choice to take effect immediately without another fetch.
@@ -172,6 +173,12 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 	// state machine. Chromium supports CSS zoom in both web and Electron.
 	useEffect(() => {
 		const root = document.documentElement;
+		const switched = lastModeRef.current !== null && lastModeRef.current !== mode;
+		// Dark/light transitions can pass through a moment where foreground
+		// and background have identical colors, temporarily hiding text.
+		// Suppress only the one-frame mode swap, not ordinary hover effects.
+		if (switched) root.classList.add("lh-theme-changing");
+		lastModeRef.current = mode;
 		root.classList.toggle("dark", mode === "dark");
 		root.dataset.theme = mode;
 		window.lh?.setTitlebarTheme?.(mode);
@@ -181,6 +188,12 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 		root.dataset.borders = resolved.borders;
 		root.style.setProperty("--lh-accent-intensity", `${resolved.accentIntensity}%`);
 		root.style.zoom = resolved.zoomPercent === 100 ? "" : `${resolved.zoomPercent}%`;
+		let frame: number | null = null;
+		if (switched) frame = requestAnimationFrame(() => root.classList.remove("lh-theme-changing"));
+		return () => {
+			if (frame !== null) cancelAnimationFrame(frame);
+			root.classList.remove("lh-theme-changing");
+		};
 	}, [mode, resolved.mode, resolved.accent, resolved.corners, resolved.borders, resolved.accentIntensity, resolved.zoomPercent]);
 
 	// The vars apply on every change — stringified as the change signal.
