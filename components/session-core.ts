@@ -93,15 +93,15 @@ async function* sseEvents(
 	let pendingCR = false;
 	for (;;) {
 		const { done, value } = await reader.read();
-		if (done) return false;
-		let chunk = (pendingCR ? "\r" : "") + decoder.decode(value, { stream: true });
-		pendingCR = chunk.endsWith("\r");
+		let chunk = (pendingCR ? "\r" : "") +
+			(done ? decoder.decode() : decoder.decode(value, { stream: true }));
+		pendingCR = !done && chunk.endsWith("\r");
 		if (pendingCR) chunk = chunk.slice(0, -1);
 		buf += chunk.replace(/\r\n?/g, "\n");
-		if (buf.length > MAX_SSE_EVENT) throw new Error("SSE event exceeds the safety limit.");
 		for (;;) {
 			const end = buf.indexOf("\n\n");
 			if (end === -1) break;
+			if (end > MAX_SSE_EVENT) throw new Error("SSE event exceeds the safety limit.");
 			const event = buf.slice(0, end);
 			buf = buf.slice(end + 2);
 			// Standard SSE allows 'data:' with or without a following space,
@@ -114,6 +114,10 @@ async function* sseEvents(
 			if (data === "[DONE]") return true;
 			yield JSON.parse(data) as Record<string, unknown>;
 		}
+		// Bound only the incomplete pending event, not a combined network
+		// chunk containing many individually small, valid SSE frames.
+		if (buf.length > MAX_SSE_EVENT) throw new Error("SSE event exceeds the safety limit.");
+		if (done) return false;
 	}
 }
 
