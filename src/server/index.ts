@@ -51,3 +51,4 @@ export * from "./tablet.ts";
 export * from "./estimation";
 export * from "./probability-lab";
 export * from "./stopping";
+export * from "./quant-exam";
