@@ -97,6 +97,34 @@ describe("sanitizeUserSettings", () => {
 		assert.deepEqual(out.general, { autoUpdate: true });
 	});
 
+	it("editorial appearance knobs sanitize, clamp and preserve unrelated settings", () => {
+		const out = sanitizeUserSettings({
+			appearance: {
+				mode: "light",
+				accent: "teal",
+				accentIntensity: 60,
+				zoomPercent: 18,
+				corners: "generous",
+				borders: "contrast",
+				fontFamily: "Georgia",
+				mdRendering: { headingWeight: 700 },
+			},
+		});
+		assert.equal(out.appearance?.mode, "light");
+		assert.equal(out.appearance?.accent, "teal");
+		assert.equal(out.appearance?.accentIntensity, 28);
+		assert.equal(out.appearance?.zoomPercent, 25);
+		assert.equal(out.appearance?.corners, "generous");
+		assert.equal(out.appearance?.borders, "contrast");
+		assert.equal(out.appearance?.fontFamily, "Georgia");
+		assert.equal(out.appearance?.mdRendering?.headingWeight, 700);
+		const bad = sanitizeUserSettings({
+			appearance: { mode: "sepia", accent: "unknown", zoomPercent: Infinity, corners: "banana", borders: 4 },
+		});
+		assert.deepEqual(bad.appearance, {});
+		assert.equal(sanitizeUserSettings({ appearance: { mode: "system" } })?.appearance?.mode, "system");
+	});
+
 	it("wrong-typed fields DROP (resolve to factory), never crash", () => {
 		const out = sanitizeUserSettings({
 			general: { autoUpdate: "yes" },
