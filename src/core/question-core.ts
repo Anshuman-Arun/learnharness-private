@@ -274,7 +274,15 @@ export const quizInputObject = Type.Object({
  *  teacher, so nothing invites misuse). Structurally identical to
  *  quizInputBase (the old superRefine never reached the wire — it ran at
  *  the call boundary, where quizInputProblems runs now). */
-export const probeQuizInputSchema = quizInputBase;
+/** Optional canonical knowledge goal for cross-session diagnostic evidence.
+ * This is NOT a plan nodeId: there is no lesson plan in the probe phase.
+ * The server only binds it if it resolves to a real shared concept. */
+export const probeQuizInputSchema = Type.Object({
+	...quizInputBase.properties,
+	conceptId: Type.Optional(Type.String({
+		description: "Optional EXACT canonical concept id returned by list_learning_concepts. Include only when the question directly tests that concept; otherwise omit.",
+	})),
+});
 
 /** The DISPLAY parse for persisted quiz calls (tool-parts.ts): the base
  *  + `type` as an OPTIONAL plain string (old records carry none, and
@@ -315,6 +323,14 @@ export const explainInputBase = Type.Object({
 	details: Type.Optional(
 		Type.String({ description: "Optional extra context or instructions shown under the question." }),
 	),
+});
+
+/** Optional canonical concept binding in the probing/free-recall phase. */
+export const probeExplainInputSchema = Type.Object({
+	...explainInputBase.properties,
+	conceptId: Type.Optional(Type.String({
+		description: "Optional EXACT canonical concept id returned by list_learning_concepts. Include only when this question tests the known concept; otherwise omit.",
+	})),
 });
 
 /** The TEACH-side explain object: base + the plan-position field (same
