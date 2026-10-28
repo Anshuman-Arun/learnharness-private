@@ -72,3 +72,33 @@ describe("cross-session global learning map",()=>{
     assert.equal(g.unlinkedAnswers,1);
   });
 });
+
+describe("cross-session diagnostic probe binding",()=>{
+  it("a physics probe updates the existing calculus divergence concept",()=>{
+    const calc=lesson("calculus","Calculus III",[["div","Divergence"]],[],
+      [{id:"teach-1",nodeId:"div",correct:true}]);
+    const physics=lesson("physics","Physics",[],[]);
+    physics.messages.push({role:"assistant",content:[{type:"toolCall",id:"probe-1",name:"probe",
+      arguments:{question:"Compute divergence of a field",conceptId:"concept:divergence"}}]} as never);
+    physics.messages.push({role:"toolResult",toolCallId:"probe-1",toolName:"probe",
+      details:{correct:false,answeredAt:"2026-10-28T00:00:00Z"}} as never);
+    const result=buildGlobalLearningGraph([physics,calc]);
+    const div=result.concepts.find(c=>c.title==="Divergence")!;
+    assert.equal(div.sources.length,1); // probe updates evidence, not invents a lesson objective
+    assert.equal(div.evidence.length,2);
+    assert.equal(div.correctChecks,1);
+    assert.equal(div.incorrectChecks,1);
+  });
+  it("ignores hallucinated canonical IDs and does not create nodes from them",()=>{
+    const a=lesson("calculus","Calculus III",[["div","Divergence"]],[]);
+    const b=lesson("physics","Physics",[],[]);
+    b.messages.push({role:"assistant",content:[{type:"toolCall",id:"q-bad",name:"probe",
+      arguments:{question:"Unknown",conceptId:"concept:made-up"}}]} as never);
+    b.messages.push({role:"toolResult",toolCallId:"q-bad",toolName:"probe",
+      details:{correct:true}} as never);
+    const result=buildGlobalLearningGraph([a,b]);
+    assert.equal(result.concepts.length,1);
+    assert.equal(result.concepts[0]!.correctChecks,0);
+    assert.equal(result.unlinkedAnswers,1);
+  });
+});
