@@ -51,7 +51,7 @@ describe("adversarial local learner-file security policy", () => {
   });
 
   it("blocks credential reads through each explicit file tool and PDF entry", async () => {
-    const files=[
+    const files: Array<[string,string]> = [
       ["src/agent/tools/read.ts","guardSourcePath"],
       ["src/agent/tools/ls.ts","guardSourcePath"],
       ["src/agent/tools/find.ts","guardSourcePath"],
