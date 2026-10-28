@@ -65,7 +65,7 @@ try {
       }
       const paths=[...svg.querySelectorAll('path[d]')];
       return {svg:true,nodeCount:rects.length,overlaps,
-        curves:paths.filter(p=>/\bC\b/.test(p.getAttribute("d")??"")).length,
+        curves:paths.filter(p=>/[Cc]/.test(p.getAttribute("d")??"")).length,
         rect:[svg.getBoundingClientRect().width,svg.getBoundingClientRect().height],
         titles:[...svg.querySelectorAll('text')].slice(0,3).map(n=>n.textContent),
       };
