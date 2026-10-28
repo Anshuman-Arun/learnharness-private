@@ -1,6 +1,6 @@
 # Reviewed feature-stack validation
 
-PRs #8–18 are merged. The remaining feature PRs #19–22 and validation PR #23 remain open. #19 targets main; merge the remaining stack in order and retarget the next PR after its parent lands. Tablet reconnect, pairing-concurrency, and Windows asset fixes are already present from #14.
+**Review snapshot, 2026-10-28:** PRs #8–18 are merged. The remaining feature PRs #19–22 and validation PR #23 remain open. #19 targets main; merge the remaining stack in order and retarget the next PR after its parent lands. Tablet reconnect, pairing-concurrency, and Windows asset fixes are already present from #14.
 
 ## Findings fixed in their feature PRs
 
@@ -45,4 +45,3 @@ For the real challenge workflow, start `npm run cpp:runner` in another terminal 
 ## Limits
 
 Chromium touch/pressure emulation verifies pointer/transport behavior; physical Apple Pencil palm rejection, iPad Safari storage, Windows certificate installation, and live model adherence require separate device/provider testing. Local challenge sources remain inspectable; finite hidden checks do not prove asymptotic complexity or form an anti-cheating boundary. Activity timers and one successful retry do not establish mastery.
-

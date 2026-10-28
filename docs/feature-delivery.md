@@ -1,6 +1,6 @@
 # Feature delivery and review map
 
-PRs **#8–#18 are merged** after Windows quality and standalone validation. The remaining feature PRs **#19–#22** and [validation PR #23](https://github.com/Anshuman-Arun/learnharness-private/pull/23) remain open. #19 targets main; each later PR targets its preceding feature branch. Merge the remaining stack in order, retargeting the next PR to main after its parent lands. Tablet reconnect/concurrency/Windows fixes are already present from #14; #23 adds validation coverage and evidence. See [pre-merge-validation.md](pre-merge-validation.md).
+At the 2026-10-28 review, PRs **#8–#18 are merged** after Windows quality and standalone validation. The remaining feature PRs **#19–#22** and [validation PR #23](https://github.com/Anshuman-Arun/learnharness-private/pull/23) remain open. #19 targets main; each later PR targets its preceding feature branch. Merge the remaining stack in order, retargeting the next PR to main after its parent lands. Tablet reconnect/concurrency/Windows fixes are already present from #14; #23 adds validation coverage and evidence. See [pre-merge-validation.md](pre-merge-validation.md).
 
 Descriptions and base/head pairs are in [feature-prs.json](feature-prs.json).
 
