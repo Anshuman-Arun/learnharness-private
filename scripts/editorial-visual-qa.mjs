@@ -54,6 +54,9 @@ try {
   for (const size of [{width:1366,height:768},{width:1920,height:1080}]) {
     const page = await browser.newPage();
     await page.setViewport({ ...size, deviceScaleFactor:1 });
+    // Each viewport test is a fresh-user initial fit, not the camera left
+    // behind by the previous viewport in this same Chromium profile.
+    await page.evaluateOnNewDocument(() => { try { localStorage.removeItem("lh.graph.camera.v1"); } catch {} });
     const errors=[];
     page.on("pageerror",e=>errors.push(e.message));
     await page.setRequestInterception(true);
@@ -88,7 +91,22 @@ try {
       assert.ok(result.rect?.[0] > 200, "canvas CSS box");
       assert.ok(result.background && result.foreground && result.background!==result.foreground, `theme foreground contrast ${theme}`);
       await page.screenshot({path:join(outDir,`home-${theme}-${size.width}x${size.height}.png`),fullPage:false});
+      const controls = await page.evaluate(() => {
+        const selectors = {
+          newSession: '[data-testid="new-session"]',
+          filterAll: '[data-testid="session-kind-filter"] button:last-child',
+          dictation: '[data-testid="dictation-toggle"]',
+          homeMode: '[data-testid="home-mode-switch"] button:first-child',
+        };
+        return Object.fromEntries(Object.entries(selectors).map(([name, selector]) => {
+          const el = document.querySelector(selector);
+          if (!el) return [name, null];
+          const style = getComputedStyle(el);
+          return [name, { color: style.color, background: style.backgroundColor, opacity: style.opacity, text: el.textContent?.trim().slice(0,100) }];
+        }));
+      });
       console.log("VISUAL",size,theme,result);
+      console.log("CONTROLS",size,theme,JSON.stringify(controls));
     }
     assert.deepEqual(errors,[],"no browser page errors");
     await page.close();
