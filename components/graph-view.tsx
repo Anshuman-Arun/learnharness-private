@@ -1452,9 +1452,22 @@ export function GraphView({
 			attributes: true,
 			attributeFilter: ["class", "style", "data-theme", "data-accent", "data-borders", "data-corners"],
 		});
+		let live = true;
+		const fontsReady = () => {
+			if (live) {
+				rendererRef.current?.refreshTypography();
+				repaint();
+			}
+		};
+		// CSS/Next fonts can load AFTER the first graph frame. That must
+		// not freeze fallback-font measurements until a server refetch.
+		document.fonts.addEventListener("loadingdone", fontsReady);
+		void document.fonts.ready.then(fontsReady);
 		repaint();
 		return () => {
+			live = false;
 			observer.disconnect();
+			document.fonts.removeEventListener("loadingdone", fontsReady);
 			if (frame !== null) cancelAnimationFrame(frame);
 		};
 	}, [isEmpty]);
