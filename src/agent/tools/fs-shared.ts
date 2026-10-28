@@ -78,8 +78,18 @@ export function isPrivateSourcePath(p: string): boolean {
  * so readers never reopen the unvalidated alias. */
 export async function guardSourcePath(p: string): Promise<string> {
 	const absolute = path.resolve(p);
-	const real = await fs.realpath(absolute);
-	if (isPrivateSourcePath(absolute) || isPrivateSourcePath(real)) {
+	// Block even nonexistent private paths before touching the filesystem.
+	if (isPrivateSourcePath(absolute)) {
+		throw new Error("Access denied: application credentials and private OS files cannot be read by the learner's tutor.");
+	}
+	let real: string;
+	try {
+		real = await fs.realpath(absolute);
+	} catch (cause) {
+		const code = (cause as NodeJS.ErrnoException).code ?? "unknown";
+		throw new Error(`Path not found: ${absolute} (${code})`);
+	}
+	if (isPrivateSourcePath(real)) {
 		throw new Error("Access denied: application credentials and private OS files cannot be read by the learner's tutor.");
 	}
 	return real;
