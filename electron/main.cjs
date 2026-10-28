@@ -264,9 +264,13 @@ function waitUntilUp(baseUrl, healthSecret, tries = 150) {
 				return;
 			}
 			const retry = () => { if (!settled) setTimeout(() => attempt(n - 1), 200); };
-			const req = http.get(healthUrl, (res) => {
+			const nonce = crypto.randomBytes(16).toString("base64url");
+			const challengeUrl = new URL(healthUrl);
+			challengeUrl.searchParams.set("challenge", nonce);
+			const expected = crypto.createHmac("sha256", healthSecret).update(nonce).digest("base64url");
+			const req = http.get(challengeUrl, (res) => {
 				const ready = res.statusCode === 200 &&
-					res.headers["x-lh-app-ready"] === healthSecret;
+					res.headers["x-lh-app-ready"] === expected;
 				res.resume();
 				if (ready) done();
 				else retry();
