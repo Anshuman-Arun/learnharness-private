@@ -1,0 +1,181 @@
+/** Read-only, cross-session lesson map.
+ *
+ * A session plan is a coarse learning GOAL map, not the graph of true
+ * propositions extracted from teacher prose. Do not conflate the two.
+ * Existing native transcripts are authoritative for assessment evidence:
+ * nothing is inferred from a "visited" plan marker or a teacher assertion.
+ *
+ * Identity v1 is deliberately CONSERVATIVE: explicit matching of specific
+ * normalized labels. Generic lesson labels remain session-local.
+ * Suspected cycles are reported, never silently installed in a DAG.
+ */
+import type { ChatRecord } from "./contracts/chat.ts";
+
+export interface LearningSource {
+  chatId: string;
+  chatTitle: string;
+  localNodeId: string;
+  summary: string | null;
+}
+export interface LearningEvidence {
+  chatId: string;
+  toolCallId: string;
+  localNodeId: string;
+  question: string;
+  kind: "check" | "predict" | "explain";
+  outcome: "correct" | "incorrect" | "ungraded";
+  answeredAt: string | null;
+}
+export interface LearningConcept {
+  id: string;
+  title: string;
+  sources: LearningSource[];
+  evidence: LearningEvidence[];
+  correctChecks: number;
+  incorrectChecks: number;
+  ungradedChecks: number;
+}
+export interface LearningDependency { from: string; to: string; sessions: string[] }
+export interface LearningConflict {
+  chatId: string; from: string; to: string;
+  reason: "self_after_merge" | "would_create_cycle";
+}
+export interface GlobalLearningGraph {
+  concepts: LearningConcept[];
+  dependencies: LearningDependency[];
+  conflicts: LearningConflict[];
+  sessions: Array<{ id: string; title: string; concepts: number }>;
+  /** Prober questions and stale/replaced plan nodes lack a safe binding. */
+  unlinkedAnswers: number;
+}
+const GENERIC = new Set([
+  "introduction","overview","basics","foundations","prerequisites","motivation",
+  "examples","practice","applications","application","methods","methodology",
+  "definition","definitions","main result","theorem","proof","summary",
+  "review","core ideas","concepts","problem solving","implementation",
+  "intuition","conclusion","extensions","background",
+]);
+const SAFE_SINGLE = new Set([
+  "gradient","divergence","curl","jacobian","hessian","eigenvalues",
+  "eigenvectors","integrals","derivatives","covariance","variance",
+  "expectation","martingales","brownian motion","convexity","duality",
+]);
+export function normalizeLearningTitle(s: string): string {
+  return s.normalize("NFKC").toLocaleLowerCase("en-US")
+    .replace(/[^\p{L}\p{N}]+/gu," ").trim().replace(/\s+/g," ");
+}
+/** Session-scoped fallback for ambiguous labels; no silent wrong merge. */
+export function learningIdentity(title: string, chatId: string, localId: string): string {
+  const normalized=normalizeLearningTitle(title);
+  if(!normalized || GENERIC.has(normalized) ||
+      (normalized.split(" ").length===1 && !SAFE_SINGLE.has(normalized)) ||
+      /^(?:step|chapter|part|lemma|theorem|section|exercise|question)\s+\d+$/.test(normalized))
+    return `local:${encodeURIComponent(chatId)}:${encodeURIComponent(localId)}`;
+  return "concept:"+encodeURIComponent(normalized);
+}
+function values(v:unknown):v is Record<string,unknown> {
+  return !!v && typeof v==="object" && !Array.isArray(v);
+}
+function createsCycle(edges:Map<string,Set<string>>,from:string,to:string):boolean {
+  if(from===to)return true;
+  const stack=[to],visited=new Set<string>();
+  while(stack.length){
+    const current=stack.pop()!;
+    if(current===from)return true;
+    if(visited.has(current))continue;
+    visited.add(current);
+    for(const next of edges.get(current)??[])stack.push(next);
+  }
+  return false;
+}
+export function buildGlobalLearningGraph(records: readonly ChatRecord[]): GlobalLearningGraph {
+  const concepts=new Map<string,LearningConcept>();
+  const dependencies=new Map<string,LearningDependency>();
+  const graphAdj=new Map<string,Set<string>>();
+  const conflicts:LearningConflict[]=[];
+  const sessions:GlobalLearningGraph["sessions"]=[];
+  const sorted=[...records].sort((a,b)=>a.id.localeCompare(b.id));
+  let unlinkedAnswers=0;
+  for(const record of sorted) {
+    if(!record.tree?.nodes?.length)continue;
+    const bindings=new Map<string,string>();
+    for(const node of record.tree.nodes) {
+      if(!node?.id || !node?.title)continue;
+      const globalId=learningIdentity(node.title,record.id,node.id);
+      bindings.set(node.id,globalId);
+      let concept=concepts.get(globalId);
+      if(!concept) {
+        concept={id:globalId,title:node.title,sources:[],evidence:[],
+          correctChecks:0,incorrectChecks:0,ungradedChecks:0};
+        concepts.set(globalId,concept);
+      }
+      concept.sources.push({chatId:record.id,chatTitle:record.title,
+        localNodeId:node.id,summary:node.summary??null});
+    }
+    sessions.push({id:record.id,title:record.title,concepts:bindings.size});
+    // Tool-call inputs are the plan-node source of truth; tool results
+    // are the graded evidence. Probe calls have NO plan node id.
+    const calls=new Map<string,{nodeId:string;kind:LearningEvidence["kind"];question:string}>();
+    for(const message of record.messages??[]) {
+      if(message.role!=="assistant" || !Array.isArray(message.content))continue;
+      for(const block of message.content) {
+        if(block.type!=="toolCall" || !["quiz","explain","probe","recall"].includes(block.name))continue;
+        const args:unknown=block.arguments;
+        if(!values(args))continue;
+        const nodeId=args.nodeId;
+        if(typeof nodeId!=="string")continue;
+        const kind=block.name==="explain" ? "explain" :
+          args.type==="predict" ? "predict" : "check";
+        calls.set(block.id,{nodeId,kind,question:typeof args.question==="string"?args.question:""});
+      }
+    }
+    for(const message of record.messages??[]) {
+      if(message.role!=="toolResult" || !["quiz","explain","probe","recall"].includes(message.toolName))continue;
+      const answer=message.details;
+      if(!values(answer) || answer.dismissed===true)continue;
+      const call=calls.get(message.toolCallId);
+      if(!call || !bindings.has(call.nodeId)) {unlinkedAnswers++;continue;}
+      const concept=concepts.get(bindings.get(call.nodeId)!)!;
+      const outcome=answer.correct===true ? "correct" :
+        answer.correct===false ? "incorrect" : "ungraded";
+      const isCheck=call.kind!=="predict";
+      const evidence:LearningEvidence={
+        chatId:record.id,toolCallId:message.toolCallId,localNodeId:call.nodeId,
+        question:call.question,kind:call.kind,outcome,
+        answeredAt:typeof answer.answeredAt==="string"?answer.answeredAt:null,
+      };
+      concept.evidence.push(evidence);
+      if(isCheck) {
+        if(outcome==="correct")concept.correctChecks++;
+        else if(outcome==="incorrect")concept.incorrectChecks++;
+        else concept.ungradedChecks++;
+      }
+    }
+    for(const edge of record.tree.edges??[]) {
+      const from=bindings.get(edge.from),to=bindings.get(edge.to);
+      if(!from||!to)continue;
+      if(from===to) {
+        conflicts.push({chatId:record.id,from,to,reason:"self_after_merge"});
+        continue;
+      }
+      const key=JSON.stringify([from,to]);
+      const existing=dependencies.get(key);
+      if(existing) {
+        if(!existing.sessions.includes(record.id))existing.sessions.push(record.id);
+        continue;
+      }
+      if(createsCycle(graphAdj,from,to)) {
+        conflicts.push({chatId:record.id,from,to,reason:"would_create_cycle"});
+        continue;
+      }
+      dependencies.set(key,{from,to,sessions:[record.id]});
+      const outs=graphAdj.get(from);
+      if(outs)outs.add(to);else graphAdj.set(from,new Set([to]));
+    }
+  }
+  return {
+    concepts:[...concepts.values()].sort((a,b)=>a.title.localeCompare(b.title)||a.id.localeCompare(b.id)),
+    dependencies:[...dependencies.values()].sort((a,b)=>a.from.localeCompare(b.from)||a.to.localeCompare(b.to)),
+    conflicts,sessions,unlinkedAnswers,
+  };
+}
