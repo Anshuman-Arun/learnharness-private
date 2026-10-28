@@ -96,10 +96,10 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
   const sessions:GlobalLearningGraph["sessions"]=[];
   const sorted=[...records].sort((a,b)=>a.id.localeCompare(b.id));
   let unlinkedAnswers=0;
+  const pending: Array<{id:string;evidence:LearningEvidence}> = [];
   for(const record of sorted) {
-    if(!record.tree?.nodes?.length)continue;
     const bindings=new Map<string,string>();
-    for(const node of record.tree.nodes) {
+    for(const node of record.tree?.nodes??[]) {
       if(!node?.id || !node?.title)continue;
       const globalId=learningIdentity(node.title,record.id,node.id);
       bindings.set(node.id,globalId);
@@ -112,21 +112,22 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
       concept.sources.push({chatId:record.id,chatTitle:record.title,
         localNodeId:node.id,summary:node.summary??null});
     }
-    sessions.push({id:record.id,title:record.title,concepts:bindings.size});
+    if(bindings.size) sessions.push({id:record.id,title:record.title,concepts:bindings.size});
     // Tool-call inputs are the plan-node source of truth; tool results
     // are the graded evidence. Probe calls have NO plan node id.
-    const calls=new Map<string,{nodeId:string;kind:LearningEvidence["kind"];question:string}>();
+    const calls=new Map<string,{nodeId:string;conceptId:string;kind:LearningEvidence["kind"];question:string}>();
     for(const message of record.messages??[]) {
       if(message.role!=="assistant" || !Array.isArray(message.content))continue;
       for(const block of message.content) {
         if(block.type!=="toolCall" || !["quiz","explain","probe","recall"].includes(block.name))continue;
         const args:unknown=block.arguments;
         if(!values(args))continue;
-        const nodeId=args.nodeId;
-        if(typeof nodeId!=="string")continue;
-        const kind=block.name==="explain" ? "explain" :
+        const nodeId=typeof args.nodeId==="string" ? args.nodeId : "";
+        const conceptId=typeof args.conceptId==="string" ? args.conceptId : "";
+        if(!nodeId && !conceptId)continue;
+        const kind=block.name==="explain"||block.name==="recall" ? "explain" :
           args.type==="predict" ? "predict" : "check";
-        calls.set(block.id,{nodeId,kind,question:typeof args.question==="string"?args.question:""});
+        calls.set(block.id,{nodeId,conceptId,kind,question:typeof args.question==="string"?args.question:""});
       }
     }
     for(const message of record.messages??[]) {
@@ -134,8 +135,8 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
       const answer=message.details;
       if(!values(answer) || answer.dismissed===true)continue;
       const call=calls.get(message.toolCallId);
-      if(!call || !bindings.has(call.nodeId)) {unlinkedAnswers++;continue;}
-      const concept=concepts.get(bindings.get(call.nodeId)!)!;
+      if(!call || (!bindings.has(call.nodeId) && !call.conceptId)) {unlinkedAnswers++;continue;}
+      const identity=bindings.get(call.nodeId) || call.conceptId;
       const outcome=answer.correct===true ? "correct" :
         answer.correct===false ? "incorrect" : "ungraded";
       const isCheck=call.kind!=="predict";
@@ -144,14 +145,12 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
         question:call.question,kind:call.kind,outcome,
         answeredAt:typeof answer.answeredAt==="string"?answer.answeredAt:null,
       };
-      concept.evidence.push(evidence);
-      if(isCheck) {
-        if(outcome==="correct")concept.correctChecks++;
-        else if(outcome==="incorrect")concept.incorrectChecks++;
-        else concept.ungradedChecks++;
-      }
+      pending.push({id:identity,evidence});
+      // Assessment belongs to a real plan objective or an explicit
+      // canonical lookup. Identity resolution waits until every session
+      // has been scanned, so source ordering cannot drop early probes.
     }
-    for(const edge of record.tree.edges??[]) {
+    for(const edge of record.tree?.edges??[]) {
       const from=bindings.get(edge.from),to=bindings.get(edge.to);
       if(!from||!to)continue;
       if(from===to) {
@@ -171,6 +170,16 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
       dependencies.set(key,{from,to,sessions:[record.id]});
       const outs=graphAdj.get(from);
       if(outs)outs.add(to);else graphAdj.set(from,new Set([to]));
+    }
+  }
+  for(const {id,evidence} of pending) {
+    const concept=concepts.get(id);
+    if(!concept) { unlinkedAnswers++; continue; }
+    concept.evidence.push(evidence);
+    if(evidence.kind!=="predict") {
+      if(evidence.outcome==="correct")concept.correctChecks++;
+      else if(evidence.outcome==="incorrect")concept.incorrectChecks++;
+      else concept.ungradedChecks++;
     }
   }
   return {
