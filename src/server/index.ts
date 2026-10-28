@@ -53,3 +53,4 @@ export * from "./probability-lab";
 export * from "./stopping";
 export * from "./quant-exam";
 export * from "./mistakes";
+export * from "./retrieval";

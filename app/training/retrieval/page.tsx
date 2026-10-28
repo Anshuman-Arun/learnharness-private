@@ -1,0 +1,1 @@
+import{TrainingShell}from'@/components/training-shell';import{RetrievalQueue}from'@/components/retrieval-queue';export default function Page(){return <TrainingShell title="Spaced retrieval" description="Return to recorded gaps after a delay. Commit a fresh answer, then rate the difficulty and inspect the next interval."><RetrievalQueue/></TrainingShell>;}
