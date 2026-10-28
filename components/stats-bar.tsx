@@ -83,11 +83,14 @@ export function StatsBar({
 	const { catalog } = useModelCatalog();
 	const limits = useMemo(() => (catalog ? catalogLimits(catalog) : undefined), [catalog]);
 	const ctx = contextWindow({ turns }, limits);
-	const { cost, unpriced } = sessionCost({ turns });
+	const planTurn = (turn: TurnUsage) => turn.model.startsWith("openai-chatgpt:");
+	const planCount = turns.filter(planTurn).length;
+	const apiTurns = turns.filter((turn) => !planTurn(turn));
+	const { cost, unpriced } = sessionCost({ turns: apiTurns });
 	// Honest cost: show dollars only when at least one turn priced;
 	// otherwise "—" (never a fake $0.0000).
-	const pricedCount = turns.length - unpriced;
-	const costLabel = pricedCount > 0 ? formatUsd(cost) : "—";
+	const pricedCount = apiTurns.length - unpriced;
+	const costLabel = pricedCount > 0 ? formatUsd(cost) : planCount > 0 ? "Plan" : "—";
 	const lastModel = turns.at(-1)?.model;
 	const chatGPTConnected = catalog?.providers.some((provider) =>
 		provider.id === "openai-chatgpt" && provider.keyPresent,
@@ -146,9 +149,12 @@ export function StatsBar({
 								</span>
 							</div>
 							<div className="flex justify-between gap-2">
-								<span>Total cost</span>
+								<span>API cost estimate</span>
 								<span className="tabular-nums text-card-foreground">{costLabel}</span>
 							</div>
+							{planCount > 0 && (
+								<div className="flex justify-between gap-2"><span>ChatGPT plan turns</span><span>{planCount}</span></div>
+							)}
 							{unpriced > 0 && (
 								<div className="flex justify-between gap-2">
 									<span>Unpriced turns</span>
@@ -171,7 +177,7 @@ export function StatsBar({
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>
-													<span>{c === null ? "—" : formatUsd(c)}</span>
+													<span>{planTurn(turn) ? "Plan" : c === null ? "—" : formatUsd(c)}</span>
 												</span>
 											</li>
 										);
