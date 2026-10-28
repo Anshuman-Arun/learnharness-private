@@ -60,7 +60,9 @@ try {
       await new Promise(r=>setTimeout(r,250));
       const opened=await page.$eval("aside.sidebar-motion",el=>el.getBoundingClientRect().left);
       assert.ok(opened>=-1,"mobile navigation opens as overlay");
-      await page.click('button[aria-label="Close navigation menu"]');
+      // The drawer covers the left 288px; dismiss on the visible scrim
+      // to the right rather than clicking a point underneath the drawer.
+      await page.mouse.click(size.width-8,Math.floor(size.height/2));
       await new Promise(r=>setTimeout(r,250));
     }
     // Wait for ResizeObserver + camera fit to run, then verify geometry.
