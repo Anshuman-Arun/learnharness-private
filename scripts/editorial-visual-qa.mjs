@@ -81,7 +81,9 @@ try {
         // settings persistence is separately tested in the unit suite.
         root.classList.toggle("dark",t==="dark");
         root.dataset.theme=t;
-        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        // Check the SETTLED appearance rather than a mid-transition frame;
+        // active-tab ink and fill cross near the same gray during color fades.
+        await new Promise(r=>setTimeout(r, 350));
         const canvas=document.querySelector("canvas");
         const rect=canvas?.getBoundingClientRect();
         const styles=getComputedStyle(root);
