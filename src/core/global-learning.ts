@@ -25,6 +25,11 @@ export interface LearningEvidence {
   kind: "check" | "predict" | "explain";
   outcome: "correct" | "incorrect" | "ungraded";
   answeredAt: string | null;
+  /** The learner's actual submitted solution, not the model's committed answer. */
+  answerText: string | null;
+  /** The learner's own explanation, if supplied alongside the answer. */
+  reasoning: string | null;
+  confidence: number | null;
 }
 export interface LearningConcept {
   id: string;
@@ -148,6 +153,15 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
         chatId:record.id,toolCallId:message.toolCallId,localNodeId:call.nodeId,
         question:call.question,kind:call.kind,outcome,
         answeredAt:typeof answer.answeredAt==="string"?answer.answeredAt:null,
+        answerText:typeof answer.text==="string" ? answer.text.slice(0,3000) :
+          Array.isArray(answer.answers) ?
+            answer.answers.filter((x):x is Record<string,unknown>=>values(x))
+              .map(x=>typeof x.label==="string"?x.label:"").filter(Boolean).join("; ").slice(0,3000)||null :
+            null,
+        reasoning:typeof answer.thinking==="string" ? answer.thinking.slice(0,3000) :
+          typeof answer.note==="string" ? answer.note.slice(0,3000) : null,
+        confidence:typeof answer.confidence==="number" && Number.isFinite(answer.confidence) &&
+          answer.confidence>=0 && answer.confidence<=100 ? answer.confidence : null,
       };
       pending.push({id:identity,evidence});
       // Assessment belongs to a real plan objective or an explicit
