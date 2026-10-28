@@ -18,6 +18,7 @@ describe("ChatGPT subscription usage attribution", () => {
     const runner=readFileSync(new URL("../src/agent/subagents/runner.ts",import.meta.url),"utf8");
     const extraction=readFileSync(new URL("../src/agent/subagents/extraction.ts",import.meta.url),"utf8");
     assert.ok(runner.includes("await deps.providerKeyMissing?.("));
-    assert.ok(extraction.includes("await deps.providerKeyMissing?.("));
+    assert.ok(extraction.includes("await deps.providerKeyMissing!("));
+    assert.ok(extraction.includes("if (!deps.providerKeyMissing) return;"), "direct-engine extraction remains synchronous and cancellable");
   });
 });
