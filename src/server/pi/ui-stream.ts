@@ -272,6 +272,7 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	};
 
 	const handle = (event: AgentEvent) => {
+		if (settled) return; // Do not double-persist a duplicate terminal event.
 		// THE LACAN FIX: ids uniquify HERE, before any view — the one seam
 		// every consumer downstream shares. No uniquifier → verbatim.
 		const uniqued = uniquifier ? uniquifier.event(event) : event;

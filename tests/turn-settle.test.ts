@@ -104,6 +104,17 @@ describe("runPiTurn — a settle failure can never be a clean end", () => {
 		assert.equal(errors.length, 1, "the learner is still told");
 	});
 
+	it("an accidental duplicate agent_end cannot persist the same turn twice", async () => {
+		let writes = 0;
+		const handle = runPiTurn({
+			agent: fakeAgent({events: [AGENT_END, AGENT_END]}) as never,
+			onFinish: () => void (writes++),
+		});
+		const streamed = await frames(handle.subscribe());
+		assert.equal(writes, 1, "idempotent terminal prevents duplicate usage/record writes");
+		assert.equal(streamed.filter(x => x === "[DONE]").length, 1);
+	});
+
 	it("a healthy settle emits no error and still ends in [DONE] (the regression)", async () => {
 		let settled = 0;
 		const handle = runPiTurn({
