@@ -36,6 +36,16 @@ describe("guided answer visibility", () => {
 		assert.match(html, /value="explain"/);
 		assert.match(html, /switch back at any time/);
 	});
+	it("preserves correct selected options on a partial multi-select without revealing the rest", () => {
+		const quiz: QuestionAnswerData = { ...answer, kind: "quiz", correct: false, correctIndices: [1, 2], options: [{ index: 1, label: "Two" }, { index: 2, label: "Three" }, { index: 3, label: "Four" }], answers: [{ index: 1, label: "Two", value: "two" }], explanation: "SECRET_PARTIAL_EXPLANATION" };
+		const html = renderToStaticMarkup(<AnsweredCard answer={quiz} teachingMode="guided" />);
+		const { document } = parseHTML(html);
+		assert.equal(document.querySelectorAll('[data-mark="check"]').length, 1);
+		assert.equal(document.querySelectorAll('[data-mark="x"]').length, 0);
+		assert.ok(!html.includes("SECRET_PARTIAL_EXPLANATION"));
+		const mixed = renderToStaticMarkup(<AnsweredCard answer={{ ...quiz, answers: [...quiz.answers, { index: 3, label: "Four", value: "four" }] }} teachingMode="guided" />);
+		assert.equal(parseHTML(mixed).document.querySelectorAll('[data-mark="x"]').length, 1);
+	});
 	it("reveals on an actual click and switches the same mounted card between modes", async () => {
 		const { window } = parseHTML("<html><body><div id='root'></div></body></html>");
 		const prior = { window: globalThis.window, document: globalThis.document };
