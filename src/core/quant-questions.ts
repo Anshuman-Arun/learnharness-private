@@ -16,4 +16,4 @@ export function quantQuestion(section:QuantSection,seed:number,index:number):Qua
  const n=integer(4,20);return{section,prompt:`A uniformly random permutation has ${n} distinct elements. What is its expected number of inversions?`,expected:n*(n-1)/4,explanation:`Each of n(n−1)/2 index pairs is inverted with probability 1/2. Sum the indicators' expectations.`,tolerance:1e-6,family:'inversion-indicators'};
 }
 export function numericAnswer(text:string):number|null{const s=text.trim();if(!s)return null;const fraction=s.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*\/\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))$/);const n=fraction?Number(fraction[1])/Number(fraction[2]):/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(s)?Number(s):NaN;return Number.isFinite(n)?n:null;}
-export function quantCorrect(q:QuantQuestion,text:string){const value=numericAnswer(text);return value!==null&&Math.abs(value-q.expected)<=Math.max(q.tolerance,q.tolerance*Math.abs(q.expected));}
+export function quantCorrect(q:QuantQuestion,text:string){const value=numericAnswer(text);return value!==null&&Math.abs(value-q.expected)<=q.tolerance;}
