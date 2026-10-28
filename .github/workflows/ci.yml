@@ -19,8 +19,15 @@ env:
 jobs:
   quality:
     name: Typecheck, tests, lint
-    runs-on: ubuntu-24.04
+    runs-on: windows-2025
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      # npm scripts use cmd.exe by default on Windows. Use the runner's
+      # Git Bash so the test script's NODE_ENV assignment stays portable.
+      npm_config_script_shell: 'C:\Program Files\Git\bin\bash.exe'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -38,13 +45,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Standard macos-15 runners are Apple Silicon (not macos-15-intel).
-          - os: macos-15
-            platform: mac-arm64
           - os: windows-2025
             platform: windows-x64
-          - os: ubuntu-24.04
-            platform: linux-x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     defaults:
