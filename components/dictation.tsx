@@ -742,7 +742,11 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					Stop
 				</button>
 			</Hint>
-			<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-destructive" aria-hidden />
+			<span
+				className={phase === "recording" ? "size-2 shrink-0 rounded-full bg-primary shadow-[0_0_0_3px_color-mix(in_srgb,var(--primary)_20%,transparent)]" : phase === "connecting" ? "size-2 shrink-0 animate-pulse rounded-full bg-amber-500" : "size-2 shrink-0 rounded-full bg-muted-foreground"}
+				aria-hidden
+			/>
+			<span className="shrink-0 text-xs font-semibold text-foreground" role="status" aria-live="polite" data-testid="dictation-connection-state">{statusText}</span>
 			{/* Fixed width while recording — nothing ever appends text beside it
 			    (no interims, owner round 1). Cells carry no minimum width; the
 			    COUNT adapts to the measured row space (owner round 2). */}
@@ -750,7 +754,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 				{levels.slice(-cellCount).map((v, i) => (
 					<span
 						key={i}
-						className="min-w-0 flex-1 rounded-full bg-foreground/40"
+						className={recording ? "min-w-0 flex-1 rounded-full bg-primary" : "min-w-0 flex-1 rounded-full bg-muted-foreground/25"}
 						style={{ height: `${2 + Math.round(v * 14)}px` }}
 					/>
 				))}
