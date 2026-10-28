@@ -47,3 +47,4 @@ export * from "./arithmetic.ts";
 export * from "./cpp-workspace.ts";
 export * from "./cpp-runner.ts";
 export * from "./scratchpad.ts";
+export * from "./tablet.ts";

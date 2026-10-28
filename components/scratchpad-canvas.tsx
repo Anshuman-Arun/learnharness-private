@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef } from "react";
-import { Excalidraw, exportToBlob } from "@excalidraw/excalidraw";
+import { useEffect, useRef } from "react";
+import { Excalidraw, exportToBlob, CaptureUpdateAction } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI, AppState } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { EvidenceImage, ScratchpadPage } from "@/src/core";
@@ -9,13 +9,16 @@ import "@excalidraw/excalidraw/index.css";
 
 if (typeof window !== "undefined") (window as Window & { EXCALIDRAW_ASSET_PATH?: string }).EXCALIDRAW_ASSET_PATH = `${window.location.origin}/vendor/excalidraw/`;
 
-export default function ScratchpadCanvas({ page, onChange, onReady, disabled = false }: {
+export default function ScratchpadCanvas({ page, onChange, onReady, disabled = false, remoteRevision }: {
 	page: ScratchpadPage;
 	onChange: (page: ScratchpadPage) => void;
 	onReady: (capture: () => Promise<EvidenceImage>) => void;
 	disabled?: boolean;
+	remoteRevision?: number;
 }) {
 	const previous = useRef("");
+	const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+	useEffect(() => { if (remoteRevision !== undefined) apiRef.current?.updateScene({ elements: page.elements as unknown as readonly ExcalidrawElement[], captureUpdate: CaptureUpdateAction.NEVER }); }, [remoteRevision]);
 	function changed(elements: readonly ExcalidrawElement[], state: AppState) {
 		const signature = `${elements.reduce((sum, element) => sum + element.version, 0)}:${elements.length}:${state.scrollX}:${state.scrollY}:${state.zoom.value}:${state.viewBackgroundColor}`;
 		if (signature === previous.current) return;
@@ -23,6 +26,7 @@ export default function ScratchpadCanvas({ page, onChange, onReady, disabled = f
 		onChange({ ...page, elements: [...elements] as unknown as Record<string, unknown>[], view: { scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom.value, backgroundColor: state.viewBackgroundColor } });
 	}
 	function ready(api: ExcalidrawImperativeAPI) {
+		apiRef.current = api;
 		onReady(async () => {
 			const elements = structuredClone(api.getSceneElements());
 			if (!elements.length) throw new Error("Draw something on this page before attaching it");

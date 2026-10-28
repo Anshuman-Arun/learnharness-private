@@ -3,7 +3,9 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { emptyScratchpad, parseScratchpad, parseLearningEvidence, type Scratchpad, type ScratchpadPage, type EvidenceImage } from "@/src/core";
+import { emptyScratchpad, parseScratchpad, parseLearningEvidence, type Scratchpad, type ScratchpadPage, type EvidenceImage, type TabletLink } from "@/src/core";
+import { TabletPairing } from "@/components/tablet-pairing";
+import { useServerEvent, useServerResync } from "@/components/server-events";
 
 const Canvas = dynamic(async () => {
 	(window as Window & { EXCALIDRAW_ASSET_PATH?: string }).EXCALIDRAW_ASSET_PATH = `${window.location.origin}/vendor/excalidraw/`;
@@ -16,6 +18,8 @@ export function ScratchpadView({ sessionId, questionId }: { sessionId?: string; 
 	const [dirty, setDirty] = useState(false), [saving, setSaving] = useState(false), [capturing, setCapturing] = useState(false);
 	const [error, setError] = useState<string>(), [target, setTarget] = useState(sessionId ?? "new");
 	const [sessions, setSessions] = useState<Array<{ id: string; title: string }>>([]);
+	const [tabletLease, setTabletLease] = useState<TabletLink | null>(null), [pairBusy, setPairBusy] = useState(false);
+	const lease = useRef<TabletLink | null>(null); lease.current = tabletLease;
 	const current = useRef<Scratchpad | undefined>(undefined), locked = useRef(false), paused = useRef(false);
 	const capture = useRef<(() => Promise<EvidenceImage>) | undefined>(undefined);
 	const inflight = useRef<Promise<Scratchpad | undefined> | undefined>(undefined);
@@ -67,28 +71,42 @@ export function ScratchpadView({ sessionId, questionId }: { sessionId?: string; 
 		finally { locked.current = false; setSaving(false); }
 	}
 	useEffect(() => {
-		if (!pad || !dirty || paused.current) return;
+		if (!pad || !dirty || paused.current || tabletLease || pairBusy) return;
 		const local = setTimeout(keepDraft, 250), remote = setTimeout(() => void save(), 1000);
 		return () => { clearTimeout(local); clearTimeout(remote); };
-	}, [pad, dirty]);
+	}, [pad, dirty, tabletLease, pairBusy]);
 	useEffect(() => {
 		const preserve = () => keepDraft(); window.addEventListener("beforeunload", preserve);
 		return () => { window.removeEventListener("beforeunload", preserve); preserve(); };
 	}, [scope]);
 	function choose(next: Scratchpad) {
+		if (lease.current) return;
 		keepDraft(); paused.current = false; adopt(next, false); setPageId(next.pages[0]!.id); capture.current = undefined; setError(undefined);
 	}
 	function updatePage(next: ScratchpadPage) {
+		if (lease.current || pairBusy) return;
 		const latest = current.current; if (!latest) return;
 		adopt({ ...latest, pages: latest.pages.map((page) => page.id === next.id ? next : page) }, true);
 	}
+	async function remote() {
+		const latest = current.current;
+		if (!latest || !lease.current) return;
+		try {
+			const response = await fetch(`/api/training/scratchpad?id=${encodeURIComponent(latest.id)}`);
+			if (!response.ok) return;
+			const body = await response.json() as { pad: Scratchpad };
+			if (lease.current && current.current?.id === body.pad.id && body.pad.revision > current.current.revision) adopt(body.pad, false);
+		} catch {}
+	}
+	useServerEvent("scratchpad-changed", (event) => { if (event.id === current.current?.id) void remote(); });
+	useServerResync(() => void remote());
+	useEffect(() => { if (tabletLease) { setError(undefined); void remote(); } }, [tabletLease]);
 	async function attach() {
 		if (!pad || !capture.current || capturing) return;
 		setCapturing(true); setError(undefined);
 		try {
 			const image = await capture.current();
-			if (inflight.current) await inflight.current;
-			if (!await save()) return;
+			if (!lease.current) { if (inflight.current) await inflight.current; if (!await save()) return; }
 			let chatId = target;
 			if (chatId === "new") {
 				const response = await fetch("/api/chats", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: pad.title }) });
@@ -103,20 +121,21 @@ export function ScratchpadView({ sessionId, questionId }: { sessionId?: string; 
 	}
 	if (!pad) return <p role={error ? "alert" : "status"}>{error ?? "Loading scratch work…"}</p>;
 	const page = pad.pages.find((item) => item.id === pageId) ?? pad.pages[0]!;
-	return <fieldset disabled={capturing} className="min-w-0 space-y-3">
+	return <fieldset disabled={capturing || pairBusy} className="min-w-0 space-y-3">
 		{error && <p role="alert" className="text-destructive">{error}</p>}
 		<div className="flex flex-wrap items-center gap-2">
-			<input aria-label="Scratchpad title" value={pad.title} onChange={(event) => adopt({ ...pad, title: event.target.value }, true)} className="min-w-0 rounded border bg-background p-2 text-sm" />
-			<button disabled={saving} onClick={() => { paused.current = false; void save(); }} className="rounded border px-3 py-2 text-sm">Save now</button>
-			<button disabled={saving} onClick={() => { paused.current = false; adopt({ ...pad, id: crypto.randomUUID(), revision: 0, title: `${pad.title.slice(0, 110)} copy` }, true); }} className="text-sm underline">Make a new copy</button>
+			<input aria-label="Scratchpad title" disabled={!!tabletLease} value={pad.title} onChange={(event) => adopt({ ...pad, title: event.target.value }, true)} className="min-w-0 rounded border bg-background p-2 text-sm" />
+			<button disabled={saving || !!tabletLease} onClick={() => { paused.current = false; void save(); }} className="rounded border px-3 py-2 text-sm">Save now</button>
+			<button disabled={saving || !!tabletLease} onClick={() => { paused.current = false; adopt({ ...pad, id: crypto.randomUUID(), revision: 0, title: `${pad.title.slice(0, 110)} copy` }, true); }} className="text-sm underline">Make a new copy</button>
 			<span role="status" className="text-xs text-muted-foreground">{saving ? "Saving…" : dirty ? "Unsaved changes" : pad.revision ? "Saved" : "New pad"}</span>
-			<select aria-label="Saved scratchpad" value={pad.id} onChange={(event) => { const next = pads.find((item) => item.id === event.target.value); if (next) choose(next); }} className="max-w-52 rounded border bg-background p-2 text-sm"><option value={pad.id}>{pad.title}</option>{pads.filter((item) => item.id !== pad.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select>
-			<button onClick={() => choose(emptyScratchpad(crypto.randomUUID(), crypto.randomUUID(), sessionId, questionId))} className="text-sm underline">New pad</button>
+			<select aria-label="Saved scratchpad" disabled={!!tabletLease} value={pad.id} onChange={(event) => { const next = pads.find((item) => item.id === event.target.value); if (next) choose(next); }} className="max-w-52 rounded border bg-background p-2 text-sm"><option value={pad.id}>{pad.title}</option>{pads.filter((item) => item.id !== pad.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select>
+			<button disabled={!!tabletLease} onClick={() => choose(emptyScratchpad(crypto.randomUUID(), crypto.randomUUID(), sessionId, questionId))} className="text-sm underline">New pad</button>
 		</div>
-		<div className="flex flex-wrap gap-2">{pad.pages.map((item) => <button key={item.id} aria-pressed={item.id === page.id} onClick={() => { setPageId(item.id); capture.current = undefined; }} className="rounded border px-3 py-1 text-sm">{item.name}</button>)}
-			<button disabled={pad.pages.length >= 12} onClick={() => { const next = emptyScratchpad("new", crypto.randomUUID()).pages[0]!; next.name = `Page ${pad.pages.length + 1}`; adopt({ ...pad, pages: [...pad.pages, next] }, true); setPageId(next.id); capture.current = undefined; }} className="text-sm underline">Add page</button>
+		<div className="flex flex-wrap gap-2">{pad.pages.map((item) => <button key={item.id} disabled={!!tabletLease} aria-pressed={item.id === page.id} onClick={() => { setPageId(item.id); capture.current = undefined; }} className="rounded border px-3 py-1 text-sm">{item.name}</button>)}
+			<button disabled={pad.pages.length >= 12 || !!tabletLease} onClick={() => { const next = emptyScratchpad("new", crypto.randomUUID()).pages[0]!; next.name = `Page ${pad.pages.length + 1}`; adopt({ ...pad, pages: [...pad.pages, next] }, true); setPageId(next.id); capture.current = undefined; }} className="text-sm underline">Add page</button>
 		</div>
-		<Canvas key={`${pad.id}:${page.id}`} page={page} disabled={capturing} onChange={updatePage} onReady={(ready) => { capture.current = ready; }} />
+		<TabletPairing key={pad.id} padId={pad.id} pageId={page.id} prepare={async () => { if (inflight.current) await inflight.current; return save(); }} onLease={setTabletLease} onBusy={setPairBusy} />
+		<Canvas key={`${pad.id}:${page.id}`} page={page} disabled={capturing || !!tabletLease || pairBusy} remoteRevision={tabletLease ? pad.revision : undefined} onChange={updatePage} onReady={(ready) => { capture.current = ready; }} />
 		<div className="flex flex-wrap items-center gap-3"><select aria-label="Scratchpad target session" value={target} onChange={(event) => setTarget(event.target.value)} className="max-w-full rounded border bg-background p-2 text-sm"><option value="new">New teaching session</option>{sessions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button data-testid="attach-scratchpad" disabled={capturing || saving} onClick={() => void attach()} className="rounded border px-3 py-2 text-sm">{capturing ? "Capturing…" : "Use this page in session"}</button></div>
 		<p className="text-xs text-muted-foreground">Only an explicit submission sends the snapshot to your model. Vector pages remain saved here. Add your typed or dictated explanation in the session before submitting.</p>
 	</fieldset>;
