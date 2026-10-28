@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import ReactFlow, { Background, Controls, MiniMap, MarkerType, Position, type Node, type Edge } from "@xyflow/react";
+import { ReactFlow, Background, Controls, MiniMap, MarkerType, Position, type Node, type Edge } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { GlobalLearningGraph, LearningConcept } from "@/src/core/global-learning.ts";
 
@@ -159,7 +159,7 @@ export function GlobalLearningMap() {
         displayed.length===0?<div className="p-5 text-sm text-muted-foreground">No matching saved lesson objectives yet.</div>:
         <ReactFlow nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{padding:.18,maxZoom:1}}
           minZoom={.08} maxZoom={2} nodesConnectable={false} nodesDraggable={false}
-          onNodeClick={(_,node)=>setSelected(node.id)}
+          onNodeClick={(_event, node:Node)=>setSelected(node.id)}
           onPaneClick={()=>setSelected(null)} proOptions={{hideAttribution:true}}>
           <Background gap={24} size={1} color="var(--border)"/>
           <Controls showInteractive={false}/>
