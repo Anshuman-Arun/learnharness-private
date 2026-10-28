@@ -6,7 +6,7 @@ import { GlyphMark } from "@/components/ui/glyph-mark";
 import { ThinkingBlock } from "@/components/thinking-block";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
-import type { QuestionAnswerData } from "@/src/core";
+import type { ChatSettings, QuestionAnswerData } from "@/src/core";
 import { parseAskInput, parseQuizInput } from "@/src/core";
 
 /**
@@ -19,8 +19,10 @@ import { parseAskInput, parseQuizInput } from "@/src/core";
  * client — the card reveals his answer, the committed correct answer, and
  * the explanation, with NO verdict chips (owner ruling 2026-09-27).
  */
-export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; input?: unknown }) {
+export function AnsweredCard({ answer, input, teachingMode }: { answer: QuestionAnswerData; input?: unknown; teachingMode?: ChatSettings["teachingMode"] }) {
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
+	const [revealOpen, setRevealOpen] = useState(false);
+	const answerVisible = teachingMode !== "guided" || answer.correct === true || revealOpen;
 	if (answer.dismissed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
@@ -100,7 +102,7 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 				<div className="flex flex-col gap-1.5 text-sm">
 					{answer.options?.map((opt) => {
 						const sel = selectedIdx.has(opt.index);
-						const key = isQuiz && correctIdx.has(opt.index);
+						const key = isQuiz && answerVisible && correctIdx.has(opt.index);
 						return (
 							<div
 								key={opt.index}
@@ -195,7 +197,12 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 			{/* px-3→removed: card p-4 + box px-3 double-inset sat the "Why" label deeper
 			    than the option box edges (owner, round 3). Sides flush with everything
 			    else; py-2 stays for vertical air. */}
-			{isQuiz && answer.explanation && (
+				{teachingMode === "guided" && !answerVisible && (isQuiz || isExplain) && (
+					<button type="button" className="mt-3 text-xs underline" onClick={() => setRevealOpen(true)}>
+						Show answer
+					</button>
+				)}
+				{isQuiz && answer.explanation && answerVisible && (
 				/* The TUCKED explanation — ALL questions (owner, 2026-10-07): the
 				   verdict shows, the explanation sits collapsed behind the Why
 				   toggle — viewable, never center stage. Identical to the
@@ -222,7 +229,7 @@ export function AnsweredCard({ answer, input }: { answer: QuestionAnswerData; in
 			{/* The explain reveal (owner ruling 2026-09-27): the committed answer
 			    — one field, reasoning included — shown on submit; no verdict,
 			    the model's next reply IS the grading. */}
-			{isExplain && answer.committed && (
+				{isExplain && answer.committed && answerVisible && (
 				<div className="mt-3 rounded-lg bg-muted py-2 text-sm text-muted-foreground">
 					<span className="font-medium text-foreground">The answer: </span>
 					<MessageResponse className="inline [&_p]:inline [&_p]:m-0">{answer.committed}</MessageResponse>
