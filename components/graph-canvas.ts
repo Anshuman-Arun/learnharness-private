@@ -560,6 +560,25 @@ function drawNameLines(
 
 // ─── The renderer ───────────────────────────────────────────────────────────
 
+/** Convert physical DOM pointer positions to the canvas's local camera
+ * coordinates when the document is CSS-zoomed (or Electron-scaled).
+ * This is pure so all zoom levels can be regression-tested without a DOM. */
+export function canvasPointerPosition(
+	clientX: number, clientY: number,
+	left: number, top: number,
+	physicalWidth: number, physicalHeight: number,
+	localWidth: number, localHeight: number,
+): Pt {
+	return {
+		x: (clientX - left) * (physicalWidth > 0 ? localWidth / physicalWidth : 1),
+		y: (clientY - top) * (physicalHeight > 0 ? localHeight / physicalHeight : 1),
+	};
+}
+
+export function effectiveCanvasDpr(deviceDpr: number, physicalWidth: number, localWidth: number): number {
+	return deviceDpr * (localWidth > 0 ? physicalWidth / localWidth : 1);
+}
+
 export class GraphCanvasRenderer {
 	private canvas: HTMLCanvasElement;
 	private ctx: CanvasRenderingContext2D;
@@ -1065,9 +1084,7 @@ export class GraphCanvasRenderer {
 		// camera uses unzoomed clientWidth/clientHeight. Convert pointer
 		// coordinates back into local canvas pixels, so hit-test and drag
 		// anchors remain exact at 75%, 125%, 150% and ultrawide zoom.
-		const sx = rect.width > 0 ? this.canvas.clientWidth / rect.width : 1;
-		const sy = rect.height > 0 ? this.canvas.clientHeight / rect.height : 1;
-		return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
+		return canvasPointerPosition(e.clientX, e.clientY, rect.left, rect.top, rect.width, rect.height, this.canvas.clientWidth, this.canvas.clientHeight);
 	}
 
 	private pickAt(px: number, py: number): CanvasNode | null {
@@ -1220,7 +1237,7 @@ export class GraphCanvasRenderer {
 	private syncSize(): void {
 		const w = this.canvas.clientWidth;
 		const h = this.canvas.clientHeight;
-		const dpr = (window.devicePixelRatio || 1) * (this.canvas.clientWidth > 0 ? this.canvas.getBoundingClientRect().width / this.canvas.clientWidth : 1);
+		const dpr = effectiveCanvasDpr(window.devicePixelRatio || 1, this.canvas.getBoundingClientRect().width, this.canvas.clientWidth);
 		const bw = Math.max(1, Math.round(w * dpr));
 		const bh = Math.max(1, Math.round(h * dpr));
 		if (this.canvas.width !== bw || this.canvas.height !== bh) {
@@ -1626,7 +1643,7 @@ export class GraphCanvasRenderer {
 		if (!data || !settings) return;
 		const w = this.canvas.clientWidth;
 		const h = this.canvas.clientHeight;
-		const dpr = (window.devicePixelRatio || 1) * (this.canvas.clientWidth > 0 ? this.canvas.getBoundingClientRect().width / this.canvas.clientWidth : 1);
+		const dpr = effectiveCanvasDpr(window.devicePixelRatio || 1, this.canvas.getBoundingClientRect().width, this.canvas.clientWidth);
 		const ctx = this.ctx;
 
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
