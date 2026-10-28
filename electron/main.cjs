@@ -224,7 +224,13 @@ function startServer(port, healthSecret) {
 		child.stderr.on("data", fwd);
 		child.on("exit", (code, signal) => {
 			log(`server exited (code=${code} signal=${signal})`);
-			if (serverProcess === child) serverProcess = null;
+			if (serverProcess !== child) return; // already shutting down
+			serverProcess = null;
+			// The port may be recycled by another local process. Never leave
+			// an Electron window with privileged preload pointing at a dead
+			// origin that a different server can subsequently occupy.
+			for (const win of BrowserWindow.getAllWindows()) win.destroy();
+			app.quit();
 		});
 		child.once("error", (error) => {
 			log(`server could not start: ${error.message}`);
