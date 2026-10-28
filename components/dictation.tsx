@@ -518,6 +518,16 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				return;
 			}
 			streamRef.current = stream;
+			// A USB/Bluetooth mic can disappear mid-question. Stop claiming
+			// "Connected · listening" immediately if its capture track ends,
+			// and never silently switch to a different device.
+			for (const track of stream.getAudioTracks()) {
+				track.addEventListener("ended", () => {
+					if (gen !== genRef.current) return;
+					setError("Microphone disconnected — select another in Settings → General");
+					cleanup();
+				}, { once: true });
+			}
 
 			// Mitigation C: app-lifetime context + memoized worklet module —
 			// per-run costs (context creation, module fetch) are gone.
@@ -555,6 +565,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			const msg =
 				e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")
 					? "Microphone permission denied"
+					: e instanceof DOMException && (e.name === "NotFoundError" || e.name === "OverconstrainedError")
+						? "Selected microphone unavailable — choose another in Settings → General"
 					: e instanceof Error
 						? e.message
 						: "mic unavailable";
