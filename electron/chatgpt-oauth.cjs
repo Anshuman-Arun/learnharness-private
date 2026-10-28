@@ -30,6 +30,18 @@ function secureEqual(left, right) {
 	return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function storageSecure(safeStorage) {
+	// Electron's Linux "basic_text" backend derives encryption from a
+	// hard-coded password and provides no meaningful protection at rest.
+	try {
+		if (!safeStorage?.isEncryptionAvailable?.()) return false;
+		const backend = safeStorage.getSelectedStorageBackend?.();
+		return backend !== "basic_text" && backend !== "unknown";
+	} catch {
+		return false;
+	}
+}
+
 function createEncryptedCredentialStore(filePath, safeStorage) {
 	const chains = new Map();
 
@@ -44,7 +56,7 @@ function createEncryptedCredentialStore(filePath, safeStorage) {
 		if (envelope?.version !== FILE_VERSION || typeof envelope.ciphertext !== "string") {
 			throw new Error("Saved ChatGPT credentials have an unsupported format.");
 		}
-		if (!safeStorage.isEncryptionAvailable()) {
+		if (!storageSecure(safeStorage)) {
 			throw new Error("Secure credential storage is unavailable on this system.");
 		}
 		const plaintext = safeStorage.decryptString(Buffer.from(envelope.ciphertext, "base64"));
@@ -56,18 +68,24 @@ function createEncryptedCredentialStore(filePath, safeStorage) {
 	}
 
 	async function writeAll(credentials) {
-		if (!safeStorage.isEncryptionAvailable()) {
+		if (!storageSecure(safeStorage)) {
 			throw new Error("Secure credential storage is unavailable on this system.");
 		}
 		await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
 		const ciphertext = safeStorage.encryptString(JSON.stringify(credentials)).toString("base64");
 		const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-		await fs.promises.writeFile(
-			temporary,
-			JSON.stringify({ version: FILE_VERSION, encryption: "electron.safeStorage", ciphertext }),
-			{ encoding: "utf8", mode: 0o600 },
-		);
-		await fs.promises.rename(temporary, filePath);
+		try {
+			await fs.promises.writeFile(
+				temporary,
+				JSON.stringify({ version: FILE_VERSION, encryption: "electron.safeStorage", ciphertext }),
+				{ encoding: "utf8", mode: 0o600, flag: "wx" },
+			);
+			await fs.promises.rename(temporary, filePath);
+		} finally {
+			await fs.promises.unlink(temporary).catch((error) => {
+				if (error?.code !== "ENOENT") throw error;
+			});
+		}
 	}
 
 	function enqueue(providerId, task) {
@@ -400,7 +418,7 @@ async function revokeCredential(credential) {
 	if (!response.ok) throw new Error("ChatGPT could not be disconnected remotely. Try again.");
 }
 
-async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcMain, log }) {
+async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcMain, log, authorizeIpc }) {
 	const credentialFile = path.join(userDataDir, "chatgpt-oauth.enc.json");
 	const deviceFile = path.join(userDataDir, "chatgpt-device-id");
 	const credentials = createEncryptedCredentialStore(credentialFile, safeStorage);
@@ -410,7 +428,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 	let loginState = { connecting: false, phase: "idle" };
 
 	async function status() {
-		if (!safeStorage.isEncryptionAvailable()) {
+		if (!storageSecure(safeStorage)) {
 			return { available: false, connected: false, error: "Secure credential storage is unavailable on this system." };
 		}
 		try {
@@ -419,9 +437,10 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 			return {
 				available: true,
 				connected,
-				connecting: connected ? false : loginState.connecting,
-				phase: connected ? "connected" : loginState.phase,
-				...(loginState.authorizationUrl ? { authorizationUrl: loginState.authorizationUrl } : {}),
+				connecting: loginState.connecting,
+				phase: loginState.connecting ? loginState.phase : connected ? "connected" : loginState.phase,
+				...(loginState.connecting && loginState.phase === "waiting" && loginState.authorizationUrl
+					? { authorizationUrl: loginState.authorizationUrl } : {}),
 				...(loginState.error ? { error: loginState.error } : {}),
 			};
 		} catch (error) {
@@ -431,7 +450,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 
 	async function signIn() {
 		if (pendingLogin) return status();
-		if (!safeStorage.isEncryptionAvailable()) throw new Error("Secure credential storage is unavailable on this system.");
+		if (!storageSecure(safeStorage)) throw new Error("Secure credential storage is unavailable on this system.");
 		let announceStarted;
 		const started = new Promise((resolve) => {
 			announceStarted = resolve;
@@ -452,11 +471,11 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 					if (next.authorizationUrl) announceStarted();
 				},
 			);
-			await credentials.modify(PROVIDER_ID, async () => credential);
+			controller.signal.throwIfAborted();
+			await credentials.modify(PROVIDER_ID, async () => credential, { signal: controller.signal });
 			loginState = { connecting: false, phase: "connected" };
 		})().catch((error) => {
 			loginState = {
-				...loginState,
 				connecting: false,
 				phase: "error",
 				error: String(error?.message ?? error),
@@ -490,9 +509,20 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 	async function disconnect() {
 		await cancelSignIn();
 		const credential = await credentials.read(PROVIDER_ID);
-		if (credential?.type === "oauth") await revokeCredential(credential);
+		// Revocation is best-effort, but local disconnect MUST succeed even
+		// during an outage or provider revocation failure.
 		await credentials.delete(PROVIDER_ID);
 		loginState = { connecting: false, phase: "idle" };
+		try {
+			if (credential?.type === "oauth") await revokeCredential(credential);
+		} catch {
+			log("ChatGPT remote revocation could not be confirmed.");
+			loginState = {
+				connecting: false,
+				phase: "idle",
+				error: "Disconnected locally. Remote revocation could not be confirmed.",
+			};
+		}
 		return status();
 	}
 
@@ -534,11 +564,19 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 	const address = server.address();
 	if (!address || typeof address === "string") throw new Error("ChatGPT OAuth broker did not bind to TCP.");
 
-	ipcMain.handle("lh:chatgpt:status", () => status());
-	ipcMain.handle("lh:chatgpt:sign-in", () => signIn());
-	ipcMain.handle("lh:chatgpt:cancel-sign-in", () => cancelSignIn());
-	ipcMain.handle("lh:chatgpt:open-authorization", () => openAuthorization());
-	ipcMain.handle("lh:chatgpt:disconnect", () => disconnect());
+	// Do not trust renderer IPC merely because the channel name is private.
+	// An untrusted iframe or navigated window must never manage OAuth.
+	const privileged = (fn) => (event) => {
+		if (typeof authorizeIpc !== "function" || !authorizeIpc(event)) {
+			throw new Error("Untrusted ChatGPT IPC sender.");
+		}
+		return fn();
+	};
+	ipcMain.handle("lh:chatgpt:status", privileged(status));
+	ipcMain.handle("lh:chatgpt:sign-in", privileged(signIn));
+	ipcMain.handle("lh:chatgpt:cancel-sign-in", privileged(cancelSignIn));
+	ipcMain.handle("lh:chatgpt:open-authorization", privileged(openAuthorization));
+	ipcMain.handle("lh:chatgpt:disconnect", privileged(disconnect));
 
 	return {
 		brokerUrl: `http://127.0.0.1:${address.port}`,
@@ -551,4 +589,4 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 	};
 }
 
-module.exports = { createChatGPTOAuthRuntime, createEncryptedCredentialStore, loadOrCreateDeviceId };
+module.exports = { createChatGPTOAuthRuntime, createEncryptedCredentialStore, loadOrCreateDeviceId, storageSecure };

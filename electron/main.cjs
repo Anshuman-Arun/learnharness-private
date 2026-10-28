@@ -315,6 +315,13 @@ function createWindow(url) {
 	});
 
 	const allowedOrigin = () => new URL(url).origin;
+	const openSafeExternal = (target) => {
+		try {
+			const parsed = new URL(target);
+			if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return;
+			void shell.openExternal(target);
+		} catch { /* Reject malformed and non-web URLs. */ }
+	};
 	// Deny-by-default; the ONLY grants are media (mic/STT groundwork) and
 	// clipboard-sanitized-write — the copy affordances in the transcript
 	// (md-blocks copy corners) call navigator.clipboard.writeText(), which
@@ -337,11 +344,11 @@ function createWindow(url) {
 	win.webContents.on("will-navigate", (event, target) => {
 		if (new URL(target).origin !== allowedOrigin()) {
 			event.preventDefault();
-			void shell.openExternal(target);
+			openSafeExternal(target);
 		}
 	});
 	win.webContents.setWindowOpenHandler(({ url: target }) => {
-		void shell.openExternal(target);
+		openSafeExternal(target);
 		return { action: "deny" };
 	});
 
@@ -442,7 +449,9 @@ function checkForUpdates({ manual = false } = {}) {
 }
 
 function installUpdateNow() {
-	// Kill the server BEFORE the quit-and-install (see block comment).
+	// Private builds have no updater. A stale renderer IPC command must not
+	// kill the learning server with no actual install to follow.
+	if (!autoUpdater) return;
 	try {
 		killServer();
 	} catch {
@@ -511,7 +520,6 @@ function installMenu() {
 				{ role: "about" },
 				// Manual check (Wave C): answers via native dialog — no renderer
 				// round-trip. The 24h automatic checks stay silent.
-				{ label: "Check for Updates…", click: () => checkForUpdates({ manual: true }) },
 				{ type: "separator" },
 				{ role: "hide" },
 				{ role: "hideOthers" },
@@ -569,25 +577,37 @@ async function main() {
 	process.on("SIGHUP", killServer);
 
 	await app.whenReady();
+	const devUrl = process.env.LH_DEV_URL;
+	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
+	const appOrigin = new URL(url).origin;
 
-	try {
+	// next dev runs in a different process without the broker capability;
+	// prevent false "connected" state that fails every model request.
+	if (!devUrl) try {
 		chatGPTOAuthRuntime = await createChatGPTOAuthRuntime({
 			userDataDir: app.getPath("userData"),
 			safeStorage,
 			shell,
 			ipcMain,
 			log,
+			authorizeIpc: (event) => {
+				const sender = event?.sender;
+				const frame = event?.senderFrame;
+				const win = sender && BrowserWindow.fromWebContents(sender);
+				return !!(sender && frame && frame === sender.mainFrame &&
+					frame.origin === appOrigin && win &&
+					win.webContents === sender && !win.isDestroyed());
+			},
 		});
 		log("ChatGPT OAuth broker ready");
 	} catch (err) {
 		log(`ChatGPT OAuth unavailable: ${err?.message ?? err}`);
 	}
+	if (devUrl) log("ChatGPT connection unavailable in desktop:dev; use a packaged build.");
 
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
 	// spawn, no packaging, full HMR. The rest of this shell still applies
 	// (guards, menu, single instance).
-	const devUrl = process.env.LH_DEV_URL;
-	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
 	if (!devUrl) {
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);

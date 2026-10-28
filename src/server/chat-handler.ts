@@ -7,6 +7,7 @@ import {
 	type TeachingAgent,
 } from "../agent/teacher-agent.ts";
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
+import { CHATGPT_PROVIDER_ID, getChatGPTBrokerStatus } from "../agent/chatgpt-broker.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
 import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
 import type { ModelRole } from "../../config.ts";
@@ -201,7 +202,10 @@ export async function handleChatInput(
 	// persist (nothing durable changes); wake-pipeline turns ride the same
 	// path. The affected tier is strong — the conversation chain's own tier
 	// (a chat.model override still resolves through it).
-	if (!providerKeyPresent(conversation.provider)) {
+	const authenticated = conversation.provider === CHATGPT_PROVIDER_ID
+		? (await getChatGPTBrokerStatus()).connected
+		: providerKeyPresent(conversation.provider);
+	if (!authenticated) {
 		const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
 		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
 		return Response.json(envelope, { status: 503 });
@@ -217,7 +221,7 @@ export async function handleChatInput(
 	// beginTurn, no liveness effects — and the record re-reads after
 	// because compaction appends the marker.
 	const conversationEngine = piEngineForSpec(conversation);
-	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
+	const modelIdForCompaction = `${conversation.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
 			chatStore: stores.chatStore,
