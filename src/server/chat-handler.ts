@@ -88,8 +88,21 @@ const jobRunner = createJobRunner({
 	// reads the resolved engine's provider and asks THIS check (the agent
 	// layer may not read the key store); a missing key refuses the spawn
 	// with the 503-envelope family instead of dying mid-run.
-	providerKeyMissing: (provider, tier) =>
-		providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]),
+	providerKeyMissing: async (provider, tier, modelId) => {
+		if (provider === CHATGPT_PROVIDER_ID) {
+			const status = await getChatGPTBrokerStatus();
+			if (!status.connected) return providerKeyMissingEnvelope(provider, [tier]);
+			try {
+				if (!modelId || !(await getChatGPTBrokerModels()).some((model) => model.id === modelId)) {
+					return providerKeyMissingEnvelope(provider, [tier]);
+				}
+			} catch {
+				return providerKeyMissingEnvelope(provider, [tier]);
+			}
+			return null;
+		}
+		return providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]);
+	},
 	// Search port wave (2026-09-20): the researcher's web_search runs on the
 	// injected port — resolved FRESH per job (key rotations land immediately).
 	// null = honestly unavailable; the dispatch-level drop (below) uses the
@@ -110,8 +123,21 @@ export const extraction = createExtractionPipeline({
 	// Key-presence gate (provider-key interlude, 2026-09-25): same check
 	// the job runner gets — a stage engine whose provider key is gone
 	// refuses BEFORE any batch runs (the typed throw), never mid-run.
-	providerKeyMissing: (provider, tier) =>
-		providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]),
+	providerKeyMissing: async (provider, tier, modelId) => {
+		if (provider === CHATGPT_PROVIDER_ID) {
+			const status = await getChatGPTBrokerStatus();
+			if (!status.connected) return providerKeyMissingEnvelope(provider, [tier]);
+			try {
+				if (!modelId || !(await getChatGPTBrokerModels()).some((model) => model.id === modelId)) {
+					return providerKeyMissingEnvelope(provider, [tier]);
+				}
+			} catch {
+				return providerKeyMissingEnvelope(provider, [tier]);
+			}
+			return null;
+		}
+		return providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]);
+	},
 });
 
 

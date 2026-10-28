@@ -721,7 +721,7 @@ export interface ExtractionModels {
 	 *  (the agent layer may not read the key store); absent in tests that
 	 *  inject engines directly (test engines never owe a key). A keyless
 	 *  stage refuses with ProviderKeyMissingError BEFORE any batch runs. */
-	providerKeyMissing?: (provider: string, tier: ModelSlotName) => ProviderKeyMissing | null;
+	providerKeyMissing?: (provider: string, tier: ModelSlotName, modelId?: string) => ProviderKeyMissing | null | Promise<ProviderKeyMissing | null>;
 }
 
 export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
@@ -796,7 +796,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  found unset (test values count as configured — they ARE engines),
 	 *  and whether a configured stage's provider key is gone (provider-key
 	 *  interlude, 2026-09-25) — both refuse BEFORE any batch runs. */
-	function refuseIfStagesUnready(): void {
+	async function refuseIfStagesUnready(): Promise<void> {
 		const stages: readonly [ModelRole, PiEngine | undefined][] = [
 			["extractor", stageEngine("extractor", deps.extractor)],
 			["auditor", stageEngine("auditor", deps.auditor)],
@@ -811,7 +811,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		// auditor); fixing that key re-gates and the next run surfaces the
 		// next offender, if any.
 		for (const [role, engine] of stages) {
-			const refusal = deps.providerKeyMissing?.(engine!.providerId ?? engine!.model.provider, ROLE_SLOT[role]);
+			const refusal = await deps.providerKeyMissing?.(engine!.providerId ?? engine!.model.provider, ROLE_SLOT[role], engine!.model.id);
 			if (refusal) {
 				console.info(`[extraction] refused — ${JSON.stringify(refusal)}`);
 				throw new ProviderKeyMissingError(refusal.provider, refusal.slots);
@@ -1110,7 +1110,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// (2026-09-25): the write channel needs extractor + auditor
 			// engines AND their providers' keys; a refusal lands BEFORE any
 			// stage runs (typed — the trigger skips, routes surface 503).
-			refuseIfStagesUnready();
+			await refuseIfStagesUnready();
 			const covered = coverageOf(record.messages, graphStore.readCoverage(), chatId);
 			if (covered.uncovered.length === 0) {
 				console.info(`[extraction ${chatId}] nothing uncovered — no-op`);
@@ -1306,7 +1306,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// BYOK per-need gate (owner, 2026-09-22) + key presence
 			// (2026-09-25): same refusal as the chat front door — no
 			// extractor/auditor engines, or a stage key gone, no run.
-			refuseIfStagesUnready();
+			await refuseIfStagesUnready();
 			// CHUNKED like the chat path (owner, 2026-09-28): each chunk is a
 			// standalone extract → audit → merge, so no single call carries a
 			// whole large file. Abort mid-run keeps earlier chunks merged
