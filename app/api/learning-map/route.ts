@@ -1,17 +1,9 @@
-import { stores } from "@/src/server/stores.ts";
-import { buildGlobalLearningGraph } from "@/src/core/global-learning.ts";
-import type { ChatRecord } from "@/src/core/contracts/chat.ts";
+import { globalLearningView } from "@/src/server";
 export const dynamic = "force-dynamic";
 
-/** Read-only: source transcripts and saved plans are the source of truth.
- * No migration or changes to the original graph ledgers are necessary. */
+/** Read-only: saved sessions and plans remain the source of truth. */
 export async function GET() {
-  const records:ChatRecord[]=[];
-  for(const summary of stores.chatStore.listChats()) {
-    const chat=stores.chatStore.getChat(summary.id);
-    if(chat)records.push(chat);
-  }
-  return Response.json(buildGlobalLearningGraph(records),{
-    headers:{"Cache-Control":"no-store"},
+  return Response.json(globalLearningView(), {
+    headers: { "Cache-Control": "no-store" },
   });
 }
