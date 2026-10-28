@@ -41,17 +41,18 @@ export function prepareChatGPTResponsesPayload<T extends { input: unknown }>(par
 		if (item.role === "system") return { ...item, role: "developer" };
 		return item;
 	});
-	if (params.tools !== undefined) {
-		if (!Array.isArray(params.tools)) throw new Error("ChatGPT plan received an invalid tool catalog.");
-		if (params.tools.length > 0) {
-			for (const tool of params.tools) {
+	const topLevelTools = (params as T & Record<string, unknown>).tools;
+	if (topLevelTools !== undefined) {
+		if (!Array.isArray(topLevelTools)) throw new Error("ChatGPT plan received an invalid tool catalog.");
+		if (topLevelTools.length > 0) {
+			for (const tool of topLevelTools) {
 				if (!object(tool) || (tool.type !== "function" && tool.type !== "custom")) {
 					throw new Error("This hosted tool cannot run through ChatGPT plan token-sharing.");
 				}
 			}
 			// Local function/custom tools must be inside input's
 			// additional_tools items, not the Platform top-level tools.
-			input.unshift({ type: "additional_tools", role: "developer", tools: params.tools });
+			input.unshift({ type: "additional_tools", role: "developer", tools: topLevelTools });
 		}
 	}
 	delete prepared.tools;
