@@ -13,6 +13,8 @@ import assert from "node:assert/strict";
 import { describe, it, it as test } from "node:test";
 import {
 	applyClusterLabels,
+	canvasPointerPosition,
+	effectiveCanvasDpr,
 	arrowGeometry,
 	isImpNodeId,
 	boxBlurRound,
@@ -413,4 +415,22 @@ describe("applyClusterLabels (the label-only rename channel)", () => {
 		);
 		assert.equal(changed, false);
 	});
+});
+
+describe("editorial zoom and graph input accuracy", () => {
+	for (const scale of [0.75, 1, 1.25, 1.5, 2]) {
+		it(`pointer hits the same node and backing store stays sharp at ${Math.round(scale * 100)}%`, () => {
+			const localWidth = 800;
+			const localHeight = 500;
+			const x = 300, y = 180;
+			const pos = canvasPointerPosition(
+				100 + x * scale, 70 + y * scale,
+				100, 70, localWidth * scale, localHeight * scale,
+				localWidth, localHeight,
+			);
+			assert.ok(Math.abs(pos.x - x) < 1e-8);
+			assert.ok(Math.abs(pos.y - y) < 1e-8);
+			assert.ok(Math.abs(effectiveCanvasDpr(2, localWidth * scale, localWidth) - 2 * scale) < 1e-8);
+		});
+	}
 });
