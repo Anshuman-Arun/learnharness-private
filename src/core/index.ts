@@ -87,3 +87,4 @@ export * from "./stopping";
 export * from "./quant-questions";
 export * from "./quant-exam";
 export * from "./mistakes";
+export * from "./training-evidence";
