@@ -47,7 +47,13 @@ const PRIVATE_FILENAMES = new Set([
 ]);
 
 function pathWithin(candidate: string, root: string): boolean {
-	const rel = path.relative(path.resolve(root), path.resolve(candidate));
+	const normalizedRoot = path.resolve(root);
+	const normalizedCandidate = path.resolve(candidate);
+	// Windows filesystem lookups are ordinarily case-insensitive. A learner
+	// must not bypass private application folders with alternate casing.
+	const from = process.platform === "win32" ? normalizedRoot.toLowerCase() : normalizedRoot;
+	const to = process.platform === "win32" ? normalizedCandidate.toLowerCase() : normalizedCandidate;
+	const rel = path.relative(from, to);
 	return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
