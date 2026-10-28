@@ -228,7 +228,9 @@ function credentialFields(data, previousScopes) {
 		data.token_type.toLowerCase() !== "bearer" ||
 		typeof data.expires_in !== "number" ||
 		!Number.isFinite(data.expires_in) ||
-		data.expires_in <= 0
+		data.expires_in <= 0 ||
+		data.expires_in > 366 * 24 * 60 * 60 ||
+		!Number.isFinite(Date.now() + data.expires_in * 1000)
 	) {
 		throw new Error("ChatGPT returned incomplete credentials.");
 	}

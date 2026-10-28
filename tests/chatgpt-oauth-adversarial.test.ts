@@ -76,8 +76,8 @@ describe("adversarial ChatGPT private-provider checks", () => {
       });
       try {
         for (const channel of ["lh:chatgpt:status", "lh:chatgpt:sign-in", "lh:chatgpt:disconnect", "lh:chatgpt:open-authorization"]) {
-          await assert.rejects(handlers.get(channel)!({trusted:true}), /Untrusted ChatGPT IPC sender/);
-          await assert.rejects(handlers.get(channel)!(), /Untrusted ChatGPT IPC sender/);
+          await assert.rejects(async () => handlers.get(channel)!({trusted:true}), /Untrusted ChatGPT IPC sender/);
+          await assert.rejects(async () => handlers.get(channel)!(), /Untrusted ChatGPT IPC sender/);
         }
         assert.equal((await handlers.get("lh:chatgpt:status")!(goodEvent) as {connected:boolean}).connected, false);
       } finally {runtime.close();}

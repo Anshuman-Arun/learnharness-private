@@ -171,7 +171,7 @@ function ChatGPTPlanRow() {
 					)}
 				</span>
 			</div>
-			{error && <p role="alert" className="pt-1 text-xs text-red-500">{error}</p>}
+			{(error || (status?.error && !dialogOpen)) && <p role="alert" className="pt-1 text-xs text-red-500">{error || status?.error}</p>}
 			{dialogOpen && status && (
 				<ChatGPTConnectDialog
 					status={status}

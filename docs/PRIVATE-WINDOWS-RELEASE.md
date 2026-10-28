@@ -20,3 +20,14 @@ Changing app identity intentionally changes Electron `userData`. Existing sessio
  
 ## Limits
 CI with dummy credentials cannot prove real ChatGPT authorization, entitlement, streaming/function tools, Windows OS keychain behavior, earbuds audio latency, or actual data migration. Production remains blocked until manual account and Windows smoke tests succeed.
+
+
+## Adversarial findings (2026-10-28)
+- Native ChatGPT IPC handlers now validate the invoking top-level frame, exact localhost app origin and owning BrowserWindow; arbitrary iframes cannot control sign-in or disconnect.
+- Linux `safeStorage` with the `basic_text` fallback is rejected even if its `isEncryptionAvailable()` reports true.
+- Local disconnect removes encrypted credentials even if the remote revocation server fails; Settings warns that remote revocation was not confirmed.
+- Signed-out ChatGPT-pinned turns now fail before the write-ahead message append rather than recording unanswered messages as if they were sent.
+- A stale renderer "install update" command no longer kills the running learning server.
+- Production boot verifies a randomly generated capability through the Next.js `/api/desktop-health` route before allowing Electron to load the localhost origin.
+- ChatGPT plan inference remains deliberately disabled in `desktop:dev`: the standalone Next dev server cannot securely receive the packaged app's OAuth broker grant.
+- Production release is still blocked pending live ChatGPT entitlements, tool-call streaming, signed-in/out restart, and actual mic/data QA.
