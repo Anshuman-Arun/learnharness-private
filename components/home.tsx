@@ -301,6 +301,7 @@ export function Home({
 										key={m}
 										type="button"
 										data-testid={`home-mode-${m}`}
+									aria-pressed={mode === m}
 										onClick={() => setMode(m)}
 										className={
 											"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
