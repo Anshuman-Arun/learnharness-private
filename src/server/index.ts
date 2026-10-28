@@ -50,3 +50,4 @@ export * from "./scratchpad.ts";
 export * from "./tablet.ts";
 export * from "./estimation";
 export * from "./probability-lab";
+export * from "./stopping";
