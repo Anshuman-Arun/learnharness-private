@@ -390,9 +390,12 @@ describe("adversarial ChatGPT private-provider checks", () => {
         if(url.endsWith("/oauth/token"))return Response.json({error:"invalid_grant"}, {status:400});
         throw new Error("Unexpected remote request "+url);
       };
+      const handlers = new Map<string,(event?:unknown,...args:unknown[])=>Promise<unknown>>();
+      let reauthorizationUrl: string | undefined;
       const runtime=await native.createChatGPTOAuthRuntime({
         userDataDir:dir,safeStorage,
-        shell:{openExternal:async()=>undefined}, ipcMain:{handle:()=>undefined},
+        shell:{openExternal:async(url:string)=>{reauthorizationUrl=url;}},
+        ipcMain:{handle:(channel:string,fn:(event?:unknown,...args:unknown[])=>Promise<unknown>)=>{handlers.set(channel,fn);}},
         authorizeIpc:()=>true,log:()=>undefined
       });
       try {
@@ -412,6 +415,13 @@ describe("adversarial ChatGPT private-provider checks", () => {
         assert.equal(noToken.status,401);
         const persisted=await fs.readFile(path.join(dir,"chatgpt-oauth.enc.json"),"utf8");
         assert.doesNotMatch(persisted,/test-user|client|expired|revoked/,"registration metadata remains encrypted");
+        await handlers.get("lh:chatgpt:sign-in")!({});
+        assert.ok(reauthorizationUrl,"reconnect should open the system browser");
+        const authorization = new URL(reauthorizationUrl);
+        assert.equal(authorization.searchParams.get("client_id"),"client",
+          "reactivation must reuse the original issued OAuth client, not dynamic registration");
+        assert.equal(authorization.searchParams.get("login_hint"),null);
+        await handlers.get("lh:chatgpt:cancel-sign-in")!({});
       } finally {runtime.close();globalThis.fetch=oldFetch;}
     });
   });
