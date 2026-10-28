@@ -118,6 +118,30 @@ describe("parseAppearanceSettingsBody", () => {
 		});
 	});
 
+	it("round-trips all editorial appearance fields through the server write parser", () => {
+		const input = {
+			mode: "system",
+			accent: "violet",
+			accentIntensity: 22,
+			zoomPercent: 125,
+			corners: "round",
+			borders: "strong",
+			fontFamily: "Georgia",
+			background: null,
+		};
+		const parsed = parseAppearanceSettingsBody(input);
+		assert.ok(parsed.ok);
+		assert.deepEqual(parsed.settings, input);
+		for (const invalid of [
+			{ accent: "hotpink" }, { accentIntensity: 100 },
+			{ accentIntensity: 15.5 }, { zoomPercent: 24 },
+			{ zoomPercent: 501 }, { zoomPercent: Number.NaN },
+			{ corners: "pill" }, { borders: "invisible" },
+		]) {
+			assert.equal(parseAppearanceSettingsBody(invalid).ok, false, JSON.stringify(invalid));
+		}
+	});
+
 	it("rejects bad enums, ranges, and colors — with specific messages, never clamps", () => {
 		const cases: unknown[] = [
 			{ mode: "sepia" },
