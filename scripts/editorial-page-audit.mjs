@@ -171,6 +171,29 @@ try{
     await open(ctx,"/");
     await page.waitForSelector('svg[aria-label="Plan diagram"]',{timeout:25000});
     await snap(ctx,"home-"+mode);
+    // Verify all seven selectable accent colors on the real brand mark.
+    // Only the root dataset is overridden: the same var resolution as
+    // AppearanceProvider; this does not persist or change the user's data.
+    for(const color of ["ink","cobalt","teal","amber","coral","violet","rose"]) {
+      const palette=await page.evaluate(ac=>{
+        const root=document.documentElement;root.dataset.accent=ac;
+        const mark=document.querySelector("svg[viewBox='0 0 806 806']");
+        const shapes=[...mark.querySelectorAll("path,circle")];
+        return {
+          background:getComputedStyle(root).getPropertyValue("--background").trim(),
+          primary:getComputedStyle(root).getPropertyValue("--primary").trim(),
+          fills:shapes.map(x=>getComputedStyle(x).fill),
+        };
+      },color);
+      assert.ok(contrast(rgb(palette.background),rgb(palette.primary))>=3,
+        `accent ${color} legible on ${mode}`);
+      assert.equal(palette.fills[0],palette.fills[2],
+        `accent ${color} has no mismatched terminal color`);
+      const brand=await page.$(".lh-editorial-brand");
+      assert.ok(brand,"Brand link exists");
+      await brand.screenshot({path:join(out,`brand-${mode}-${color}.png`)});
+    }
+    await page.evaluate(()=>document.documentElement.dataset.accent="coral");
     await page.click('[data-testid="home-graph-view-toggle"]');
     await new Promise(r=>setTimeout(r,300));
     await snap(ctx,"home-atlas-"+mode);
