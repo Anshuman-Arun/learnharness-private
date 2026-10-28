@@ -1061,7 +1061,13 @@ export class GraphCanvasRenderer {
 
 	private eventPos(e: { clientX: number; clientY: number }): Pt {
 		const rect = this.canvas.getBoundingClientRect();
-		return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+		// CSS interface zoom changes the physical DOMRect, but the canvas
+		// camera uses unzoomed clientWidth/clientHeight. Convert pointer
+		// coordinates back into local canvas pixels, so hit-test and drag
+		// anchors remain exact at 75%, 125%, 150% and ultrawide zoom.
+		const sx = rect.width > 0 ? this.canvas.clientWidth / rect.width : 1;
+		const sy = rect.height > 0 ? this.canvas.clientHeight / rect.height : 1;
+		return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
 	}
 
 	private pickAt(px: number, py: number): CanvasNode | null {
@@ -1214,7 +1220,7 @@ export class GraphCanvasRenderer {
 	private syncSize(): void {
 		const w = this.canvas.clientWidth;
 		const h = this.canvas.clientHeight;
-		const dpr = window.devicePixelRatio || 1;
+		const dpr = (window.devicePixelRatio || 1) * (this.canvas.clientWidth > 0 ? this.canvas.getBoundingClientRect().width / this.canvas.clientWidth : 1);
 		const bw = Math.max(1, Math.round(w * dpr));
 		const bh = Math.max(1, Math.round(h * dpr));
 		if (this.canvas.width !== bw || this.canvas.height !== bh) {
@@ -1620,7 +1626,7 @@ export class GraphCanvasRenderer {
 		if (!data || !settings) return;
 		const w = this.canvas.clientWidth;
 		const h = this.canvas.clientHeight;
-		const dpr = window.devicePixelRatio || 1;
+		const dpr = (window.devicePixelRatio || 1) * (this.canvas.clientWidth > 0 ? this.canvas.getBoundingClientRect().width / this.canvas.clientWidth : 1);
 		const ctx = this.ctx;
 
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
