@@ -110,9 +110,11 @@ export function GlobalLearningMap() {
       const matching=new Set(list.filter(c=>c.title.toLowerCase().includes(query.trim().toLowerCase()) ||
         c.sources.some(s=>(s.summary??"").toLowerCase().includes(query.trim().toLowerCase()))).map(c=>c.id));
       // Include immediate prerequisites and dependents for local context.
-      for(const e of data.dependencies)if(matching.has(e.from)||matching.has(e.to)){
-        if(data.concepts.some(c=>c.id===e.from)) matching.add(e.from);
-        if(data.concepts.some(c=>c.id===e.to)) matching.add(e.to);
+      const seed=new Set(matching);
+      const available=new Set(list.map(c=>c.id));
+      for(const e of data.dependencies)if(seed.has(e.from)||seed.has(e.to)){
+        if(available.has(e.from)) matching.add(e.from);
+        if(available.has(e.to)) matching.add(e.to);
       }
       list=list.filter(c=>matching.has(c.id));
     }
@@ -157,7 +159,7 @@ export function GlobalLearningMap() {
         {loading?<div className="p-5 text-sm text-muted-foreground">Reading your saved lesson plans…</div>:
         error?<div role="alert" className="p-5 text-sm text-red-500">{error}</div>:
         displayed.length===0?<div className="p-5 text-sm text-muted-foreground">No matching saved lesson objectives yet.</div>:
-        <ReactFlow nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{padding:.18,maxZoom:1}}
+        <ReactFlow key={session+"|"+query+"|"+(showAll?"all":"focused")} nodes={graph.nodes} edges={graph.edges} fitView fitViewOptions={{padding:.18,maxZoom:1}}
           minZoom={.08} maxZoom={2} nodesConnectable={false} nodesDraggable={false}
           onNodeClick={(_event, node:Node)=>setSelected(node.id)}
           onPaneClick={()=>setSelected(null)} proOptions={{hideAttribution:true}}>
