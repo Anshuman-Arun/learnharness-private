@@ -17,6 +17,7 @@ import {
 	ChatGPTBrokerCredentialStore,
 } from "./chatgpt-broker.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
+import { prepareChatGPTResponsesPayload } from "./chatgpt-responses-payload.ts";
 
 /** App identity is immutable and shared by Models and every native Agent.
  * Agent's default Pi attribution otherwise overrides the Models identity. */
@@ -149,7 +150,18 @@ export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 				...options,
 				// Do not let an explicitly supplied ambient key/header bypass the
 				// ChatGPT broker boundary on the subscription-only path.
-				...(usesChatGPT ? { apiKey: undefined, env: undefined, headers: undefined } : {}),
+				...(usesChatGPT ? {
+					apiKey: undefined, env: undefined, headers: undefined,
+					// pi-ai's regular OpenAI transport may emit top-level
+					// function tools, explicit system messages, or sampling
+					// fields rejected by ChatGPT token-sharing preview.
+					// Keep the original onPayload hook for observability but
+					// enforce the subscription contract *after* it.
+					onPayload: async (payload, runtimeModel) => {
+						const changed = await options?.onPayload?.(payload, runtimeModel);
+						return prepareChatGPTResponsesPayload(changed ?? payload);
+					},
+				} : {}),
 				reasoning: level === "off" ? undefined : level,
 			}),
 	};

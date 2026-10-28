@@ -43,3 +43,14 @@ extraction admission refuse to run on ChatGPT until enabled. Turning it off
 prevents new background job admissions; do not treat this as a guarantee that
 an already-running request stops synchronously. Test revocation behavior before
 production release.
+
+## SIWC Responses payload guard
+The pi-ai OpenAI transport's default output was not guaranteed to comply with
+the ChatGPT plan-use preview: nonreasoning models may serialize explicit system
+messages and all models may serialize local function tools at the top level.
+The subscription-only payload admission guard now preserves every input item
+but converts system messages to developer messages and moves local function
+and custom tools into a developer `additional_tools` input item. It strips
+unsupported sampling/state fields and forces `store:false, stream:true`.
+Unsupported hosted tools and malformed histories fail before any request.
+Normal OpenAI API-key provider calls are unchanged.
