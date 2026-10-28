@@ -77,6 +77,16 @@ test('pre-merge production browser workflows', { timeout: 600000 }, async t => {
    const p = await page('/training/exam'); await click(p, 'Start timed exam'); await p.waitForSelector('[aria-label="Exam answer"]'); await fill(p, '[aria-label="Exam answer"]', '1/6'); await p.click('input[type=checkbox]'); await p.reload({ waitUntil: 'networkidle2' }); await p.waitForFunction(() => document.querySelector('[aria-label="Exam answer"]')?.value === '1/6', { polling: 100 }); await click(p, 'Save and next');
    await p.waitForFunction(() => document.querySelector('section h3')?.textContent.startsWith('2.'), { polling: 100 }); await click(p, 'Finish and reveal solutions'); await p.waitForSelector('[data-testid=exam-solution]'); const exam = (await api('/api/training/exam')).exams[0]; assert.ok(exam.responses[0].flagged); const r = await fetch(origin + '/api/training/exam', { method: 'POST', body: JSON.stringify({ action: 'answer', id: exam.id, revision: exam.revision, index: 0, answer: '9', reasoning: '', flagged: false }) }); assert.equal(r.status, 400); await p.close();
   });
+  await check('maximum-size OA handoff preserves all fifty long reasoning records', async () => {
+   let exam = (await api('/api/training/exam', { action: 'start', config: { counts: { arithmetic: 20, probability: 20, reasoning: 10 }, durationSeconds: 5400 } })).exam;
+   for (let index = 0; index < 50; index++) exam = (await api('/api/training/exam', { action: 'answer', id: exam.id, revision: exam.revision, index, answer: '1/6', reasoning: 'x'.repeat(4000), flagged: false })).exam;
+   exam = (await api('/api/training/exam', { action: 'finish', id: exam.id, revision: exam.revision })).exam;
+   const p = await page('/training/exam'); await p.waitForSelector('[data-testid=exam-solution]');
+   await click(p, 'Discuss this result with tutor'); await p.waitForFunction(() => location.pathname.startsWith('/chat/'), { polling: 100 });
+   await p.waitForSelector('[aria-label="Remove training-record.part-1-of-4.txt"]');
+   const pieces = await p.$$eval('[data-testid=evidence-input] [data-testid=submitted-evidence] pre', nodes => nodes.map(node => node.textContent));
+   const recovered = JSON.parse(pieces.join('')); assert.deepEqual(recovered.responses, exam.responses); assert.equal(recovered.questions.length, 50); await p.close();
+  });
   await check('scratchpad touch sync, offline/reload recovery, cross-pairing isolation and PC reclaim', async () => {
    await api('/api/training/scratchpad', pad('tablet-a'), 'PUT');
    const p = await browser.newPage(); p.setDefaultTimeout(20000); p.on('pageerror', e => errors.push(e.message)); await p.setViewport({ width: 1024, height: 1366, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
