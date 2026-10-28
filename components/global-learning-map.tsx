@@ -27,6 +27,7 @@ export function GlobalLearningMap() {
   const [size,setSize]=useState({w:0,h:0});
   const [view,setView]=useState<Viewport>({x:0,y:0,zoom:1});
   const dragRef=useRef<{x:number;y:number;startX:number;startY:number;moved:boolean}|null>(null);
+  const suppressedClick=useRef(false);
   const [dragging,setDragging]=useState(false);
   useEffect(()=>{
     const c=new AbortController();
@@ -92,6 +93,7 @@ export function GlobalLearningMap() {
   const fit=()=>{if(size.w&&size.h)setView(fitGraphView(box,size,floor));};
   const down=(e:ReactPointerEvent<HTMLDivElement>)=>{
     if(e.button!==0||view.zoom<=floor+1e-9)return;
+    suppressedClick.current=false;
     dragRef.current={startX:e.clientX,startY:e.clientY,x:view.x,y:view.y,moved:false};
     e.currentTarget.setPointerCapture(e.pointerId);
     setDragging(true);
@@ -103,6 +105,7 @@ export function GlobalLearningMap() {
     setView(v=>({...v,x:d.x+e.clientX-d.startX,y:d.y+e.clientY-d.startY}));
   };
   const end=(e:ReactPointerEvent<HTMLDivElement>)=>{
+    suppressedClick.current=!!dragRef.current?.moved;
     dragRef.current=null;setDragging(false);
     if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);
   };
@@ -137,7 +140,7 @@ export function GlobalLearningMap() {
         className={`relative min-h-[320px] flex-1 overflow-hidden select-none touch-none ${dragging?"cursor-grabbing":"cursor-grab"}`}
         onPointerDown={down} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
         onClick={e=>{
-          if(dragging||dragRef.current?.moved)return;
+          if(suppressedClick.current){suppressedClick.current=false;return;}
           const target=e.target;
           if(!(target instanceof Element))return;
           const group=target.closest<SVGGElement>("[data-testid^='plan-node-']");
