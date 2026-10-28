@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { hasLearningEvidence, parseLearningEvidence, MAX_EVIDENCE_IMAGE_BYTES, type LearningEvidence } from "@/src/core";
 
 /** Only submitted snapshots enter the agent's context; editing stays private. */
@@ -16,13 +16,19 @@ export function EvidenceInput({ value, onChange, disabled = false, onBusyChange 
 	const [source, setSource] = useState("");
 	const [name, setName] = useState("main.cpp");
 	const [language, setLanguage] = useState("cpp");
+	const latest = useRef(value);
+	latest.current = value;
+	function update(next: LearningEvidence | undefined) {
+		latest.current = next;
+		onChange(next);
+	}
 	useEffect(() => {
 		try {
 			const raw = sessionStorage.getItem("lh:incoming-evidence");
 			if (!raw) return;
 			const incoming = JSON.parse(raw) as { chatId: string; evidence: LearningEvidence };
 			if (window.location.pathname !== `/chat/${incoming.chatId}`) return;
-			onChange(parseLearningEvidence(incoming.evidence));
+			update(parseLearningEvidence(incoming.evidence));
 			sessionStorage.removeItem("lh:incoming-evidence");
 		} catch { setError("Could not recover the incoming work. Return to the workspace to bring it again."); }
 		// A handoff is consumed once by the mounted input for this session.
@@ -41,13 +47,13 @@ export function EvidenceInput({ value, onChange, disabled = false, onBusyChange 
 					reader.readAsDataURL(file);
 				});
 			}));
-			onChange(parseLearningEvidence({ ...value, images: [...(value?.images ?? []), ...images] }));
+			update(parseLearningEvidence({ ...latest.current, images: [...(latest.current?.images ?? []), ...images] }));
 		} catch (cause) { setError(cause instanceof Error ? cause.message : "Could not attach work"); }
 		finally { setReading(false); onBusyChange?.(false); }
 	}
 	function addCode() {
 		try {
-			onChange(parseLearningEvidence({ ...value, code: [...(value?.code ?? []), { name, language, source }] }));
+			update(parseLearningEvidence({ ...latest.current, code: [...(latest.current?.code ?? []), { name, language, source }] }));
 			setSource(""); setEditingCode(false); setError(undefined);
 		} catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid code"); }
 	}
@@ -73,6 +79,7 @@ export function EvidenceInput({ value, onChange, disabled = false, onBusyChange 
 				{value?.images?.map((image, index) => <li key={`image-${index}`} className="flex gap-2"><span>{image.name}</span><button type="button" disabled={disabled || reading} aria-label={`Remove ${image.name}`} onClick={() => onChange(parseLearningEvidence({ ...value, images: value.images?.filter((_, i) => i !== index) }))}>Remove</button></li>)}
 				{value?.code?.map((code, index) => <li key={`code-${index}`} className="flex gap-2"><span>{code.name}</span><button type="button" disabled={disabled || reading} aria-label={`Remove ${code.name}`} onClick={() => onChange(parseLearningEvidence({ ...value, code: value.code?.filter((_, i) => i !== index) }))}>Remove</button></li>)}
 			</ul>
+			<details><summary>Preview attached work</summary><EvidencePreview evidence={value} /></details>
 			<p className="text-muted-foreground">Included with your next submission. Images require an image-capable model.</p>
 		</>}
 		{error && <p role="alert" className="text-destructive">{error}</p>}
