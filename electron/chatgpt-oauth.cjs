@@ -147,9 +147,10 @@ function createEncryptedCredentialStore(filePath, safeStorage) {
 				// a later successful login must not be erased by a stale refresh.
 				if (options?.expectedRefresh !== undefined &&
 					credentials[providerId]?.refresh !== options.expectedRefresh) return false;
+				const removed = credentials[providerId];
 				delete credentials[providerId];
 				await writeAll(credentials);
-				return true;
+				return removed;
 			});
 		},
 	};
@@ -321,7 +322,7 @@ async function listenForCallback(expectedState, savedClientId, signal) {
 			response.writeHead(400).end("ChatGPT did not complete app registration.");
 			return;
 		}
-		response.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(callbackPage("Authentication completed. You may close this tab."));
+		response.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(callbackPage("Return to LearnHarness while your authorization is verified."));
 		finish(undefined, { code, clientId });
 	});
 	server.requestTimeout = 15_000;
@@ -438,7 +439,7 @@ async function revokeCredential(credential) {
 		method: "POST",
 		headers: { "content-type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({ token: credential.refresh, token_type_hint: "refresh_token", client_id: credential.clientId }),
-		signal: AbortSignal.timeout(30_000),
+		signal: AbortSignal.timeout(5_000),
 	});
 	if (!response.ok) throw new Error("ChatGPT could not be disconnected remotely. Try again.");
 }
@@ -613,10 +614,12 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 
 	async function disconnect() {
 		await cancelSignIn();
-		const credential = await credentials.read(PROVIDER_ID);
+		// Delete through the same serialized provider queue as refresh.
+		// Revoke exactly the token that was removed, not a stale pre-refresh
+		// snapshot which could leave the newly rotated refresh token active.
+		const credential = await credentials.delete(PROVIDER_ID);
 		// Revocation is best-effort, but local disconnect MUST succeed even
 		// during an outage or provider revocation failure.
-		await credentials.delete(PROVIDER_ID);
 		invalidateCatalog();
 		loginState = { connecting: false, phase: "idle" };
 		try {
