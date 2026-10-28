@@ -43,6 +43,13 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+  it("does not silently report successful remote revocation when OAuth metadata has no revoke endpoint", () => {
+    const source = require("node:fs").readFileSync(require("node:path").join(process.cwd(),"electron/chatgpt-oauth.cjs"),"utf8");
+    assert.match(source,/remote revocation is unavailable/);
+    assert.doesNotMatch(source,/if \(!provider\.revocation_endpoint \|\| !credential\?\.refresh \|\| !credential\.clientId\) return;/);
+  });
+
+
 
   it("completes a synthetic PKCE + state + nonce + signed OIDC sign-in without a paid API key", async () => {
     await scratch(async dir => {

@@ -463,7 +463,7 @@ async function refreshCredential(previous) {
 
 async function revokeCredential(credential) {
 	const provider = await discovery();
-	if (!provider.revocation_endpoint || !credential?.refresh || !credential.clientId) return;
+	if (!provider.revocation_endpoint || !credential?.refresh || !credential.clientId) throw new Error("ChatGPT remote revocation is unavailable.");
 	const response = await fetch(provider.revocation_endpoint, {
 		method: "POST",
 		headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -596,7 +596,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 				available: true,
 				connected,
 				connecting: loginState.connecting,
-				phase: loginState.connecting ? loginState.phase : connected ? "connected" : loginState.phase,
+				phase: loginState.connecting || loginState.phase === "error" ? loginState.phase : connected ? "connected" : loginState.phase,
 				...(loginState.connecting && loginState.phase === "waiting" && loginState.authorizationUrl
 					? { authorizationUrl: loginState.authorizationUrl } : {}),
 				...(loginState.error ? { error: loginState.error } : {}),
