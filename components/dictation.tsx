@@ -433,7 +433,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				// Mitigation A: everything captured during the handshake (or a
 				// reconnect gap) goes out now, in order — Deepgram accepts
 				// faster-than-realtime sends.
-				for (const frame of pendingRef.current) ws.send(frame);
+				try {
+					for (const frame of pendingRef.current) ws.send(frame);
+				} catch {
+					setError("Dictation audio could not be sent. Check the connection and retry.");
+					cleanup();
+					return;
+				}
 				pendingRef.current = [];
 				setPhase("recording");
 			});
@@ -456,8 +462,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			ws.addEventListener("close", (ev) => {
 				if (gen !== genRef.current || ws !== wsRef.current) return;
 				if (ev.code === 1000 || stopRequestedRef.current) {
-					// Our own CloseStream landing: finalize now — the stop path's
-					// safety net stays as the no-close backstop only.
+					// Graceful server closure is only a successful stop when
+					// WE requested CloseStream. Otherwise the recording ended
+					// unexpectedly and must not report a clean transcript.
+					if (!stopRequestedRef.current) {
+						setError("Dictation ended unexpectedly. Check the captured text and retry if incomplete.");
+					}
 					cleanup();
 					return;
 				}
@@ -526,14 +536,25 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
-				} else if (msg.type === "audio") {
+				} else if (msg.type === "audio" && msg.buffer instanceof ArrayBuffer) {
 					const ws = wsRef.current;
-					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
-					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
-					// queue, capped; the open handler flushes in order.
-					else {
-						pendingRef.current.push(msg.buffer!);
-						if (pendingRef.current.length > 256) pendingRef.current.shift();
+					if (ws && ws.readyState === WebSocket.OPEN) {
+						try {
+							ws.send(msg.buffer);
+						} catch {
+							setError("Dictation audio could not be sent. Check the connection and retry.");
+							cleanup();
+						}
+					} else {
+						// Do not silently discard the first seconds of speech
+						// when a Bluetooth handshake or Deepgram connection
+						// stalls longer than the bounded audio queue.
+						if (pendingRef.current.length >= 256) {
+							setError("Dictation connection stalled and audio could not be preserved. Retry.");
+							cleanup();
+							return;
+						}
+						pendingRef.current.push(msg.buffer);
 					}
 				}
 			};
