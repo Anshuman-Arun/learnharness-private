@@ -200,10 +200,10 @@ export function Home({
 			    div above, and the toggle's lh-no-drag subtracts from it (it is
 			    later in the tree, so the subtraction sticks). */}
 			<header className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
-				<span className="lh-editorial-home-masthead">LEARNHARNESS <span aria-hidden="true">/</span> KNOWLEDGE ATLAS</span>
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>
+				<span className="lh-editorial-home-masthead">LEARNHARNESS <span aria-hidden="true">/</span> KNOWLEDGE ATLAS</span>
 			</header>
 
 			{/* New session — same floating blob as the chat composer, docked
