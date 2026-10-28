@@ -110,6 +110,7 @@ describe("sanitizeUserSettings", () => {
 				mdRendering: { headingWeight: 700 },
 			},
 		});
+		assert.ok(out);
 		assert.equal(out.appearance?.mode, "light");
 		assert.equal(out.appearance?.accent, "teal");
 		assert.equal(out.appearance?.accentIntensity, 28);
@@ -121,6 +122,7 @@ describe("sanitizeUserSettings", () => {
 		const bad = sanitizeUserSettings({
 			appearance: { mode: "sepia", accent: "unknown", zoomPercent: Infinity, corners: "banana", borders: 4 },
 		});
+		assert.ok(bad);
 		assert.deepEqual(bad.appearance, {});
 		assert.equal(sanitizeUserSettings({ appearance: { mode: "system" } })?.appearance?.mode, "system");
 	});
