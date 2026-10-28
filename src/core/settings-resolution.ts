@@ -175,6 +175,8 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 	return {
 		general: {
 			autoUpdate: record?.general?.autoUpdate ?? FACTORY_SETTINGS.general.autoUpdate,
+			microphoneId: record?.general?.microphoneId ?? FACTORY_SETTINGS.general.microphoneId,
+			microphoneLabel: record?.general?.microphoneLabel ?? FACTORY_SETTINGS.general.microphoneLabel,
 		},
 		agent: {
 			models,
