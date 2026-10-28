@@ -11,6 +11,7 @@ export const CHATGPT_SOURCE_PROVIDER_ID = "openai";
 export interface ChatGPTBrokerStatus {
 	available: boolean;
 	connected: boolean;
+	backgroundUseAllowed?: boolean;
 	error?: string;
 }
 

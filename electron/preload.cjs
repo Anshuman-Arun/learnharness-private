@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld("lh", {
 	chatGPTCancelSignIn: () => ipcRenderer.invoke("lh:chatgpt:cancel-sign-in"),
 	chatGPTOpenAuthorization: () => ipcRenderer.invoke("lh:chatgpt:open-authorization"),
 	chatGPTDisconnect: () => ipcRenderer.invoke("lh:chatgpt:disconnect"),
+	chatGPTSetBackgroundUse: (allowed) => ipcRenderer.invoke("lh:chatgpt:set-background-use", allowed),
 	onUpdateStatus: (cb) => {
 		const listener = (_event, status) => cb(status);
 		ipcRenderer.on("lh:update-status", listener);

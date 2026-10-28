@@ -34,7 +34,7 @@ import {
 	resolveConversationSpec,
 	resolveRoleSpec,
 } from "../core/settings-resolution.ts";
-import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, type ProviderKeyMissing } from "../core/settings.ts";
+import { CHATGPT_BACKGROUND_DISABLED, modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, type ProviderKeyMissing } from "../core/settings.ts";
 import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, unregisterTurn } from "./turn-runs.ts";
@@ -92,6 +92,10 @@ const jobRunner = createJobRunner({
 		if (provider === CHATGPT_PROVIDER_ID) {
 			const status = await getChatGPTBrokerStatus();
 			if (!status.connected) return providerKeyMissingEnvelope(provider, [tier]);
+			if (status.backgroundUseAllowed !== true) return {
+				...providerKeyMissingEnvelope(provider, [tier]),
+				error: CHATGPT_BACKGROUND_DISABLED,
+			};
 			try {
 				if (!modelId || !(await getChatGPTBrokerModels()).some((model) => model.id === modelId)) {
 					return providerKeyMissingEnvelope(provider, [tier]);
@@ -127,6 +131,10 @@ export const extraction = createExtractionPipeline({
 		if (provider === CHATGPT_PROVIDER_ID) {
 			const status = await getChatGPTBrokerStatus();
 			if (!status.connected) return providerKeyMissingEnvelope(provider, [tier]);
+			if (status.backgroundUseAllowed !== true) return {
+				...providerKeyMissingEnvelope(provider, [tier]),
+				error: CHATGPT_BACKGROUND_DISABLED,
+			};
 			try {
 				if (!modelId || !(await getChatGPTBrokerModels()).some((model) => model.id === modelId)) {
 					return providerKeyMissingEnvelope(provider, [tier]);

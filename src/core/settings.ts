@@ -156,6 +156,7 @@ export interface ProviderKeyMissing {
  * (the label prefix varies by provider). */
 const PROVIDER_KEY_MISSING_TAIL = "key is set — add one in Settings → Keys";
 export const CHATGPT_PLAN_NOT_CONNECTED = "ChatGPT plan not connected — sign in under Settings → Keys → ChatGPT plan";
+export const CHATGPT_BACKGROUND_DISABLED = "ChatGPT background use is disabled — enable it in Settings → Keys → ChatGPT plan";
 export function providerKeyMissing(provider: string, slots: ModelSlotName[]): ProviderKeyMissing {
 	const label = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider;
 	return {
@@ -172,7 +173,7 @@ export function providerKeyMissing(provider: string, slots: ModelSlotName[]): Pr
  * scary-error) — the envelope's home module owns the string so the
  * writer and the matcher can never drift. */
 export function isProviderKeyRefusal(error: string | undefined): boolean {
-	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CHATGPT_PLAN_NOT_CONNECTED);
+	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CHATGPT_PLAN_NOT_CONNECTED || error === CHATGPT_BACKGROUND_DISABLED);
 }
 /** The typed throw for in-process seams (extraction pipeline) — the
  * ProviderKeyMissing sibling of ModelsNotConfiguredError: callers catch

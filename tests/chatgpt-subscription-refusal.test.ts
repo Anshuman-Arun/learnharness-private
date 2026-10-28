@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {describe,it} from "node:test";
-import { CHATGPT_PLAN_NOT_CONNECTED, providerKeyMissing, isProviderKeyRefusal } from "../src/core/settings.ts";
+import { CHATGPT_PLAN_NOT_CONNECTED, CHATGPT_BACKGROUND_DISABLED, providerKeyMissing, isProviderKeyRefusal } from "../src/core/settings.ts";
 import { parseProviderKeyRefusal } from "../components/chat.tsx";
 
 describe("subscription refusal protocol remains machine-readable across UI/transport", () => {
@@ -10,6 +10,7 @@ describe("subscription refusal protocol remains machine-readable across UI/trans
     assert.match(e.error,/ChatGPT plan/);
     assert.doesNotMatch(e.error,/add one|API key/i);
     assert.equal(isProviderKeyRefusal(e.error),true);
+    assert.equal(isProviderKeyRefusal(CHATGPT_BACKGROUND_DISABLED),true);
   });
   it("parses subscription sign-out by code regardless of human wording", () => {
     const envelope=providerKeyMissing("openai-chatgpt",["strong"]);

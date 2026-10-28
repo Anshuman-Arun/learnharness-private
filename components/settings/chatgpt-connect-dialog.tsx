@@ -7,6 +7,7 @@ import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 export interface ChatGPTStatus {
 	available: boolean;
 	connected: boolean;
+	backgroundUseAllowed?: boolean;
 	connecting?: boolean;
 	phase?: "idle" | "preparing" | "waiting" | "exchanging" | "verifying" | "connected" | "error";
 	authorizationUrl?: string;

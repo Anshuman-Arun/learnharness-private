@@ -31,3 +31,15 @@ CI with dummy credentials cannot prove real ChatGPT authorization, entitlement, 
 - Production boot verifies a randomly generated capability through the Next.js `/api/desktop-health` route before allowing Electron to load the localhost origin.
 - ChatGPT plan inference remains deliberately disabled in `desktop:dev`: the standalone Next dev server cannot securely receive the packaged app's OAuth broker grant.
 - Production release is still blocked pending live ChatGPT entitlements, tool-call streaming, signed-in/out restart, and actual mic/data QA.
+
+## Express background permission
+ChatGPT plan consent is **not** consent for autonomous agents to operate indefinitely.
+The ChatGPT plan row in Settings → Keys now offers an explicit **Allow ChatGPT
+plan use by autonomous background learning agents** checkbox. It is **off by
+default** for new and existing encrypted credentials. This preference is
+stored in the local encrypted account credential; reconnecting to the same
+account retains it, and disconnect clears it. Background job and graph
+extraction admission refuse to run on ChatGPT until enabled. Turning it off
+prevents new background job admissions; do not treat this as a guarantee that
+an already-running request stops synchronously. Test revocation behavior before
+production release.

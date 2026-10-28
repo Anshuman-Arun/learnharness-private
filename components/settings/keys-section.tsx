@@ -198,6 +198,22 @@ function ChatGPTPlanRow() {
 					)}
 				</span>
 			</div>
+			{connected && (
+				<label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground" data-testid="chatgpt-background-consent">
+					<input type="checkbox" className="mt-0.5 accent-foreground"
+						checked={status?.backgroundUseAllowed === true}
+						disabled={busy}
+						onChange={(event) => {
+							const allowed = event.currentTarget.checked;
+							const native = window.lh as typeof window.lh & {
+								chatGPTSetBackgroundUse?: (allowed: boolean) => Promise<ChatGPTStatus>;
+							};
+							if (native?.chatGPTSetBackgroundUse) void change(() => native.chatGPTSetBackgroundUse!(allowed));
+						}}
+					/>
+					<span>Allow ChatGPT plan use by autonomous background learning agents. Off by default; teaching messages you send can still use your plan.</span>
+				</label>
+			)}
 			{(error || (status?.error && !dialogOpen)) && <p role="alert" className="pt-1 text-xs text-red-500">{error || status?.error}</p>}
 			{dialogOpen && status && (
 				<ChatGPTConnectDialog

@@ -55,6 +55,8 @@ function validCredential(c) {
 		c.clientId !== DYNAMIC_CLIENT_ID &&
 		typeof c.subject === "string" && c.subject.length > 0 &&
 		Number.isFinite(c.expires) && c.expires > 0 &&
+		(c.backgroundUseAllowed === undefined || typeof c.backgroundUseAllowed === "boolean") &&
+		(c.idToken === undefined || typeof c.idToken === "string") &&
 		Array.isArray(c.scopes) &&
 		REQUIRED_SCOPES.every((scope) => c.scopes.includes(scope)));
 }
@@ -409,6 +411,7 @@ async function authorize(previous, hostId, openBrowser, signal, onProgress) {
 		}).toString();
 		if (!previous?.clientId) authorization.searchParams.set("agent_name_hint", "LearnHarness");
 		if (previous?.identity?.email) authorization.searchParams.set("login_hint", previous.identity.email);
+		if (previous?.idToken) authorization.searchParams.set("id_token_hint", previous.idToken);
 		onProgress({ phase: "waiting", authorizationUrl: authorization.toString() });
 		await openBrowser(authorization.toString());
 		const callback = await listener.result;
@@ -432,6 +435,8 @@ async function authorize(previous, hostId, openBrowser, signal, onProgress) {
 			...fields,
 			refresh: data.refresh_token,
 			clientId: callback.clientId,
+			idToken: data.id_token,
+			backgroundUseAllowed: previous?.backgroundUseAllowed === true,
 			...identity,
 		};
 	} finally {
@@ -457,6 +462,7 @@ async function refreshCredential(previous) {
 		...previous,
 		...fields,
 		refresh: typeof data.refresh_token === "string" && data.refresh_token ? data.refresh_token : previous.refresh,
+		idToken: typeof data.id_token === "string" && data.id_token ? data.id_token : previous.idToken,
 		...identity,
 	};
 }
@@ -595,6 +601,7 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 			return {
 				available: true,
 				connected,
+				backgroundUseAllowed: connected && credential?.backgroundUseAllowed === true,
 				connecting: loginState.connecting,
 				phase: loginState.connecting || loginState.phase === "error" ? loginState.phase : connected ? "connected" : loginState.phase,
 				...(loginState.connecting && loginState.phase === "waiting" && loginState.authorizationUrl
@@ -678,6 +685,15 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 		return status();
 	}
 
+	async function setBackgroundUse(allowed) {
+		if (typeof allowed !== "boolean") throw new Error("Invalid ChatGPT background-use permission.");
+		await credentials.modify(PROVIDER_ID, async (current) => {
+			if (!validCredential(current)) throw new Error("Connect ChatGPT before changing background permission.");
+			return { ...current, backgroundUseAllowed: allowed };
+		});
+		return status();
+	}
+
 	async function disconnect() {
 		await cancelSignIn();
 		// Delete through the same serialized provider queue as refresh.
@@ -753,17 +769,18 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 
 	// Do not trust renderer IPC merely because the channel name is private.
 	// An untrusted iframe or navigated window must never manage OAuth.
-	const privileged = (fn) => (event) => {
+	const privileged = (fn) => (event, ...args) => {
 		if (typeof authorizeIpc !== "function" || !authorizeIpc(event)) {
 			throw new Error("Untrusted ChatGPT IPC sender.");
 		}
-		return fn();
+		return fn(...args);
 	};
 	ipcMain.handle("lh:chatgpt:status", privileged(status));
 	ipcMain.handle("lh:chatgpt:sign-in", privileged(signIn));
 	ipcMain.handle("lh:chatgpt:cancel-sign-in", privileged(cancelSignIn));
 	ipcMain.handle("lh:chatgpt:open-authorization", privileged(openAuthorization));
 	ipcMain.handle("lh:chatgpt:disconnect", privileged(disconnect));
+	ipcMain.handle("lh:chatgpt:set-background-use", privileged(setBackgroundUse));
 
 	return {
 		brokerUrl: `http://127.0.0.1:${address.port}`,
