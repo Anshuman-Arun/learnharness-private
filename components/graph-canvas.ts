@@ -814,6 +814,14 @@ export class GraphCanvasRenderer {
 		this.markDirty();
 	}
 
+	/** Next/font can finish loading after the first frame. Recalculate cached
+	 * canvas text wrap/metrics without touching positions, force or camera. */
+	refreshTypography(): void {
+		if (!this.data) return;
+		this.geoVersion++;
+		this.markDirty();
+	}
+
 	setSettings(settings: GraphRenderSettings): void {
 		this.settings = settings;
 		this.geoVersion++; // sizes/wrap width changed → rebuild geometry
