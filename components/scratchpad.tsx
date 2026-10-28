@@ -43,9 +43,9 @@ export function ScratchpadView({ sessionId, questionId }: { sessionId?: string; 
 	}, [sessionId, questionId, scope]);
 	function keepDraft() {
 		const latest = current.current;
-		if (!latest) return;
-		try { sessionStorage.setItem(scope, latest.id); sessionStorage.setItem(`lh:scratchpad:draft:${latest.id}`, JSON.stringify(latest)); }
-		catch { setError("Local draft recovery is unavailable. Save before leaving this page."); }
+		if (!latest) return true;
+		try { sessionStorage.setItem(scope, latest.id); sessionStorage.setItem(`lh:scratchpad:draft:${latest.id}`, JSON.stringify(latest)); return true; }
+		catch { setError("Local draft recovery is unavailable. Save before leaving this page."); return false; }
 	}
 	function save(): Promise<Scratchpad | undefined> {
 		if (inflight.current) return inflight.current;
@@ -81,7 +81,19 @@ export function ScratchpadView({ sessionId, questionId }: { sessionId?: string; 
 	}, [scope]);
 	function choose(next: Scratchpad) {
 		if (lease.current) return;
-		keepDraft(); paused.current = false; adopt(next, false); setPageId(next.pages[0]!.id); capture.current = undefined; setError(undefined);
+		if (!keepDraft()) return;
+		const previous = current.current;
+		if (previous && dirty) setPads((saved) => [previous, ...saved.filter((item) => item.id !== previous.id)]);
+		let recovered: Scratchpad | undefined;
+		try {
+			const raw = sessionStorage.getItem(`lh:scratchpad:draft:${next.id}`);
+			if (raw) {
+				const candidate = JSON.parse(raw) as Scratchpad; parseScratchpad(candidate);
+				if (candidate.id === next.id && Number.isInteger(candidate.revision) && candidate.revision >= 0) recovered = candidate;
+			}
+		} catch { setError("A local drawing draft could not be recovered. Saved pads remain available."); return; }
+		const selected = recovered ?? next;
+		paused.current = false; adopt(selected, !!recovered); setPageId(selected.pages[0]!.id); capture.current = undefined; setError(undefined);
 	}
 	function updatePage(next: ScratchpadPage) {
 		if (lease.current || pairBusy) return;
