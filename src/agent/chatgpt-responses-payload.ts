@@ -30,7 +30,7 @@ export function prepareChatGPTResponsesPayload<T extends { input: unknown }>(par
 	if (!object(params) || !Array.isArray(params.input)) {
 		throw new Error("ChatGPT plan requires the complete array of input history.");
 	}
-	const prepared = { ...params } as T & Record<string, unknown>;
+	const prepared: Record<string, unknown> = { ...params };
 	const input = params.input.map((item) => {
 		if (!object(item)) throw new Error("ChatGPT plan received a malformed transcript item.");
 		if (item.type === "tool_search_call" || item.type === "tool_search_output") {
@@ -60,5 +60,5 @@ export function prepareChatGPTResponsesPayload<T extends { input: unknown }>(par
 	prepared.input = input;
 	prepared.store = false;
 	prepared.stream = true;
-	return prepared;
+	return prepared as T;
 }

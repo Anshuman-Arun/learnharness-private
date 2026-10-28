@@ -34,7 +34,7 @@ describe("SIWC live inference payload compatibility", () => {
 		assert.equal((result.input[2] as {role:string}).role,"user");
 		assert.equal((result.input[3] as {role:string}).role,"developer");
 		assert.equal((result.input[4] as {role:string}).role,"assistant");
-		assert.equal(original.input[0].role,"system","do not rewrite reusable source transcript");
+		assert.equal(original.input[0]!.role,"system","do not rewrite reusable source transcript");
 		assert.equal(original.store,true,"source request is unchanged");
 	});
 	it("rejects disallowed hosted tools and malformed/nonarray payloads before network submission",()=>{
