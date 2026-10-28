@@ -102,7 +102,7 @@ export function AnsweredCard({ answer, input, teachingMode }: { answer: Question
 				<div className="flex flex-col gap-1.5 text-sm">
 					{answer.options?.map((opt) => {
 						const sel = selectedIdx.has(opt.index);
-						const key = isQuiz && answerVisible && correctIdx.has(opt.index);
+						const key = isQuiz && (answerVisible || sel) && correctIdx.has(opt.index);
 						return (
 							<div
 								key={opt.index}
