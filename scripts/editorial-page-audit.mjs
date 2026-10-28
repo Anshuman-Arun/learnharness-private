@@ -55,8 +55,22 @@ const practice={...teach,id:"visual_practice",kind:"practice",title:"Practice: C
     {id:"u2",role:"user",content:"Practice tricky conditional probability and counting questions.",timestamp},
     nativeAssistant("a3",[{type:"text",text:"We will work through probability interview exercises one at a time. Explain your reasoning, not just the answer.\n\n**Warm-up:** Two cards are drawn without replacement from a standard deck. What is the probability both are aces?"}]),
   ]};
+const quiz={...teach,id:"visual_quiz",title:"Interview check: expectation by indicators",
+  messages:[
+    {id:"u-quiz",role:"user",content:"Test my understanding with a probability question.",timestamp},
+    nativeAssistant("a-quiz",[
+      {type:"text",text:"Use the indicator-variable method. Think about which outcomes contribute to the expected value."},
+      {type:"toolCall",id:"check-1",name:"quiz",arguments:{
+        type:"check",nodeId:"indicators",
+        question:"What is the expected number of fixed points in a uniformly random permutation of n elements?",
+        options:[{label:"1",value:"one"},{label:"n/2",value:"half"},{label:"sqrt(n)",value:"sqrt"},{label:"n",value:"n"}],
+        correctAnswer:"one",
+        explanation:"Let I_i indicate that permutation i maps to itself. Each E[I_i]=1/n, so the sum of n indicators has expectation 1.",
+      }},
+    ]),
+  ]};
 mkdirSync(join(data,"chats"),{recursive:true});
-for(const c of [teach,practice])writeFileSync(join(data,"chats",c.id+".json"),JSON.stringify(c));
+for(const c of [teach,practice,quiz])writeFileSync(join(data,"chats",c.id+".json"),JSON.stringify(c));
 const graphNodes=["Expectation by indicators","Linearity of expectation","Conditional probability","Bayes' rule","Variance decomposition","Martingale increments"]
 .map((name,i)=>({id:"node_"+i,name,statement:name+" is a synthetic example for visual QA.",
   aliases:[],createdAt:new Date(timestamp).toISOString(),
@@ -199,6 +213,15 @@ try{
     await snap(ctx,"home-atlas-"+mode);
     await page.click('[data-testid="home-graph-view-toggle"]');
     await settingShot(ctx,"appearance");
+    // The font selection menu is an important user-facing popover.
+    await page.click('[data-testid="settings-entry"]');
+    await page.waitForSelector('[data-testid="settings-dialog"]');
+    await page.click('[data-testid="settings-nav-appearance"]');
+    await page.click('[data-testid="font-trigger"]');
+    await new Promise(r=>setTimeout(r,220));
+    await snap(ctx,"font-menu-"+mode);
+    await page.keyboard.press("Escape"); // closes only the font menu
+    await page.click('[data-testid="settings-close"]');
     await settingShot(ctx,"general");
     await settingShot(ctx,"agent");
     await settingShot(ctx,"keys");
@@ -233,6 +256,11 @@ try{
     await open(practiceCtx,"/chat/visual_practice");
     await snap(practiceCtx,"practice-"+mode);
     await practiceCtx.page.close();
+    const quizCtx=await newPage(mode);
+    await open(quizCtx,"/chat/visual_quiz");
+    await quizCtx.page.waitForSelector('[data-testid="question-dock"]',{timeout:25000});
+    await snap(quizCtx,"quiz-dock-"+mode);
+    await quizCtx.page.close();
   }
   const narrow=await newPage("dark",390,844);
   await open(narrow,"/");
