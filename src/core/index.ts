@@ -86,3 +86,4 @@ export * from "./probability-lab";
 export * from "./stopping";
 export * from "./quant-questions";
 export * from "./quant-exam";
+export * from "./training-evidence";
