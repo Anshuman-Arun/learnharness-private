@@ -69,6 +69,7 @@ import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
+import { useAppearance } from "@/components/settings/appearance";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
@@ -963,6 +964,8 @@ export function GraphView({
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
 	onChainSelectClose?: () => void;
 }) {
+	// A changed appearance re-colors the canvas without replacing graph data.
+	const { appearance } = useAppearance();
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const cardRef = useRef<HTMLDivElement | null>(null);
@@ -1421,10 +1424,24 @@ export function GraphView({
 				label: tokenHex("--muted-foreground"),
 				hoverText: tokenHex("--foreground"),
 			},
-			// Match the app typography (Geist via the body's stack).
+			// Read the actual computed UI font stack, including editorial/OS overrides.
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
 	}, [snapshot, isEmpty]);
+
+	// Feed #1b — theme/highlight/reading-font changes are presentation-only.
+	// The previous [snapshot]-only feed left the canvas with dark-era colors
+	// after a Light/Accent switch until the NEXT graph refetch. Calling
+	// setData here would also reset drag positions and physics; use the
+	// dedicated lightweight canvas repaint channel instead.
+	useEffect(() => {
+		rendererRef.current?.setAppearance({
+			node: tokenHex(NODE_COLOR_TOKEN),
+			edge: tokenHex("--ring"),
+			label: tokenHex("--muted-foreground"),
+			hoverText: tokenHex("--foreground"),
+		}, getComputedStyle(document.body).fontFamily);
+	}, [appearance, isEmpty]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
