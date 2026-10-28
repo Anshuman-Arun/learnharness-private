@@ -24,8 +24,9 @@ test('scratchpad switches preserve saved-pad and new-pad drafts, including stora
   const page = await browser.newPage(); page.setDefaultTimeout(20000);
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   // Keep autosaves pending so switching cannot accidentally pass by saving first.
+  let offline = true;
   await page.setRequestInterception(true);
-  page.on('request', r => r.method() === 'PUT' && r.url().includes('/api/training/scratchpad') ? r.respond({ status: 503, contentType: 'application/json', body: '{"error":"offline"}' }) : r.continue());
+  page.on('request', r => offline && r.method() === 'PUT' && r.url().includes('/api/training/scratchpad') ? r.respond({ status: 503, contentType: 'application/json', body: '{"error":"offline"}' }) : r.continue());
   await page.goto(origin + '/training/scratchpad', { waitUntil: 'networkidle2' });
   const title = '[aria-label="Scratchpad title"]', selector = '[aria-label="Saved scratchpad"]';
   const fill = async value => page.$eval(title, (node, value) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(node, value); node.dispatchEvent(new Event('input', { bubbles: true })); }, value);
@@ -40,6 +41,11 @@ test('scratchpad switches preserve saved-pad and new-pad drafts, including stora
   await fill('Retain when storage is full'); await page.select(selector, 'draft-b');
   assert.equal(await page.$eval(title, n => n.value), 'Retain when storage is full');
   assert.match(await page.$eval('[role=alert]', n => n.textContent), /Save before leaving/);
+  offline = false;
+  await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.textContent === 'Save now').click());
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=status]')].some(n => n.textContent === 'Saved'));
+  await page.select(selector, 'draft-b');
+  assert.equal(await page.$eval(title, n => n.value), 'draft-b', 'acknowledged work permits switching even if recovery storage stays full');
   assert.deepEqual(errors, []); passed = true;
  } finally {
   await browser?.close(); app.kill('SIGTERM');
