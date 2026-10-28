@@ -6,7 +6,7 @@ import Link from "next/link";
 import { MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { PlanDiagram, blockLayout, GRAPH_PAD } from "@/components/plan-block";
 import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/components/pan-zoom";
-import type { GlobalLearningGraph } from "@/src/core/global-learning.ts";
+import type { GlobalLearningGraph } from "@/src/core";
 
 /** The same Dagre + hand-built SVG skin as the original mini lesson DAGs.
  * Do not replace it with React Flow, circles, or a second diagram engine.
