@@ -277,8 +277,14 @@ export interface MdRenderingSettings {
 
 /** Appearance settings — mode, colors, type, markdown emphasis. */
 export interface AppearanceSettings {
-	/** "dark" | "light" (default dark). */
-	mode?: "dark" | "light";
+	/** "system" follows OS appearance; default remains dark for existing installs. */
+	mode?: "dark" | "light" | "system";
+	/** Editorial v10 appearance options, all optional to preserve existing records. */
+	accent?: "ink" | "cobalt" | "teal" | "amber" | "coral" | "violet" | "rose";
+	accentIntensity?: number;
+	zoomPercent?: number;
+	corners?: "square" | "soft" | "round" | "generous";
+	borders?: "quiet" | "regular" | "strong" | "contrast";
 	/** The one user-chosen color; everything else derives per-mode in code.
 	 *  null = the mode's default background. */
 	background?: string | null;
@@ -379,7 +385,12 @@ export interface FactorySettings {
 	version: number;
 	general: Required<GeneralSettings>;
 	appearance: {
-		mode: "dark" | "light";
+		mode: "dark" | "light" | "system";
+		accent: NonNullable<AppearanceSettings["accent"]>;
+		accentIntensity: number;
+		zoomPercent: number;
+		corners: NonNullable<AppearanceSettings["corners"]>;
+		borders: NonNullable<AppearanceSettings["borders"]>;
 		background: string | null;
 		fontFamily: string | null;
 		proseFontSize: number;
@@ -399,6 +410,11 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	general: { autoUpdate: true },
 	appearance: {
 		mode: "dark",
+		accent: "coral",
+		accentIntensity: 16,
+		zoomPercent: 100,
+		corners: "soft",
+		borders: "regular",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
@@ -545,7 +561,17 @@ function sanitizeMdRendering(raw: unknown): MdRenderingSettings {
 
 function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const out: AppearanceSettings = {};
-	if (raw.mode === "dark" || raw.mode === "light") out.mode = raw.mode;
+	if (raw.mode === "dark" || raw.mode === "light" || raw.mode === "system") out.mode = raw.mode;
+	if (typeof raw.accent === "string" && ["ink", "cobalt", "teal", "amber", "coral", "violet", "rose"].includes(raw.accent))
+		out.accent = raw.accent as NonNullable<AppearanceSettings["accent"]>;
+	if (typeof raw.accentIntensity === "number" && Number.isFinite(raw.accentIntensity))
+		out.accentIntensity = clamp(Math.round(raw.accentIntensity), 8, 28);
+	if (typeof raw.zoomPercent === "number" && Number.isFinite(raw.zoomPercent))
+		out.zoomPercent = clamp(Math.round(raw.zoomPercent), 25, 500);
+	if (typeof raw.corners === "string" && ["square", "soft", "round", "generous"].includes(raw.corners))
+		out.corners = raw.corners as NonNullable<AppearanceSettings["corners"]>;
+	if (typeof raw.borders === "string" && ["quiet", "regular", "strong", "contrast"].includes(raw.borders))
+		out.borders = raw.borders as NonNullable<AppearanceSettings["borders"]>;
 	if (raw.background !== undefined) out.background = sanitizeHexOrNull(raw.background);
 	if (raw.fontFamily !== undefined) {
 		out.fontFamily = typeof raw.fontFamily === "string" && raw.fontFamily.trim() ? raw.fontFamily : null;
