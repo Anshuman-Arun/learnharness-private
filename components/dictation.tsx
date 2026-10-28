@@ -298,6 +298,15 @@ export function useDictationTarget(append: (text: string) => void, claimed: bool
 
 export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
 
+/** User-visible connectivity truth — never show "connected" before the
+ * Deepgram socket's open event or imply the mic is ready before capture. */
+export function dictationStatusText(phase: DictationPhase, captureReady: boolean): string {
+	if (phase === "connecting") return captureReady ? "Mic on · connecting" : "Requesting microphone";
+	if (phase === "recording") return "Connected · listening";
+	if (phase === "stopping") return "Finishing transcription";
+	return "Microphone off";
+}
+
 export type Dictation = {
 	phase: DictationPhase;
 	/** Whether the microphone stream is connected to the capture worklet. */
@@ -689,10 +698,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	const keyless = error === DICTATION_KEYLESS;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	const recording = phase === "recording";
-	const statusText = phase === "connecting"
-		? (captureReady ? "Mic on · connecting" : "Requesting microphone")
-		: phase === "recording" ? "Connected · listening"
-		: phase === "stopping" ? "Finishing transcription" : "Microphone off";
+	const statusText = dictationStatusText(phase, captureReady);
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
 	 *  overflowing under neighbors. */
