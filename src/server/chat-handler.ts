@@ -345,7 +345,7 @@ export async function handleChatInput(
 	const engine = conversationEngine;
 	// Provider-qualified stamp (model slots wave): matches the price table's
 	// provider:id keys.
-	const modelId = `${engine.model.provider}:${engine.model.id}`;
+	const modelId = `${engine.providerId ?? engine.model.provider}:${engine.model.id}`;
 	// Tests inject a factory: the agent is stateless per turn, so each
 	// request builds a fresh one off the record — the factory mirrors that
 	// seam exactly. Wave B: the record IS the agent state (native messages;
