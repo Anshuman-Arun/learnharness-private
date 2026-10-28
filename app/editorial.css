@@ -373,3 +373,19 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
   transition-property: none !important;
   transition-duration: 0s !important;
 }
+
+/* The teach/practice and history filter tabs share the selected accent wash.
+ * aria-pressed makes the state accessible; the saved 8–28% intensity slider
+ * now affects these actual controls rather than only session cards. */
+[data-lh-editorial="v10"] [data-testid="session-kind-filter"] button[aria-pressed="true"],
+[data-lh-editorial="v10"] [data-testid="home-mode-switch"] button[aria-pressed="true"] {
+  background: var(--lh-highlight-wash);
+  box-shadow: inset 0 -2px 0 var(--primary);
+  color: var(--foreground);
+}
+[data-lh-editorial="v10"] [data-testid="session-kind-filter"] button,
+[data-lh-editorial="v10"] [data-testid="home-mode-switch"] button {
+  font-size: 12px;
+  line-height: 1.4;
+  min-height: 25px;
+}
