@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { hasLearningEvidence, parseLearningEvidence, MAX_EVIDENCE_IMAGE_BYTES, type LearningEvidence } from "@/src/core";
 
 /** Only submitted snapshots enter the agent's context; editing stays private. */
@@ -22,7 +22,17 @@ export function EvidenceInput({ value, onChange, disabled = false, onBusyChange 
 		latest.current = next;
 		onChange(next);
 	}
-
+	useEffect(() => {
+		try {
+			const raw = sessionStorage.getItem("lh:incoming-evidence");
+			if (!raw) return;
+			const incoming = JSON.parse(raw) as { chatId: string; evidence: LearningEvidence };
+			if (window.location.pathname !== `/chat/${incoming.chatId}`) return;
+			update(parseLearningEvidence(incoming.evidence));
+			sessionStorage.removeItem("lh:incoming-evidence");
+		} catch { setError("Could not recover the incoming work. Return to the workspace to bring it again."); }
+		// A handoff is consumed once by the mounted input for this session.
+	}, []);
 	async function addImages(files: File[]) {
 		if (reading || !files.length) return;
 		setReading(true); onBusyChange?.(true); setError(undefined);
