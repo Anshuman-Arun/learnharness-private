@@ -572,6 +572,9 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 			}
 			if (epoch !== catalogEpoch) throw new Error("ChatGPT connection changed during model discovery.");
 			catalogCache = { expires: Date.now() + 60_000, models };
+			if (loginState.error?.includes("account model")) {
+				loginState = { ...loginState, error: undefined };
+			}
 			return models;
 		})();
 		catalogPending = pending;
@@ -715,6 +718,8 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 				try {
 					json(res, 200, { models: await discoverAccountModels() });
 				} catch {
+					loginState = { ...loginState,
+						error: "ChatGPT account models could not be verified. Retry in Providers." };
 					json(res, 503, { error: "chatgpt_models_unavailable" });
 				}
 				return;

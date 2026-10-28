@@ -306,6 +306,8 @@ describe("adversarial ChatGPT private-provider checks", () => {
         const response = await fetch(runtime.brokerUrl + "/v1/models", {headers:{authorization:`Bearer ${runtime.brokerSecret}`}});
         assert.equal(response.status,503);
         assert.deepEqual(await response.json(),{error:"chatgpt_models_unavailable"});
+        const status=await fetch(runtime.brokerUrl+"/v1/status",{headers:{authorization:`Bearer ${runtime.brokerSecret}`}});
+        assert.equal((await status.json()).error,"ChatGPT account models could not be verified. Retry in Providers.");
       } finally {runtime.close();globalThis.fetch=oldFetch;}
     });
   });
