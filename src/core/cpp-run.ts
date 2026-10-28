@@ -20,7 +20,7 @@ export function cppRunEvidence(report: CppRunReport): LearningEvidence {
 	const bounded = (value: string) => value.length <= 16000 ? value : `${value.slice(0, 15800)}\n[Truncated; full local run report: ${report.id}]`;
 	const stdout = report.result.cases ? JSON.stringify(report.result.cases.map((test) => ({ ...test, stdout: bounded(test.stdout).slice(0, 1024), stderr: bounded(test.stderr).slice(0, 1024) }))) : report.result.stdout;
 	const { ok, exitCode, errorKind, timedOut } = report.result;
-	return parseLearningEvidence({ code: code.map((file, i) => i === 0 ? { ...file, execution: { ok, exitCode, errorKind, timedOut }, stdout: bounded(stdout), stderr: bounded([report.result.compilerOutput, report.result.stderr].filter(Boolean).join("\n")), prediction: report.request.prediction } : file) })!;
+	return parseLearningEvidence({ source: { kind: "cpp-run", id: report.id }, code: code.map((file, i) => i === 0 ? { ...file, execution: { ok, exitCode, errorKind, timedOut }, stdout: bounded(stdout), stderr: bounded([report.result.compilerOutput, report.result.stderr].filter(Boolean).join("\n")), prediction: report.request.prediction } : file) })!;
 }
 export interface CppExecutionResult {
 	ok: boolean; stdout: string; stderr: string; compileError?: string; timedOut: boolean;

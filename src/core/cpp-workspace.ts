@@ -36,7 +36,7 @@ export function parseCppWorkspace(raw: unknown): Omit<CppWorkspace, "revision" |
 export function workspaceEvidence(workspace: CppWorkspace, names: readonly string[]): LearningEvidence {
 	const code: CodeEvidence[] = workspace.files.filter((file) => names.includes(file.name) && file.source.trim()).map((file) => ({ name: file.name, language: "cpp", source: file.source }));
 	if (!code.length) throw new Error("Select at least one nonempty code file");
-	return { code };
+	return { code, source: { kind: "workspace", id: workspace.id } };
 }
 export function emptyCppWorkspace(id: string): CppWorkspace {
 	return { version: 1, id, revision: 0, title: "C++ workspace", problem: "", stdin: "", files: [{ name: "main.cpp", source: '#include <iostream>\n\nint main() {\n    // Write your solution here.\n    return 0;\n}\n' }], updatedAt: 0 };

@@ -13,7 +13,7 @@
 	"private": true,
 	"main": "electron/main.cjs",
 	"scripts": {
-		"postinstall": "node scripts/prepare-monaco.mjs",
+		"postinstall": "node scripts/prepare-monaco.mjs && node scripts/prepare-excalidraw.mjs",
 		"cpp:runner": "node runner/cpp-service.mjs",
 		"test:cpp-runner": "node --test tests/runner/cpp-service.test.mjs",
 		"dev": "next dev",
@@ -29,6 +29,7 @@
 	"dependencies": {
 		"@earendil-works/pi-agent-core": "1.4.0",
 		"@earendil-works/pi-ai": "1.4.0",
+		"@excalidraw/excalidraw": "0.18.1",
 		"@monaco-editor/react": "4.7.0",
 		"@mozilla/readability": "^0.6.0",
 		"@radix-ui/react-use-controllable-state": "^1.2.6",

@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
@@ -1291,6 +1292,7 @@ export function Chat({
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
 					{kind !== "practice" && <TeachingModeControl chatId={chatId} mode={teachingMode} onChange={setTeachingMode} />}
+					<Link href={`/training/scratchpad?chatId=${encodeURIComponent(chatId)}${pending?.toolCallId || activeProblem?.toolCallId ? `&questionId=${encodeURIComponent(pending?.toolCallId ?? activeProblem!.toolCallId)}` : ""}`} className="shrink-0 rounded border px-2 py-1 text-xs">Scratch work</Link>
 					{planTree && (
 						<Hint label="Open the full plan" side="bottom">
 <button
