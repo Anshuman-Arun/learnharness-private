@@ -171,12 +171,34 @@ async function loadOrCreateDeviceId(filePath) {
 	return id;
 }
 
+async function boundedJson(response, maxBytes = 131072) {
+	const stated = Number(response.headers.get("content-length") ?? 0);
+	if (Number.isFinite(stated) && stated > maxBytes) throw new Error("Oversized OAuth response.");
+	if (!response.body) throw new Error("Empty OAuth response.");
+	const reader = response.body.getReader();
+	let total = 0;
+	const parts = [];
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		total += value.byteLength;
+		if (total > maxBytes) {
+			await reader.cancel().catch(() => undefined);
+			throw new Error("Oversized OAuth response.");
+		}
+		parts.push(Buffer.from(value));
+	}
+	return JSON.parse(Buffer.concat(parts).toString("utf8"));
+}
+
 async function discovery() {
 	discoveryPromise ??= (async () => {
 		const response = await fetch(`${ISSUER}/.well-known/openid-configuration`, {
 			signal: AbortSignal.timeout(15_000),
+			redirect: "error",
+			credentials: "omit",
 		});
-		const data = await response.json();
+		const data = await boundedJson(response);
 		if (!response.ok || data?.issuer !== ISSUER) throw new Error("ChatGPT sign-in configuration could not be verified.");
 		for (const name of ["authorization_endpoint", "token_endpoint", "jwks_uri", "revocation_endpoint"]) {
 			const value = data[name];
@@ -229,8 +251,10 @@ async function tokenRequest(body, signal) {
 		headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
 		body,
 		signal,
+		redirect: "error",
+		credentials: "omit",
 	});
-	const data = await response.json().catch(() => undefined);
+	const data = await boundedJson(response).catch(() => undefined);
 	if (!response.ok) {
 		const error = new Error(`ChatGPT token request failed (${response.status}).`);
 		if (response.status === 400 && data?.error === "invalid_grant") error.oauthCode = "invalid_grant";
@@ -440,6 +464,8 @@ async function revokeCredential(credential) {
 		headers: { "content-type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams({ token: credential.refresh, token_type_hint: "refresh_token", client_id: credential.clientId }),
 		signal: AbortSignal.timeout(5_000),
+		redirect: "error",
+		credentials: "omit",
 	});
 	if (!response.ok) throw new Error("ChatGPT could not be disconnected remotely. Try again.");
 }
