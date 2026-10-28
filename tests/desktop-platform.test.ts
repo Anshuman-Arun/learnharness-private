@@ -103,7 +103,9 @@ describe("desktop packaging policy", () => {
 			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
 		]);
 		assert.equal(config.linux.syncDesktopName, true);
-		assert.equal(config.publish[0].releaseType, "draft");
+		assert.equal(config.publish, undefined, "private derivative must have no upstream publication feed");
+		assert.equal(config.appId, "org.learnharness.private.windows");
+		assert.equal(config.productName, "LearnHarness Private");
 	});
 
 	it("deb has public maintainer metadata and a matching desktop identity", () => {

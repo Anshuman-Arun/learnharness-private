@@ -1,28 +1,15 @@
-/**
- * CI packaging-only transform: preserve the PR20 source for all upstream
- * regression and release-policy tests. Only AFTER those tests and builds
- * pass, isolate the *portable Windows artifact* from the installed app.
- *
- * This script runs only in a disposable GitHub Actions workspace.
- * Fail closed on every source anchor; no uploads/releases or credentials.
+/** Fail-closed release identity guard. Never mutate production files in CI.
+ * A normal electron-builder invocation must be safe even without this script.
  */
 import fs from "node:fs";
-function once(s,a,b) {
-  if(s.split(a).length!==2) throw new Error("PR20 packaging anchor changed: "+a);
-  return s.replace(a,b);
-}
-const mainFile="electron/main.cjs",yamlFile="electron-builder.yml";
-let main=fs.readFileSync(mainFile,"utf8");
-// Git for Windows can check out YAML with CRLF. Canonicalize before matching
-// its section headings; do not change the app's source semantics.
-let yaml=fs.readFileSync(yamlFile,"utf8").replace(/\r\n/g,"\n");
-main=once(main,'const PRODUCT_NAME = "LearnHarness";','const PRODUCT_NAME = "LearnHarness PR20 Test";');
-main=once(main,'function setupAutoUpdater() {','function setupAutoUpdater() {\n\t// Evaluation app must never install updates from upstream.\n\treturn;');
-yaml=once(yaml,'appId: com.learnharness.LearnHarness','appId: org.learnharness.private.pr20-test');
-yaml=once(yaml,'productName: LearnHarness','productName: LearnHarness PR20 Test');
-const publish=yaml.indexOf("\npublish:\n");
-if(publish===-1)throw new Error("Expected upstream publish policy missing");
-yaml=yaml.slice(0,publish)+'\n# No release feed for isolated PR20 evaluation.\n';
-fs.writeFileSync(mainFile,main);
-fs.writeFileSync(yamlFile,yaml);
-console.log("Prepared isolated PR20 test package (no upstream updater).");
+const main = fs.readFileSync("electron/main.cjs", "utf8");
+const yaml = fs.readFileSync("electron-builder.yml", "utf8").replace(/\r\n/g, "\n");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+function assert(ok, why) { if (!ok) throw new Error("Unsafe private packaging: " + why); }
+assert(main.includes('const PRODUCT_NAME = "LearnHarness Private";'), "Electron runtime must use the private product name");
+assert(/function setupAutoUpdater\(\)\s*\{\s*\/\/[^\n]*\n\s*return;/.test(main), "updater must fail closed before any network activity");
+assert(/^appId: org\.learnharness\.private\.windows$/m.test(yaml), "wrong appId");
+assert(/^productName: LearnHarness Private$/m.test(yaml), "wrong product name");
+assert(!/^publish:/m.test(yaml) && !/^\s+-\s+provider:\s+github\s*$/m.test(yaml), "upstream publish feed still configured");
+assert(pkg.scripts["desktop:dist:win"]?.includes("--publish never"), "Windows build must never publish");
+console.log("Verified private app identity, disabled updater, and no upstream publication feed.");
