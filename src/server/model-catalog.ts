@@ -42,7 +42,7 @@ import type {
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
 import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
-import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type AgentSettings, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
 export type ModelDto = ModelCatalogEntry;
@@ -343,9 +343,9 @@ export async function validateAccountAwareModelsSettings(settings: ModelsSetting
 	}
 	return {ok:true};
 }
-export async function validateAccountAwareAgentModels(settings: {models?: Record<string, {model?: {provider:string;id:string}}> }): Promise<SettingsValidation> {
+export async function validateAccountAwareAgentModels(settings: Pick<AgentSettings, "models">): Promise<SettingsValidation> {
 	for (const entry of Object.values(settings.models ?? {})) {
-		if (!entry.model) continue;
+		if (!entry?.model) continue;
 		const base = validateChatSettings({model: entry.model});
 		if (!base.ok) return base;
 		const allowed = await validateConnectedAccountModel(entry.model.provider, entry.model.id);
