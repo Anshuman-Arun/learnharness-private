@@ -123,6 +123,31 @@ function model(opts: Partial<ConstructorParameters<typeof SessionModel>[0]> = {}
 	return new SessionModel({ chatId: "chat_x", initialMessages: [], ...opts });
 }
 
+
+describe("SSE transport adversarial framing", () => {
+	it("accepts CRLF frames split between CR and LF without falsely truncating", async () => {
+		for (const chunkSize of [1, 2, 5, 17]) {
+			const m = model();
+			const wire = "data: {\\"type\\":\\"agent_start\\"}\\r\\n\\r\\ndata: [DONE]\\r\\n\\r\\n"
+				.replaceAll("\\r", "\r").replaceAll("\\n", "\n");
+			await m.consumeStream(dripped(wire, chunkSize), false);
+			assert.equal(m.getState().status, "ready", `chunk size ${chunkSize}`);
+		}
+	});
+	it("accepts standard multi-line data blocks and ignores SSE comments", async () => {
+		const m = model();
+		const wire = ":heartbeat\\ndata: {\\"type\\":\\ndata: \\"agent_start\\"}\\n\\ndata:[DONE]\\n\\n"
+			.replaceAll("\\n", "\n");
+		await m.consumeStream(dripped(wire, 2), false);
+		assert.equal(m.getState().status, "ready");
+	});
+	it("cannot mark an EOF-without-DONE stream as successfully settled", async () => {
+		const m = model();
+		await m.consumeStream(dripped("data: {\\"type\\":\\"agent_start\\"}\\n\\n".replaceAll("\\n", "\n"), 1), false);
+		assert.equal(m.getState().status, "error");
+	});
+});
+
 // ─── the 409 identity-retry ────────────────────────────────────────────────
 
 interface Call {

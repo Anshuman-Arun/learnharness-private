@@ -88,19 +88,29 @@ async function* sseEvents(
 	reader: ReadableStreamDefaultReader<Uint8Array>,
 ): AsyncGenerator<Record<string, unknown>, boolean> {
 	const decoder = new TextDecoder();
+	const MAX_SSE_EVENT = 16 * 1024 * 1024;
 	let buf = "";
+	let pendingCR = false;
 	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) return false;
-		buf += decoder.decode(value, { stream: true });
+		let chunk = (pendingCR ? "\r" : "") + decoder.decode(value, { stream: true });
+		pendingCR = chunk.endsWith("\r");
+		if (pendingCR) chunk = chunk.slice(0, -1);
+		buf += chunk.replace(/\r\n?/g, "\n");
+		if (buf.length > MAX_SSE_EVENT) throw new Error("SSE event exceeds the safety limit.");
 		for (;;) {
 			const end = buf.indexOf("\n\n");
 			if (end === -1) break;
 			const event = buf.slice(0, end);
 			buf = buf.slice(end + 2);
-			const dataLine = event.split("\n").find((l) => l.startsWith("data: "));
-			if (!dataLine) continue;
-			const data = dataLine.slice("data: ".length);
+			// Standard SSE allows 'data:' with or without a following space,
+			// multiple data lines, CRLF frames, and comment/metadata lines.
+			const dataLines = event.split("\n")
+				.filter((line) => line.startsWith("data:"))
+				.map((line) => line.slice(5).replace(/^ /, ""));
+			if (!dataLines.length) continue;
+			const data = dataLines.join("\n");
 			if (data === "[DONE]") return true;
 			yield JSON.parse(data) as Record<string, unknown>;
 		}
