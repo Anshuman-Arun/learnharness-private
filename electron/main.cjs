@@ -27,6 +27,7 @@
 const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog, safeStorage } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
@@ -185,7 +186,7 @@ function log(line) {
 	}
 }
 
-function startServer(port) {
+function startServer(port, healthSecret) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
 			process.execPath,
@@ -197,6 +198,7 @@ function startServer(port) {
 					ELECTRON_RUN_AS_NODE: "1",
 					NODE_ENV: "production",
 					PORT: String(port),
+					LH_DESKTOP_HEALTH_SECRET: healthSecret,
 					HOSTNAME: "127.0.0.1", // the server defaults to 0.0.0.0 — never
 					LH_DATA_DIR: DATA_DIR(),
 					// The auth/keys store — the child reads AND writes this file itself
@@ -226,15 +228,23 @@ function startServer(port) {
 }
 
 /** No "ready" event exists — poll until the server answers (docs-confirmed). */
-function waitUntilUp(url, tries = 150) {
+function waitUntilUp(baseUrl, healthSecret, tries = 150) {
+	const healthUrl = new URL("/api/desktop-health", baseUrl).toString();
 	return new Promise((resolve, reject) => {
 		const attempt = (n) => {
-			const req = http.get(url, (res) => {
+			// Requiring a per-launch capability proves we found OUR Next child,
+			// not an unrelated process that won the free-port race.
+			const req = http.get(healthUrl, (res) => {
+				const ready = res.statusCode === 200 &&
+					res.headers["x-lh-app-ready"] === healthSecret;
 				res.resume();
-				resolve(res.statusCode !== undefined);
+				if (ready) resolve(true);
+				else if (n <= 0) reject(new Error("Unexpected server answered the private health check."));
+				else setTimeout(() => attempt(n - 1), 200);
 			});
+			req.setTimeout(5000, () => req.destroy(new Error("Health check timed out")));
 			req.on("error", () => {
-				if (n <= 0) reject(new Error(`server never answered on ${url}`));
+				if (n <= 0) reject(new Error("Private desktop server never became healthy."));
 				else setTimeout(() => attempt(n - 1), 200);
 			});
 		};
@@ -611,8 +621,9 @@ async function main() {
 	if (!devUrl) {
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
-		await startServer(new URL(url).port);
-		await waitUntilUp(url);
+		const healthSecret = crypto.randomBytes(32).toString("base64url");
+		await startServer(new URL(url).port, healthSecret);
+		await waitUntilUp(url, healthSecret);
 		log(`server up: ${url}`);
 	} else {
 		log(`dev mode: ${devUrl}`);
