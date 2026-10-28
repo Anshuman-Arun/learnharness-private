@@ -211,6 +211,22 @@ try{
     await snap(teachCtx,"lesson-"+mode);
     await teachCtx.page.click('[data-testid="plan-chip"]');
     await new Promise(r=>setTimeout(r,450));
+    // Directly audit the ACTUAL rendered SVG, not merely its CSS classes.
+    const planInk=await teachCtx.page.evaluate(()=>{
+      const upcoming=document.querySelector('[data-testid="plan-popup"] svg g[data-status="upcoming"] text');
+      const outline=document.querySelector('[data-testid="plan-popup"] svg g[data-status="upcoming"] rect');
+      const root=getComputedStyle(document.documentElement);
+      return {
+        ink:upcoming?getComputedStyle(upcoming).fill:null,
+        stroke:outline?getComputedStyle(outline).stroke:null,
+        background:root.getPropertyValue("--background").trim(),
+      };
+    });
+    assert.ok(planInk.ink&&planInk.stroke,"plan text and box are visible");
+    assert.ok(contrast(rgb(planInk.ink),rgb(planInk.background))>=4.5,
+      `plan node text contrast in ${mode}`);
+    assert.ok(contrast(rgb(planInk.stroke),rgb(planInk.background))>=3,
+      `plan node outlines contrast in ${mode}`);
     await snap(teachCtx,"lesson-plan-"+mode);
     await teachCtx.page.close();
     const practiceCtx=await newPage(mode);
