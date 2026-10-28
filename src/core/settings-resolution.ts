@@ -190,6 +190,11 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		appearance: {
 			mode: appearance.mode ?? factoryAppearance.mode,
+			accent: appearance.accent ?? factoryAppearance.accent,
+			accentIntensity: appearance.accentIntensity ?? factoryAppearance.accentIntensity,
+			zoomPercent: appearance.zoomPercent ?? factoryAppearance.zoomPercent,
+			corners: appearance.corners ?? factoryAppearance.corners,
+			borders: appearance.borders ?? factoryAppearance.borders,
 			background: appearance.background ?? factoryAppearance.background,
 			fontFamily: appearance.fontFamily ?? factoryAppearance.fontFamily,
 			proseFontSize: appearance.proseFontSize ?? factoryAppearance.proseFontSize,
