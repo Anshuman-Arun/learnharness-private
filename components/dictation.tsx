@@ -249,6 +249,8 @@ export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
 
 export type Dictation = {
 	phase: DictationPhase;
+	/** Whether the microphone stream is connected to the capture worklet. */
+	captureReady?: boolean;
 	/** Terminal-state explanation, shown inside the wide button (cleared on the next start). */
 	error: string | null;
 	/** Latest observed RMS, 0..1 — sampled by the meter's own tick, never reset. */
@@ -286,6 +288,7 @@ export type Dictation = {
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
 	const [phase, setPhase] = useState<DictationPhase>("idle");
+	const [captureReady, setCaptureReady] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
 	const levelRef = useRef(0);
@@ -350,6 +353,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				ws.close();
 			} catch {}
 		}
+		setCaptureReady(false);
 		setPhase("idle");
 		// The finish() waiters ride until NOW — post-flush, post-teardown:
 		// a submit path resuming after `await finishDictation()` reads the
@@ -402,6 +406,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 					cleanup();
 					return;
 				}
+				// The WebSocket has disconnected, even if the mic still captures.
+				setPhase("connecting");
 				// Abnormal close mid-run: ONE reconnect with a fresh token (the
 				// research pass: resume is our job, no SDK to lean on).
 				if (reconnectsRef.current < 1) {
@@ -429,6 +435,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		dictationActiveFlag = true;
 		setError(null);
 		setPhase("connecting");
+		setCaptureReady(false);
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
@@ -484,6 +491,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			// Pull the graph with silence out (the worklet writes no output) —
 			// an unconnected worklet node is never clocked.
 			worklet.connect(ctx.destination);
+			setCaptureReady(true);
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			const msg =
@@ -598,6 +606,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 
 	return {
 		phase,
+		captureReady,
 		error,
 		levelRef,
 		active: phase !== "idle",
@@ -622,7 +631,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
-	const { phase, error, levelRef, toggle, active, clearError } = dictation;
+	const { phase, captureReady = false, error, levelRef, toggle, active, clearError } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
@@ -630,7 +639,11 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	 *  error keeps the old behavior (click = retry, which clears). */
 	const keyless = error === DICTATION_KEYLESS;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
-	const recording = phase === "recording" || phase === "stopping";
+	const recording = phase === "recording";
+	const statusText = phase === "connecting"
+		? (captureReady ? "Mic on · connecting" : "Requesting microphone")
+		: phase === "recording" ? "Connected · listening"
+		: phase === "stopping" ? "Finishing transcription" : "Microphone off";
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
 	 *  overflowing under neighbors. */
@@ -696,7 +709,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					data-testid="dictation-toggle"
 				// Same blurring as the floating chrome (owner, fix wave round 3),
 			// but lower opacity — the mic stays quieter than the model pills.
-			className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
+			className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-border bg-card text-xs text-muted-foreground shadow-sm backdrop-blur transition-colors hover:border-primary/40 hover:text-foreground"
 			>
 					<MicIcon className="size-3.5" />
 					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
@@ -706,7 +719,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	}
 
 	return (
-		<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-bar">
+		<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-bar" data-dictation-phase={phase} data-dictation-capturing={captureReady ? "true" : "false"}>
 			<Hint
 				// The owner flagged this copy good ("Stop dictation (Esc)") —
 				// kept verbatim; only the machinery moved to the styled tooltip.
@@ -719,7 +732,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					disabled={phase === "stopping"}
 					aria-label="Stop dictation"
 				data-testid="dictation-toggle"
-				className="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-destructive/10 px-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
+				className="flex h-8 shrink-0 items-center gap-1.5 rounded-sm border border-destructive/60 bg-destructive/10 px-2 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/20"
 			>
 				{phase === "stopping" ? (
 					<Loader2Icon className="size-3.5 animate-spin" />
