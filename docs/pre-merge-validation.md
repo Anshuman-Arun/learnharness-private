@@ -30,7 +30,7 @@ The 15 feature PRs are open as drafts (#8–#22). [Validation PR #23](https://gi
 | Retrieval | Incorrect committed answer overrides an Easy rating |
 | Sprints | Unsaved notes survive timer changes; exit drafts survive reload; delayed rubrics |
 | C++ workspace/runner/judge | Revision conflict, frozen source/stdout, real hidden-check failure/redaction, tutor evidence handoff |
-| Scratchpad/iPad/evidence | Pressure-bearing touch strokes, portrait/landscape fit, offline reload/replay, cross-pad isolation, delayed acknowledgment after re-pair, PC reclaim with helper down, PNG capture staged in session |
+| Scratchpad/iPad/evidence | Pressure-bearing touch strokes, portrait/landscape fit, offline reload/replay, cross-pad isolation, delayed acknowledgment after re-pair, PC reclaim with helper down, math-text/font export, PNG capture staged in session |
 
 The default suite also exercises native image/code/dictation-transcript transport through an injected agent provider, answer-reveal behavior, exact probability/Bellman math, calibration, scheduler boundaries, retry variants and source provenance.
 
