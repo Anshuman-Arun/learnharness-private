@@ -48,7 +48,9 @@ test('trusted HTTPS pairing scopes, replay, reconnect and desktop revocation', a
   assert.equal((await request('/vendor/excalidraw/../../package.json')).status, 404);
   assert.equal((await request('/api/scene')).status, 401);
   assert.equal((await request('/control/create', { padId: pad.id, pageId: 'public-page' })).status, 401);
-  const paired = await createTabletLink(pad.id, 'public-page');
+  const competing = await Promise.allSettled([createTabletLink(pad.id, 'public-page'), createTabletLink(pad.id, 'public-page')]);
+  assert.equal(competing.filter(result => result.status === 'fulfilled').length, 1, 'one active writer when two PC tabs pair concurrently');
+  const paired = competing.find(result => result.status === 'fulfilled').value;
   const login = await request('/api/pair', { code: paired.code });
   assert.equal(login.status, 200); const token = login.body.token;
   assert.equal(login.body.scene.pad.id, pad.id);
