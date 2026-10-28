@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';import {after,describe,it}from'node:test';import fs from'node:fs';import os from'node:os';import path from'node:path';
+import {advanceExperiment,exactExperiment,parseExperiment,wilsonInterval,type ProbabilityExperiment}from'../src/core/probability-lab.ts';
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'lh-probability-'));process.env.LH_DATA_DIR=dir;const {changeExperiment,probabilityExperiments}=await import('../src/server/probability-lab.ts');after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+const initial:ProbabilityExperiment={version:1,id:'experiment',seed:42,config:{kind:'dice',dice:2,sides:6,threshold:10},prediction:.2,reasoning:'count pairs',targetTrials:10000,completed:0,eligible:0,successes:0,histogram:{},createdAt:0};
+describe('predict-first probability lab',()=>{
+ it('matches exact dice and without-replacement enumerations',()=>{assert.ok(Math.abs(exactExperiment(initial.config).probability-1/6)<1e-12);const urn=exactExperiment({kind:'urn',red:2,blue:2,draws:2,threshold:2});assert.ok(Math.abs(urn.probability-1/6)<1e-12);assert.ok(Math.abs(urn.distribution[1]!-4/6)<1e-12);assert.ok(Math.abs(Object.values(urn.distribution).reduce((a,b)=>a+b,0)-1)<1e-12);});
+ it('uses positive tests as the Bayes denominator and rejects an impossible condition',()=>{assert.ok(Math.abs(exactExperiment({kind:'diagnostic',prevalence:.01,sensitivity:.95,specificity:.95}).probability-.0095/.059)<1e-12);assert.throws(()=>parseExperiment({kind:'diagnostic',prevalence:0,sensitivity:1,specificity:1}));});
+ it('is identical across pause/resume batch boundaries, rejects replay and never exceeds its target',()=>{const direct=advanceExperiment(initial,0,2000),split=advanceExperiment(advanceExperiment(initial,0,777),777,1223);assert.deepEqual(direct,split);assert.throws(()=>advanceExperiment(direct,0,2000),/stale/);const final=advanceExperiment({...direct,targetTrials:2050},2000,1000);assert.equal(final.completed,2050);assert.equal(Object.values(final.histogram).reduce((a,b)=>a+b,0),2050);});
+ it('simulates degenerate urns and perfect tests exactly',()=>{const urn=advanceExperiment({...initial,config:{kind:'urn',red:3,blue:0,draws:3,threshold:3}},0,1000);assert.equal(urn.successes,1000);const tests=advanceExperiment({...initial,config:{kind:'diagnostic',prevalence:1,sensitivity:1,specificity:1}},0,1000);assert.equal(tests.eligible,1000);assert.equal(tests.successes,1000);});
+ it('reports bounded Wilson intervals even at zero or all successes',()=>{assert.equal(wilsonInterval(0,0),null);for(const count of [0,50,100]){const [l,u]=wilsonInterval(count,100)!;assert.ok(l>=0&&u<=1&&l<=count/100&&u>=count/100);}assert.ok(wilsonInterval(50,100)![1]<.6);});
+ it('persists committed predictions before exposing exact results and resumes the saved sequence',()=>{const e=changeExperiment({action:'start',config:initial.config,prediction:.2,reasoning:'Six favourable pairs of 36',targetTrials:1000});assert.equal('exact'in e,false);const batch=changeExperiment({action:'advance',id:e.id,offset:0,batch:300});assert.equal(batch.reasoning,e.reasoning);assert.equal(batch.completed,300);assert.ok(batch.exact);assert.equal(probabilityExperiments().find(x=>x.id===e.id)?.completed,300);const done=changeExperiment({action:'advance',id:e.id,offset:300,batch:1000});assert.equal(done.completed,1000);assert.throws(()=>changeExperiment({action:'advance',id:e.id,offset:300,batch:1000}),/stale/);});
+});
+
+it('agrees with an independent combinatorial oracle across small urn boundaries',()=>{
+ const choose=(n:number,k:number)=>{if(k<0||k>n)return 0;let v=1;for(let i=1;i<=k;i++)v=v*(n-i+1)/i;return v;};
+ for(let red=0;red<=8;red++)for(let blue=0;blue<=8;blue++)for(let draws=1;draws<=Math.min(8,red+blue);draws++)for(let threshold=0;threshold<=draws;threshold++){
+  const result=exactExperiment({kind:'urn',red,blue,draws,threshold});
+  let expected=0;for(let k=threshold;k<=draws;k++)expected+=choose(red,k)*choose(blue,draws-k)/choose(red+blue,draws);
+  assert.ok(Math.abs(result.probability-expected)<1e-12,JSON.stringify({red,blue,draws,threshold}));
+  assert.ok(Math.abs(Object.values(result.distribution).reduce((a,b)=>a+b,0)-1)<1e-12);
+ }
+});
