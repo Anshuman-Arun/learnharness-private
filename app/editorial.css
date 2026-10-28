@@ -8,8 +8,8 @@
  * legacy dark-only palette without changing the learning/runtime components. */
 [data-lh-editorial="v10"]:not(.dark) {
   color-scheme: light;
-  --lh-font-ui: "IBM Plex Sans", var(--font-sans3), "Segoe UI Variable Text", "Segoe UI", sans-serif;
-  --lh-font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --lh-font-ui: var(--font-plex), "IBM Plex Sans", var(--font-sans3), "Segoe UI", sans-serif;
+  --lh-font-display: var(--font-newsreader), "Newsreader", "Iowan Old Style", Georgia, serif;
   --background: #f2eddf;
   --foreground: #1a1815;
   --card: #fbf8ef;
@@ -71,8 +71,8 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
 
 .dark[data-lh-editorial="v10"] {
   color-scheme: dark;
-  --lh-font-ui: "IBM Plex Sans", var(--font-sans3), "Segoe UI Variable Text", "Segoe UI", sans-serif;
-  --lh-font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --lh-font-ui: var(--font-plex), "IBM Plex Sans", var(--font-sans3), "Segoe UI", sans-serif;
+  --lh-font-display: var(--font-newsreader), "Newsreader", "Iowan Old Style", Georgia, serif;
   --background: #2a2825;
   --foreground: #f3eee5;
   --card: #34312d;
@@ -156,7 +156,7 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
   border: 1px solid var(--primary);
   border-radius: var(--lh-control-radius);
   font-family: var(--lh-font-ui);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 650;
   letter-spacing: .012em;
   text-transform: none;
@@ -174,7 +174,7 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
   border-radius: var(--lh-control-radius);
   color: var(--foreground);
   background: transparent;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   letter-spacing: .01em;
   text-transform: none;
@@ -221,7 +221,7 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
   border-top: 1px solid var(--lh-editorial-border-subtle);
   border-radius: var(--lh-control-radius);
   text-transform: none;
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: .02em;
 }
 [data-lh-editorial="v10"] .lh-editorial-topbar {
@@ -234,7 +234,7 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
 [data-lh-editorial="v10"] .lh-editorial-home-masthead {
   margin-left: 8px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: .11em;
   color: var(--muted-foreground);
@@ -269,7 +269,7 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
   margin-bottom: 12px;
   color: var(--primary);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: .14em;
 }
@@ -290,9 +290,75 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
 }
 @media (max-width: 640px) {
   [data-lh-editorial="v10"] .lh-editorial-brand-label {font-size: 17px;}
-  [data-lh-editorial="v10"] .lh-editorial-home-masthead {font-size: 8px; letter-spacing: .04em;}
+  [data-lh-editorial="v10"] .lh-editorial-home-masthead {font-size: 11px; letter-spacing: .06em;}
   [data-lh-editorial="v10"] .lh-editorial-knowledge-summary {padding: 24px;}
 }
 @media (prefers-reduced-motion: reduce) {
   [data-lh-editorial="v10"] [data-testid="new-session"]:hover {transform: none;}
+}
+
+/* Shared highlight wash: the slider now affects all selection surfaces, not
+ * only the home composer. Primary is the saved accent; neutral --accent
+ * remains safe for hover, and text keeps the correct per-theme contrast. */
+[data-lh-editorial="v10"] {
+  --lh-highlight-wash: color-mix(in srgb, var(--primary) var(--lh-accent-intensity), var(--card));
+  --lh-highlight-border: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+[data-lh-editorial="v10"] [data-active="true"][data-testid^="session-row"] {
+  background: var(--lh-highlight-wash);
+  border-color: var(--lh-highlight-border);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+[data-lh-editorial="v10"] [data-testid="session-row-kbd"]:not([data-active="true"]) {
+  background: var(--lh-highlight-wash);
+  border-color: var(--lh-highlight-border);
+}
+[data-lh-editorial="v10"] [data-testid="session-row"]:focus-visible,
+[data-lh-editorial="v10"] [data-testid="session-row-kbd"]:focus-visible {
+  outline: 2px solid var(--primary);
+}
+[data-lh-editorial="v10"] [data-testid="new-session-practice"]:focus-visible,
+[data-lh-editorial="v10"] [data-testid="new-session"]:focus-visible {
+  outline: 2px solid var(--primary);
+}
+[data-lh-editorial="v10"] [data-testid^="accent-"][aria-pressed="true"] {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+}
+[data-lh-editorial="v10"] [data-testid="settings-dialog"] [aria-current="true"],
+[data-lh-editorial="v10"] [data-testid="settings-dialog"] [aria-selected="true"] {
+  background: var(--lh-highlight-wash);
+  border-color: var(--lh-highlight-border);
+}
+/* Composers are already designed at 16px reading scale. Keep visual
+ * labels at 11–13px or above; support readable responsive scaling. */
+[data-lh-editorial="v10"] .lh-editorial-home-masthead {
+  font-size: 11px;
+  line-height: 1.55;
+}
+[data-lh-editorial="v10"] .lh-editorial-eyebrow {
+  font-size: 11px;
+  line-height: 1.5;
+}
+[data-lh-editorial="v10"] .lh-editorial-brand-label {font-size: clamp(17px, 1.4vw, 20px);}
+[data-lh-editorial="v10"] [data-testid="dictation-bar"] {
+  border: 1px solid var(--lh-editorial-border-subtle);
+  border-radius: var(--lh-panel-radius);
+  padding: 2px 6px;
+  background: var(--lh-highlight-wash);
+}
+[data-lh-editorial="v10"] [data-testid="dictation-bar"][data-dictation-phase="connecting"] {
+  background: var(--card);
+}
+[data-lh-editorial="v10"] [data-testid="dictation-bar"][data-dictation-phase="stopping"] {
+  background: var(--secondary);
+}
+[data-lh-editorial="v10"] [data-testid="dictation-connection-state"] {
+  white-space: nowrap;
+  font-size: 12px;
+}
+@media (max-width: 700px) {
+  [data-lh-editorial="v10"] [data-testid="dictation-connection-state"] {
+    font-size: 11px;
+  }
 }
