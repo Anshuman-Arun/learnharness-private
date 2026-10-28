@@ -27,7 +27,7 @@ jobs:
       # Windows checks the actual OAuth, credential broker, billing boundary
       # and native desktop integration instead.
       - name: Focused PR20 Windows security and desktop tests
-        run: node --import tsx --test tests/chatgpt-oauth.test.ts tests/chatgpt-pr20-broker.test.ts tests/pr20-billing-isolation.test.ts tests/desktop-platform.test.ts tests/auth-provider-keys.test.ts
+        run: node --import tsx --test tests/chatgpt-oauth.test.ts tests/chatgpt-pr20-broker.test.ts tests/chatgpt-oauth-adversarial.test.ts tests/private-release-policy.test.ts tests/pr20-billing-isolation.test.ts tests/desktop-platform.test.ts tests/auth-provider-keys.test.ts
         env:
           NODE_ENV: test
       - run: npm run lint

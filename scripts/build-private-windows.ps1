@@ -23,7 +23,8 @@ try {
     Step "Typecheck" { & npm.cmd run typecheck }
     Step "Lint" { & npm.cmd run lint }
     Step "PR20 OAuth and billing security tests" {
-        & node.exe --import tsx --test tests/chatgpt-oauth.test.ts tests/chatgpt-pr20-broker.test.ts tests/pr20-billing-isolation.test.ts tests/desktop-platform.test.ts tests/auth-provider-keys.test.ts tests/private-release-policy.test.ts
+        $env:NODE_ENV = "test"
+        & node.exe --import tsx --test tests/chatgpt-oauth.test.ts tests/chatgpt-pr20-broker.test.ts tests/chatgpt-oauth-adversarial.test.ts tests/pr20-billing-isolation.test.ts tests/desktop-platform.test.ts tests/auth-provider-keys.test.ts tests/private-release-policy.test.ts
     }
     Step "Build Next.js" { & npm.cmd run build }
     Step "Bundle standalone server" { & node.exe scripts/build-server.mjs }
