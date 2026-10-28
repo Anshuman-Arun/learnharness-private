@@ -68,7 +68,7 @@ export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentToo
 				if(!matches.length)return "No matching canonical lesson concepts. Probe normally, without conceptId.";
 				return matches.slice(0,25).map(c=>
 					`${c.id} :: ${c.title} | ${c.correctChecks} correct / ${c.incorrectChecks} incorrect / ${c.ungradedChecks} ungraded check(s) in ${c.sources.length} lesson(s)`
-				).join("\\n")+(matches.length>25?"\\nRefine query for more.":"");
+				).join("\n")+(matches.length>25?"\nRefine query for more.":"");
 			}),
 		},
 		list_sessions: {
