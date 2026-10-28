@@ -129,9 +129,14 @@ function createEncryptedCredentialStore(filePath, safeStorage) {
 			return enqueue(providerId, async () => {
 				options?.signal?.throwIfAborted();
 				const credentials = await readAll();
-				if (!(providerId in credentials)) return;
+				if (!(providerId in credentials)) return false;
+				// Invalid-grant cleanup is compare-and-delete, not unconditional:
+				// a later successful login must not be erased by a stale refresh.
+				if (options?.expectedRefresh !== undefined &&
+					credentials[providerId]?.refresh !== options.expectedRefresh) return false;
 				delete credentials[providerId];
 				await writeAll(credentials);
+				return true;
 			});
 		},
 	};
@@ -438,30 +443,35 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 	let catalogPending = null;
 	const invalidateCatalog = () => { catalogEpoch++; catalogCache = null; catalogPending = null; };
 	async function accessCredential() {
+		let attemptedRefresh;
 		try {
 			return await credentials.modify(PROVIDER_ID, async (current) => {
 				if (current?.type !== "oauth") return undefined;
-				return current.expires <= Date.now() + 10 * 60_000 ? refreshCredential(current) : undefined;
+				if (current.expires > Date.now() + 10 * 60_000) return undefined;
+				attemptedRefresh = current.refresh;
+				return refreshCredential(current);
 			});
 		} catch (error) {
-			// A revoked/consumed refresh token is not a transient network
-			// failure. Stop claiming this account is still connected.
-			if (error?.oauthCode === "invalid_grant") {
-				await credentials.delete(PROVIDER_ID);
-				invalidateCatalog();
-				loginState = { connecting: false, phase: "error",
-					error: "Your ChatGPT authorization expired. Reconnect to continue." };
+			if (error?.oauthCode === "invalid_grant" && attemptedRefresh) {
+				const removed = await credentials.delete(PROVIDER_ID, { expectedRefresh: attemptedRefresh });
+				if (removed) {
+					invalidateCatalog();
+					loginState = { connecting: false, phase: "error",
+						error: "Your ChatGPT authorization expired. Reconnect to continue." };
+				}
 			}
 			throw error;
 		}
 	}
 	async function discoverAccountModels() {
 		const epoch = catalogEpoch;
+		// Refresh/validate account authority before accepting a cached
+		// catalog. Otherwise a revoked token could show selectable models.
+		const credential = await accessCredential();
+		if (credential?.type !== "oauth" || !credential.access) throw new Error("ChatGPT is not connected.");
 		if (catalogCache && catalogCache.expires > Date.now()) return catalogCache.models;
 		if (catalogPending) return catalogPending;
 		const pending = (async () => {
-			const credential = await accessCredential();
-			if (credential?.type !== "oauth" || !credential.access) throw new Error("ChatGPT is not connected.");
 			const response = await fetch(`${RESOURCE}/models`, {
 				headers: { authorization: `Bearer ${credential.access}` },
 				signal: AbortSignal.timeout(15_000),
@@ -470,9 +480,23 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 			if (!response.ok) throw new Error(`ChatGPT account model discovery failed (${response.status}).`);
 			const contentLength = Number(response.headers.get("content-length") ?? 0);
 			if (contentLength > 1_048_576) throw new Error("ChatGPT model catalog exceeds the size limit.");
-			const raw = await response.text();
-			if (raw.length > 1_048_576) throw new Error("ChatGPT model catalog exceeds the size limit.");
-			const body = JSON.parse(raw);
+			// Do not allow an upstream server to force an unbounded response
+			// allocation before the size check is applied.
+			if (!response.body) throw new Error("ChatGPT returned an empty model catalog.");
+			const reader = response.body.getReader();
+			const chunks = [];
+			let size = 0;
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				size += value.byteLength;
+				if (size > 1_048_576) {
+					await reader.cancel().catch(() => undefined);
+					throw new Error("ChatGPT model catalog exceeds the size limit.");
+				}
+				chunks.push(Buffer.from(value));
+			}
+			const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 			if (!body || !Array.isArray(body.models)) throw new Error("ChatGPT returned an invalid model catalog.");
 			const models = [];
 			const seen = new Set();
