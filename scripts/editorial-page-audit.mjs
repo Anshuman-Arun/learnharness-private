@@ -220,7 +220,10 @@ try{
     await page.click('[data-testid="font-trigger"]');
     await new Promise(r=>setTimeout(r,220));
     await snap(ctx,"font-menu-"+mode);
-    await page.keyboard.press("Escape"); // closes only the font menu
+    await page.keyboard.press("Escape");
+    await page.waitForSelector('[data-testid="font-menu"]',{hidden:true,timeout:10000});
+    assert.ok(await page.$('[data-testid="settings-dialog"]'),
+      "one Escape closes only the font submenu, not its settings dialog");
     await page.click('[data-testid="settings-close"]');
     await settingShot(ctx,"general");
     await settingShot(ctx,"agent");
