@@ -67,6 +67,7 @@ describe("ChatGPT OAuth provider alias", () => {
 
 		const engine = piEngineForSpec({ provider: CHATGPT_PROVIDER_ID, id: chatGPT[0]!.id });
 		assert.equal(engine.model.provider, "openai");
+		assert.equal(engine.providerId, CHATGPT_PROVIDER_ID, "billing gate must use the subscription provider, not OpenAI API key transport");
 	});
 
 	it("projects broker tokens as OAuth credentials without persisting them in Next", async () => {

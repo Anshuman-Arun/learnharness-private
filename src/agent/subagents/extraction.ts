@@ -811,7 +811,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		// auditor); fixing that key re-gates and the next run surfaces the
 		// next offender, if any.
 		for (const [role, engine] of stages) {
-			const refusal = deps.providerKeyMissing?.(engine!.model.provider, ROLE_SLOT[role]);
+			const refusal = deps.providerKeyMissing?.(engine!.providerId ?? engine!.model.provider, ROLE_SLOT[role]);
 			if (refusal) {
 				console.info(`[extraction] refused — ${JSON.stringify(refusal)}`);
 				throw new ProviderKeyMissingError(refusal.provider, refusal.slots);

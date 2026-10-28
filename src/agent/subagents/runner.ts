@@ -136,7 +136,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		const chatId = jobStore.getJob(jobId)?.chatId;
 		// Provider-qualified stamp: the engine's actual model — the only
 		// thing that ran (BYOK: no config-pin fallback stamps exist).
-		const model = `${engine.model.provider}:${engine.model.id}`;
+		const model = `${engine.providerId ?? engine.model.provider}:${engine.model.id}`;
 		// Real-kill wiring (2026-09 abort semantics): the controller is what
 		// the abort endpoint fires (agent/subagents/aborts.ts registry); the
 		// signal rides into every model call of the loop.
@@ -252,7 +252,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 		// convention (the injected check reads the key store; absent in
 		// engine-injecting tests).
 		const keyRefusal =
-			deps.providerKeyMissing?.(engine.model.provider, ROLE_SLOT[KIND_ROLE[job.kind]]) ?? null;
+			deps.providerKeyMissing?.(engine.providerId ?? engine.model.provider, ROLE_SLOT[KIND_ROLE[job.kind]]) ?? null;
 		if (keyRefusal) {
 			console.info(`[job ${jobId}] refused — ${JSON.stringify(keyRefusal)}`);
 			await refuse(keyRefusal.error);

@@ -40,6 +40,10 @@ export const APP_IDENTITY = Object.freeze({
 
 export interface PiEngine {
 	model: Model<Api>;
+	/** The settings-selected billing/provider identity. May differ from the
+	 * pi-ai transport provider (ChatGPT plan maps to the OpenAI Responses API).
+	 * Missing on injected test engines for backward compatibility. */
+	providerId?: string;
 	streamFn: StreamFunction;
 	/** The resolved (config-or-settings, CLAMPED) thinking level —
 	 *  observability + tests; the streamFn pins it anyway. */
@@ -135,6 +139,7 @@ export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 		: defaultThinkingLevel(model);
 	return {
 		model,
+		providerId: spec.provider,
 		level,
 		// bound streamSimple: the agent loop forwards state.thinkingLevel as
 		// `reasoning` (undefined = off on pi-ai's scale); the clamp above keeps
