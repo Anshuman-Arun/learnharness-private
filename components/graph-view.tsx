@@ -1420,6 +1420,7 @@ export function GraphView({
 				edge: tokenHex("--ring"),
 				label: tokenHex("--muted-foreground"),
 				hoverText: tokenHex("--foreground"),
+				regionLabelLightness: document.documentElement.classList.contains("dark") ? 78 : 29,
 			},
 			// Read the actual computed UI font stack, including editorial/OS overrides.
 			fontFamily: getComputedStyle(document.body).fontFamily,
@@ -1444,6 +1445,7 @@ export function GraphView({
 					edge: tokenHex("--ring"),
 					label: tokenHex("--muted-foreground"),
 					hoverText: tokenHex("--foreground"),
+				regionLabelLightness: document.documentElement.classList.contains("dark") ? 78 : 29,
 				}, getComputedStyle(document.body).fontFamily);
 			});
 		};
