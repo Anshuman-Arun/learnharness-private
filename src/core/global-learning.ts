@@ -57,8 +57,8 @@ const GENERIC = new Set([
 ]);
 const SAFE_SINGLE = new Set([
   "gradient","divergence","curl","jacobian","hessian","eigenvalues",
-  "eigenvectors","integrals","derivatives","covariance","variance",
-  "expectation","martingales","brownian motion","convexity","duality",
+  "eigenvectors","covariance","variance",
+  "expectation","martingales","brownian motion","convexity",
 ]);
 export function normalizeLearningTitle(s: string): string {
   return s.normalize("NFKC").toLocaleLowerCase("en-US")
