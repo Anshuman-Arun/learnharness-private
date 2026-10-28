@@ -313,6 +313,47 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
 	return { ok: true };
 }
 
+/** Account-authorized write gate: the pinned ChatGPT model must be both
+ * supported by pi-ai AND on this connected account's visible roster. */
+async function validateConnectedAccountModel(provider: string, id: string): Promise<SettingsValidation> {
+	if (provider !== CHATGPT_PROVIDER_ID) return { ok: true };
+	const status = await getChatGPTBrokerStatus();
+	if (!status.connected) return { ok: false, error: "Connect ChatGPT before selecting a subscription model." };
+	try {
+		const allowed = await getChatGPTBrokerModels();
+		if (allowed.some((model) => model.id === id)) return { ok: true };
+		return { ok: false, error: `ChatGPT model "${id}" is unavailable to the connected account.` };
+	} catch {
+		return { ok: false, error: "ChatGPT model catalog could not be verified. Retry before saving." };
+	}
+}
+export async function validateAccountAwareChatSettings(settings: ChatSettings): Promise<SettingsValidation> {
+	const verdict = validateChatSettings(settings);
+	if (!verdict.ok || !settings.model) return verdict;
+	return validateConnectedAccountModel(settings.model.provider, settings.model.id);
+}
+export async function validateAccountAwareModelsSettings(settings: ModelsSettings): Promise<SettingsValidation> {
+	const verdict = validateModelsSettings(settings);
+	if (!verdict.ok) return verdict;
+	for (const name of MODEL_SLOTS) {
+		const model = settings[name]?.model;
+		if (!model) continue;
+		const allowed = await validateConnectedAccountModel(model.provider, model.id);
+		if (!allowed.ok) return allowed;
+	}
+	return {ok:true};
+}
+export async function validateAccountAwareAgentModels(settings: {models?: Record<string, {model?: {provider:string;id:string}}> }): Promise<SettingsValidation> {
+	for (const entry of Object.values(settings.models ?? {})) {
+		if (!entry.model) continue;
+		const base = validateChatSettings({model: entry.model});
+		if (!base.ok) return base;
+		const allowed = await validateConnectedAccountModel(entry.model.provider, entry.model.id);
+		if (!allowed.ok) return allowed;
+	}
+	return {ok:true};
+}
+
 // ─── clamp-on-write (owner ruling, interlude 2026-09-22) ─────────────────────
 // A model swap with a pinned thinking level must JUST WORK: the pin
 // translates to the new model's nearest supported level — pi's
