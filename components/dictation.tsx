@@ -107,6 +107,57 @@ export const METER_CELLS = 48;
  *  section's openRow state and the PUT /api/keys/:id seam). */
 export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
 
+/** A named device is a strict choice: never silently record from another mic. */
+export function dictationAudioConstraints(microphoneId = "default"): MediaStreamConstraints {
+	return {
+		audio: {
+			...(microphoneId !== "default" ? { deviceId: { exact: microphoneId } } : {}),
+			channelCount: 1,
+			echoCancellation: true,
+			noiseSuppression: true,
+			autoGainControl: true,
+		},
+	};
+}
+
+/** ID changes across localhost origins; match a uniquely named physical mic after a restart. */
+export function findMicrophoneByLabel(
+	label: string,
+	devices: readonly Pick<MediaDeviceInfo, "kind" | "label" | "deviceId">[],
+): string | undefined {
+	if (!label) return undefined;
+	const matches = devices.filter((item) => item.kind === "audioinput" && item.label === label && item.deviceId);
+	return matches.length === 1 ? matches[0]?.deviceId : undefined;
+}
+
+async function selectedMicrophone(): Promise<MediaStream> {
+	const response = await fetch("/api/settings", { cache: "no-store" });
+	if (!response.ok) throw new Error("Could not read microphone setting.");
+	const body = (await response.json()) as { settings?: { general?: { microphoneId?: string; microphoneLabel?: string } } | null };
+	const id = body.settings?.general?.microphoneId ?? "default";
+	const label = body.settings?.general?.microphoneLabel ?? "";
+	const media = navigator.mediaDevices;
+	if (id === "default") return media.getUserMedia(dictationAudioConstraints());
+	try {
+		return await media.getUserMedia(dictationAudioConstraints(id));
+	} catch (error) {
+		// Never use a different microphone silently on a genuine permission error.
+		if (!(error instanceof DOMException) || (error.name !== "NotFoundError" && error.name !== "OverconstrainedError") || !label) throw error;
+	}
+	let available = await media.enumerateDevices();
+	let resolved = findMicrophoneByLabel(label, available);
+	if (!resolved && !available.some((item) => item.kind === "audioinput" && item.label)) {
+		// Chromium hides labels until permission is granted on this origin.
+		// Open the default mic briefly ONLY to unlock enumeration, never to stream.
+		const permissionStream = await media.getUserMedia({ audio: true });
+		permissionStream.getTracks().forEach((track) => track.stop());
+		available = await media.enumerateDevices();
+		resolved = findMicrophoneByLabel(label, available);
+	}
+	if (!resolved) throw new DOMException("Saved microphone unavailable", "NotFoundError");
+	return media.getUserMedia(dictationAudioConstraints(resolved));
+}
+
 /** The client-authored KEYLESS line (zero-keys wave, owner 2026-09-25):
  * the token route's raw 503 message is dev-speak ("add it to auth.json
  * (desktop) or .env.local (dev)") — the surface says the short truth
@@ -449,9 +500,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// first use.
 		const tokenPromise = warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
-		const micPromise = navigator.mediaDevices.getUserMedia({
-			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-		});
+		const micPromise = selectedMicrophone();
 		let stream: MediaStream;
 		try {
 			stream = await micPromise;
