@@ -43,6 +43,58 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+
+  it("makes autonomous subscription use an explicit encrypted opt-in, changeable only by trusted UI", async () => {
+    await scratch(async dir => {
+      const safeStorage = encryptedBackend();
+      const store = native.createEncryptedCredentialStore(path.join(dir,"chatgpt-oauth.enc.json"),safeStorage);
+      const identity = {
+        type:"oauth",access:"access",refresh:"refresh",clientId:"test-client",
+        subject:"account-123",expires:Date.now()+3600000,
+        scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"],
+      };
+      await store.modify("openai",async()=>identity);
+      const good = {valid:true};
+      const handlers = new Map<string,(event?:unknown, ...args:unknown[])=>Promise<unknown>>();
+      const start = async () => native.createChatGPTOAuthRuntime({
+        userDataDir:dir,safeStorage,
+        shell:{openExternal:async()=>undefined},
+        ipcMain:{handle:(channel:string,fn:(event?:unknown,...args:unknown[])=>Promise<unknown>)=>{handlers.set(channel,fn);}},
+        authorizeIpc:(event:unknown)=>event===good,log:()=>undefined,
+      });
+      let runtime=await start();
+      try {
+        const status=handlers.get("lh:chatgpt:status")!;
+        const toggle=handlers.get("lh:chatgpt:set-background-use")!;
+        const before = await status(good) as {connected:boolean;backgroundUseAllowed:boolean};
+        assert.equal(before.connected,true);
+        assert.equal(before.backgroundUseAllowed,false);
+        await assert.rejects(async()=>toggle({},true),/Untrusted ChatGPT IPC sender/);
+        await assert.rejects(async()=>toggle(good,"yes"),/Invalid ChatGPT background-use permission/);
+        assert.equal((await status(good) as {backgroundUseAllowed:boolean}).backgroundUseAllowed,false);
+        const enabled=await toggle(good,true) as {backgroundUseAllowed:boolean};
+        assert.equal(enabled.backgroundUseAllowed,true);
+        assert.equal((await store.read("openai"))?.backgroundUseAllowed,true);
+        assert.doesNotMatch(await fs.readFile(path.join(dir,"chatgpt-oauth.enc.json"),"utf8"),/backgroundUseAllowed|access|refresh/);
+        runtime.close();
+        runtime=await start();
+        assert.equal((await handlers.get("lh:chatgpt:status")!(good) as {backgroundUseAllowed:boolean}).backgroundUseAllowed,true);
+        await handlers.get("lh:chatgpt:set-background-use")!(good,false);
+        assert.equal((await store.read("openai"))?.backgroundUseAllowed,false);
+      } finally { runtime.close(); }
+    });
+  });
+
+  it("background jobs and extraction explicitly check consent; normal learner turns do not require it", async () => {
+    const handler = await fs.readFile(new URL("../src/server/chat-handler.ts",import.meta.url),"utf8");
+    const checks = handler.match(/status\.backgroundUseAllowed !== true/g) ?? [];
+    assert.equal(checks.length,2,"both autonomous admission gates enforce explicit opt-in");
+    assert.match(handler,/CHATGPT_BACKGROUND_DISABLED/);
+    const oauth = await fs.readFile(new URL("../electron/chatgpt-oauth.cjs",import.meta.url),"utf8");
+    assert.match(oauth,/authorization\.searchParams\.set\("id_token_hint", previous\.idToken\)/);
+  });
+
+
   it("does not silently report successful remote revocation when OAuth metadata has no revoke endpoint", () => {
     const source = require("node:fs").readFileSync(require("node:path").join(process.cwd(),"electron/chatgpt-oauth.cjs"),"utf8");
     assert.match(source,/remote revocation is unavailable/);
