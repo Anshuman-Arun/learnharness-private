@@ -59,6 +59,7 @@ declare global {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
 			expandWindow: () => void;
+			setTitlebarTheme?: (mode: "light" | "dark") => void;
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
 			getZoom?: () => Promise<number>;
