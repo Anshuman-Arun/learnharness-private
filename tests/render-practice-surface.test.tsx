@@ -46,7 +46,7 @@ describe("PracticeDock", () => {
 				input={{ statement: "Show that the sum is even." }}
 				expanded={true}
 				onExpand={() => {}}
-				onSubmit={() => {}}
+				onSubmit={async () => true}
 			/>,
 		);
 		assert.match(html, /Show that the sum is even\./);
@@ -70,7 +70,7 @@ describe("PracticeDock", () => {
 				input={{ statement: "Show that the sum is even." }}
 				expanded={false}
 				onExpand={() => {}}
-				onSubmit={() => {}}
+				onSubmit={async () => true}
 			/>,
 		);
 		assert.match(html, /data-testid="practice-dock-bar"/);
