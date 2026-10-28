@@ -208,16 +208,41 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { mode?, background?, fontFamily?, proseFontSize?,
- *  sessionNameSerif?, mdRendering? } */
+ *  accent?, accentIntensity?, zoomPercent?, corners?, borders?, sessionNameSerif?, mdRendering? } */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: AppearanceSettings = {};
 	if (raw.mode !== undefined) {
-		if (raw.mode !== "dark" && raw.mode !== "light") {
-			return { ok: false, error: "mode must be \"dark\" or \"light\"" };
+		if (raw.mode !== "dark" && raw.mode !== "light" && raw.mode !== "system") {
+			return { ok: false, error: "mode must be \"dark\", \"light\" or \"system\"" };
 		}
 		settings.mode = raw.mode;
+	}
+	if (raw.accent !== undefined) {
+		if (typeof raw.accent !== "string" || !["ink", "cobalt", "teal", "amber", "coral", "violet", "rose"].includes(raw.accent))
+			return { ok: false, error: "accent must be a known editorial color" };
+		settings.accent = raw.accent as NonNullable<AppearanceSettings["accent"]>;
+	}
+	if (raw.accentIntensity !== undefined) {
+		if (typeof raw.accentIntensity !== "number" || !Number.isInteger(raw.accentIntensity) || raw.accentIntensity < 8 || raw.accentIntensity > 28)
+			return { ok: false, error: "accentIntensity must be an integer between 8 and 28" };
+		settings.accentIntensity = raw.accentIntensity;
+	}
+	if (raw.zoomPercent !== undefined) {
+		if (typeof raw.zoomPercent !== "number" || !Number.isInteger(raw.zoomPercent) || raw.zoomPercent < 25 || raw.zoomPercent > 500)
+			return { ok: false, error: "zoomPercent must be an integer between 25 and 500" };
+		settings.zoomPercent = raw.zoomPercent;
+	}
+	if (raw.corners !== undefined) {
+		if (typeof raw.corners !== "string" || !["square", "soft", "round", "generous"].includes(raw.corners))
+			return { ok: false, error: "corners must be square, soft, round or generous" };
+		settings.corners = raw.corners as NonNullable<AppearanceSettings["corners"]>;
+	}
+	if (raw.borders !== undefined) {
+		if (typeof raw.borders !== "string" || !["quiet", "regular", "strong", "contrast"].includes(raw.borders))
+			return { ok: false, error: "borders must be quiet, regular, strong or contrast" };
+		settings.borders = raw.borders as NonNullable<AppearanceSettings["borders"]>;
 	}
 	if (raw.background !== undefined) {
 		const parsed = parseHexOrNull(raw.background, "background");
