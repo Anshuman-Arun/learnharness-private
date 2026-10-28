@@ -5,6 +5,7 @@ import {
 	askInputSchema,
 	askOptionProblems,
 	explainInputBase,
+	probeExplainInputSchema,
 	explainInputObject,
 	explainInputProblems,
 	parseOptionsIfString,
@@ -246,11 +247,11 @@ export function teachExplainToolFor(
  *  probe call shape into teaching. Old probe-phase records keep the
  *  `explain` name and parse identically (the display seam accepts
  *  both). */
-export const probeExplainTool: AgentTool<typeof explainInputBase> = {
+export const probeExplainTool: AgentTool<typeof probeExplainInputSchema> = {
 	name: "recall",
 	label: "recall",
 	description: explainDescription("recall", false),
-	parameters: explainInputBase,
+	parameters: probeExplainInputSchema,
 	prepareArguments: prepareQuestionArguments,
 	executionMode: "sequential",
 	execute: async (_toolCallId, input) => {
