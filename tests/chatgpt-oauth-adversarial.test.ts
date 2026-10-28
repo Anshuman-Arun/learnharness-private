@@ -163,7 +163,7 @@ describe("adversarial ChatGPT private-provider checks", () => {
     for(const broken of [
       {...baseline,access:"sk-platform-api-key"},
       {...baseline,clientId:"dynamic_agent_client"},
-      {...baseline,scopes:["chatgpt.tokens.use.direct"]},
+      {...baseline,scopes:[]},
       {...baseline,refresh:""},
       {...baseline,subject:""},
       {...baseline,expires:Infinity},

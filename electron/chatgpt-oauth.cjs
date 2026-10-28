@@ -9,7 +9,10 @@ const ISSUER = "https://auth.openai.com";
 const RESOURCE = "https://api.openai.com/v1";
 const SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 const SHARING_SCOPE = "chatgpt.tokens.use.direct";
-const REQUIRED_SCOPES = SCOPES.split(" ");
+// Only the subscription-sharing grant is mandatory. OpenID identity and
+// refresh-token possession are validated independently; optional profile/email
+// grants must not break a previously successful ChatGPT login.
+const REQUIRED_SCOPES = [SHARING_SCOPE];
 const CALLBACK_PATH = "/auth/callback";
 const DYNAMIC_CLIENT_ID = "dynamic_agent_client";
 let discoveryPromise;
