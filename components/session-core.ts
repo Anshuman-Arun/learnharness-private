@@ -275,7 +275,9 @@ export class SessionModel {
 
 	private setStatus(status: SessionStatus): void {
 		this.statusValue = status;
-		this.readyRef = status === "ready";
+		// A refused/failed turn is idle too; retry still passes the server's
+		// conflict gate and must not be silently discarded by the client.
+		this.readyRef = status === "ready" || status === "error";
 		this.onChange?.();
 	}
 
@@ -532,7 +534,7 @@ export class SessionModel {
 	 * POST + consume. Ready-gated: one turn per client at a time (the
 	 * server's 409 + identity retry covers the wake-race window).
 	 */
-	async send(input: ChatInput): Promise<void> {
+	async send(input: ChatInput, onAccepted?: () => void): Promise<void> {
 		if (!this.readyRef) return;
 		this.consumeAbort?.abort();
 		const controller = new AbortController();
@@ -560,6 +562,11 @@ export class SessionModel {
 		if (optimistic.length > 0) this.mutate(() => {
 			this.tail = [...this.tail, ...optimistic];
 		});
+		let accepted = false;
+		const discardRefused = () => this.mutate(() => {
+			const ids = new Set(optimistic.map((message) => message.id));
+			this.tail = this.tail.filter((message) => !ids.has(message.id));
+		});
 		try {
 			// SUBMITS ARE NOT ABORTABLE BY VIEW TEARDOWN (owner, 2026-10-10 —
 			// the dead-session-start postmortem): the POST must NOT ride
@@ -575,6 +582,7 @@ export class SessionModel {
 			// connection is Diet A's whole job.
 			const res = await this.postInputEvent(input);
 			if (res.status === 409) {
+				discardRefused();
 				this.setError("A turn is already running — try again in a moment.");
 				this.setStatus("error");
 				return;
@@ -585,6 +593,8 @@ export class SessionModel {
 				// page's refusal flow JSON-parses the envelope out of it.
 				throw new Error((await res.text()) || `The send failed (${res.status}).`);
 			}
+			accepted = true;
+			onAccepted?.();
 			// CONNECTION DIET B (owner, 2026-10-10 — parallel-session freeze
 			// postmortem): the POST acknowledges and closes; there is no stream
 			// on this response to consume. Attach through the SAME reattach wire
@@ -599,6 +609,7 @@ export class SessionModel {
 			if (this.consumeAbort !== controller) return;
 			await this.resumeStream(true);
 		} catch (err) {
+			if (!accepted) discardRefused();
 			if ((err as Error).name === "AbortError") return; // stop() or a newer consume won
 			this.setError((err as Error).message);
 			this.setStatus("error");

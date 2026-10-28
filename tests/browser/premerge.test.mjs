@@ -9,6 +9,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import puppeteer from 'puppeteer-core';
 import { createCppRunnerServer, loadRunnerToken } from '../../runner/cpp-service.mjs';
 import { createTabletServer, loadTabletControlToken } from '../../runner/tablet-service.mjs';
+import { cppRunEvidence } from '../../src/core/cpp-run.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const until = async (fn, timeout = 30000) => { const end = Date.now() + timeout; while (Date.now() < end) { if (await fn()) return; await new Promise(r => setTimeout(r, 100)); } throw Error('Condition did not settle'); };
@@ -51,6 +52,32 @@ test('pre-merge production browser workflows', { timeout: 600000 }, async t => {
    await p.reload({ waitUntil: 'networkidle2' }); assert.equal(await p.$eval('[aria-label="Teaching style"]', e => e.value), 'guided');
    await p.select('[aria-label="Teaching style"]', 'explain');
    await until(async () => (await api(`/api/chats/${chat.id}`)).settings.teachingMode === 'explain');
+   await p.close();
+  });
+  await check('image reads preserve code attached while FileReader is pending', async () => {
+   const chat = await api('/api/chats', { title: 'Concurrent attachment regression' });
+   const p = await page('/chat/' + chat.id);
+   await click(p, 'Attach code'); await fill(p, '[aria-label="Code snapshot"]', 'int main(){return 0;}');
+   await p.evaluate(() => { const original = FileReader.prototype.readAsDataURL; FileReader.prototype.readAsDataURL = function(blob) { window.finishEvidenceRead = () => original.call(this, blob); }; });
+   const image = path.join(temporary, 'attachment.png');
+   fs.writeFileSync(image, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jzFoAAAAASUVORK5CYII=', 'base64'));
+   await (await p.$('[aria-label="Attach sketch or image"]')).uploadFile(image);
+   await p.waitForFunction(() => document.body.textContent.includes('Reading images'), { polling: 100 });
+   await click(p, 'Add code snapshot'); await p.waitForSelector('[aria-label="Remove main.cpp"]');
+   await p.evaluate(() => window.finishEvidenceRead()); await p.waitForSelector('[aria-label="Remove attachment.png"]');
+   assert.ok(await p.$('[aria-label="Remove main.cpp"]'), 'image completion must retain the new code');
+   await p.close();
+  });
+  await check('silent C++ failures retain execution status in the tutor handoff', async () => {
+   const { report } = await api('/api/training/cpp/run', { files: [{ name: 'main.cpp', source: 'int main(){return 1;}' }], stdin: '' });
+   assert.equal(report.result.exitCode, 1); assert.equal(report.result.errorKind, 'runtime');
+   const evidence = cppRunEvidence(report);
+   assert.deepEqual(evidence.code[0].execution, { ok: false, exitCode: 1, errorKind: 'runtime', timedOut: false });
+   const chat = await api('/api/chats', { title: 'Run status regression' }); const p = await page('/training');
+   await p.evaluate(incoming => sessionStorage.setItem('lh:incoming-evidence', JSON.stringify(incoming)), { chatId: chat.id, evidence });
+   await p.goto(origin + '/chat/' + chat.id, { waitUntil: 'networkidle2' });
+   await p.waitForFunction(() => document.querySelector('[data-testid="evidence-input"]')?.textContent.includes('Reported execution: runtime'), { polling: 100 });
+   assert.ok(await p.$eval('[data-testid="evidence-input"]', e => e.textContent.includes('exit 1')));
    await p.close();
   });
   await check('arithmetic wrong/correct submissions and stopped-round reload', async () => {
