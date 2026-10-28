@@ -150,7 +150,9 @@ export function useAppearance() {
 
 export function AppearanceProvider({ children }: { children: React.ReactNode }) {
 	const [delta, setDelta] = useState<AppearanceSettings | undefined>(undefined);
-	const [prefersDark, setPrefersDark] = useState(false);
+	const [prefersDark, setPrefersDark] = useState(
+		() => typeof window === "undefined" ? true : window.matchMedia("(prefers-color-scheme: dark)").matches,
+	);
 	const resolved = useMemo(() => resolveAppearance(delta), [delta]);
 	const mode = resolved.mode === "system" ? (prefersDark ? "dark" : "light") : resolved.mode;
 	const appliedRef = useRef<string>("");
