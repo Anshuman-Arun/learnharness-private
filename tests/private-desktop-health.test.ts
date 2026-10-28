@@ -26,5 +26,7 @@ describe("Electron private desktop health proof", () => {
     assert.match(main, /res\.headers\["x-lh-app-ready"\] === healthSecret/);
     assert.match(main, /LH_DESKTOP_HEALTH_SECRET: healthSecret/);
     assert.match(main, /crypto\.randomBytes\(32\)/);
+    assert.match(main, /const deadline = Date\.now\(\) \+ 30_000/);
+    assert.match(main, /serverProcess\.exitCode !== null/);
   });
 });

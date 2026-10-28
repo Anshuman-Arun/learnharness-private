@@ -125,7 +125,10 @@ if (process.argv.includes("--browser-service")) {
 				win.focus();
 			}
 		});
-		main();
+		main().catch((error) => {
+			log(`Failed to start LearnHarness: ${error?.stack ?? error}`);
+			app.quit();
+		});
 	}
 }
 
@@ -221,32 +224,49 @@ function startServer(port, healthSecret) {
 		child.stderr.on("data", fwd);
 		child.on("exit", (code, signal) => {
 			log(`server exited (code=${code} signal=${signal})`);
-			serverProcess = null;
+			if (serverProcess === child) serverProcess = null;
 		});
-		resolve(child);
+		child.once("error", (error) => {
+			log(`server could not start: ${error.message}`);
+			if (serverProcess === child) serverProcess = null;
+			reject(error);
+		});
+		child.once("spawn", () => resolve(child));
 	});
 }
 
 /** No "ready" event exists — poll until the server answers (docs-confirmed). */
 function waitUntilUp(baseUrl, healthSecret, tries = 150) {
 	const healthUrl = new URL("/api/desktop-health", baseUrl).toString();
+	const deadline = Date.now() + 30_000;
 	return new Promise((resolve, reject) => {
+		let settled = false;
+		const done = (error) => {
+			if (settled) return;
+			settled = true;
+			if (error) reject(error);
+			else resolve(true);
+		};
 		const attempt = (n) => {
-			// Requiring a per-launch capability proves we found OUR Next child,
-			// not an unrelated process that won the free-port race.
+			if (settled) return;
+			if (!serverProcess || serverProcess.exitCode !== null) {
+				done(new Error("Private desktop server exited before readiness."));
+				return;
+			}
+			if (n <= 0 || Date.now() >= deadline) {
+				done(new Error("Private desktop server did not pass authenticated health checks."));
+				return;
+			}
+			const retry = () => { if (!settled) setTimeout(() => attempt(n - 1), 200); };
 			const req = http.get(healthUrl, (res) => {
 				const ready = res.statusCode === 200 &&
 					res.headers["x-lh-app-ready"] === healthSecret;
 				res.resume();
-				if (ready) resolve(true);
-				else if (n <= 0) reject(new Error("Unexpected server answered the private health check."));
-				else setTimeout(() => attempt(n - 1), 200);
+				if (ready) done();
+				else retry();
 			});
-			req.setTimeout(5000, () => req.destroy(new Error("Health check timed out")));
-			req.on("error", () => {
-				if (n <= 0) reject(new Error("Private desktop server never became healthy."));
-				else setTimeout(() => attempt(n - 1), 200);
-			});
+			req.setTimeout(1500, () => req.destroy(new Error("Health check timed out")));
+			req.on("error", retry);
 		};
 		attempt(tries);
 	});
