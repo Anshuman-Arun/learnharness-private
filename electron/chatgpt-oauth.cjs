@@ -578,6 +578,18 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 			);
 			controller.signal.throwIfAborted();
 			await credentials.modify(PROVIDER_ID, async () => credential, { signal: controller.signal });
+			// A cancel may arrive while safeStorage/rename is awaiting the
+			// disk. Roll back ONLY the token this attempt actually committed;
+			// preserve a previously connected account on reconnect cancel.
+			if (controller.signal.aborted) {
+				if (previous) {
+					await credentials.modify(PROVIDER_ID, async (current) =>
+						current?.refresh === credential.refresh ? previous : undefined);
+				} else {
+					await credentials.delete(PROVIDER_ID, { expectedRefresh: credential.refresh });
+				}
+				controller.signal.throwIfAborted();
+			}
 			invalidateCatalog();
 			loginState = { connecting: false, phase: "connected" };
 		})().catch((error) => {
