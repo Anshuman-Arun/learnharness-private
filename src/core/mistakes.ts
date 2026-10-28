@@ -4,7 +4,7 @@ export type MistakeSource={kind:'arithmetic'|'exam'|'estimate'|'stopping'|'manua
 export type RetryRecipe={kind:'quant';section:QuantSection;family:string}|{kind:'arithmetic';config:ArithmeticConfig}|{kind:'estimate';topic:EstimationKind}|{kind:'stopping';config:StoppingConfig;remaining:number}|{kind:'manual'};
 export interface MistakeCandidate{source:MistakeSource;question:QuantQuestion;answer:string;reasoning:string;recipe:RetryRecipe;trigger:string}
 export interface MistakeEntry extends MistakeCandidate{version:1;id:string;revision:number;category:typeof ERROR_CATEGORIES[number];correction:string;createdAt:number;updatedAt:number;demonstratedBy?:string}
-export interface MistakeRetry{version:1;id:string;entryId:string;mode:'original'|'variant';question:QuantQuestion;createdAt:number;submittedAt?:number;answer?:string;reasoning?:string;correct?:boolean}
+export interface MistakeRetry{version:1;id:string;entryId:string;mode:'original'|'variant';entryRevision?:number;question:QuantQuestion;createdAt:number;submittedAt?:number;answer?:string;reasoning?:string;correct?:boolean}
 export function retryQuestion(entry:MistakeEntry,seed:number,variant:boolean):QuantQuestion{
  if(!variant)return structuredClone(entry.question);const r=entry.recipe;
  for(let offset=0;offset<1000;offset++){
@@ -19,4 +19,8 @@ export function retryQuestion(entry:MistakeEntry,seed:number,variant:boolean):Qu
  throw Error('This fixed configuration has no distinct variant; use an original retry');
 }
 export function correctMistakeRetry(retry:MistakeRetry,answer:string){return quantCorrect(retry.question,answer);}
-export function mistakeRetryView(retry:MistakeRetry):Omit<MistakeRetry,"question">&{question:Omit<QuantQuestion,"expected"|"explanation">&Partial<Pick<QuantQuestion,"expected"|"explanation">>}{const{expected:_e,explanation:_x,...publicQuestion}=retry.question;return{...retry,question:retry.submittedAt!==undefined?retry.question:publicQuestion};}
+export function mistakeRetryView(retry:MistakeRetry):Omit<MistakeRetry,"question">&{question:Omit<QuantQuestion,"expected"|"explanation"|"tolerance">&Partial<Pick<QuantQuestion,"expected"|"explanation"|"tolerance">>}{const{expected:_e,explanation:_x,tolerance:_t,...publicQuestion}=retry.question;return{...retry,question:retry.submittedAt!==undefined?retry.question:publicQuestion};}
+
+export function canDemonstrateCorrection(entry:MistakeEntry,retry:Pick<MistakeRetry,'entryId'|'correct'|'submittedAt'|'entryRevision'|'createdAt'>|null|undefined):boolean {
+ return !!entry.correction.trim() && retry?.correct===true && retry.entryId===entry.id && retry.submittedAt!==undefined && (retry.entryRevision===undefined ? retry.createdAt>entry.updatedAt : retry.entryRevision===entry.revision);
+}
