@@ -259,3 +259,14 @@ describe("desktop release workflow", () => {
 		]), /Multiple releases match/);
 	});
 });
+
+describe("native URL and permission fail-closed handling",()=>{
+  it("rejects malformed navigation rather than throwing before preventDefault",async()=>{
+    const source=await (await import("node:fs/promises")).readFile(
+      new URL("../electron/main.cjs",import.meta.url),"utf8");
+    assert.match(source,/let sameOrigin = false;/);
+    assert.match(source,/if \(!sameOrigin\) \{\s*event\.preventDefault\(\)/);
+    assert.match(source,/let requestOrigin = null;/);
+    assert.match(source,/callback\(fromOwnOrigin\(requestOrigin, permission\)\)/);
+  });
+});

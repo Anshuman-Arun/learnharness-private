@@ -374,7 +374,10 @@ function createWindow(url) {
 	const fromOwnOrigin = (origin, permission) =>
 		origin === allowedOrigin() && allowedPermissions.has(permission);
 	session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-		const requestOrigin = details.requestingUrl ? new URL(details.requestingUrl).origin : null;
+		let requestOrigin = null;
+		try {
+			if (details?.requestingUrl) requestOrigin = new URL(details.requestingUrl).origin;
+		} catch { /* Malformed URLs do not receive OS microphone permissions. */ }
 		callback(fromOwnOrigin(requestOrigin, permission));
 	});
 	session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => {
@@ -382,7 +385,10 @@ function createWindow(url) {
 	});
 
 	win.webContents.on("will-navigate", (event, target) => {
-		if (new URL(target).origin !== allowedOrigin()) {
+		let sameOrigin = false;
+		try { sameOrigin = new URL(target).origin === allowedOrigin(); }
+		catch { /* Unknown target schemes never navigate inside the app. */ }
+		if (!sameOrigin) {
 			event.preventDefault();
 			openSafeExternal(target);
 		}
