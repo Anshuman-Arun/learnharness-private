@@ -125,8 +125,8 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
         const nodeId=typeof args.nodeId==="string" ? args.nodeId : "";
         const conceptId=typeof args.conceptId==="string" ? args.conceptId : "";
         if(!nodeId && !conceptId)continue;
-        const kind=block.name==="explain"||block.name==="recall" ? "explain" :
-          args.type==="predict" ? "predict" : "check";
+        const kind=args.type==="predict" ? "predict" :
+          (block.name==="explain"||block.name==="recall") ? "explain" : "check";
         calls.set(block.id,{nodeId,conceptId,kind,question:typeof args.question==="string"?args.question:""});
       }
     }
