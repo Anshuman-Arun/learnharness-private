@@ -225,8 +225,8 @@ try{
     assert.ok(planInk.ink&&planInk.stroke,"plan text and box are visible");
     assert.ok(contrast(rgb(planInk.ink),rgb(planInk.background))>=4.5,
       `plan node text contrast in ${mode}`);
-    if(mode==="light")assert.ok(contrast(rgb(planInk.stroke),rgb(planInk.background))>=3,
-      `light plan node outlines must not vanish into cream`);
+    assert.ok(contrast(rgb(planInk.stroke),rgb(planInk.background))>=3,
+      `plan node outlines must remain distinguishable in ${mode}`);
     await snap(teachCtx,"lesson-plan-"+mode);
     await teachCtx.page.close();
     const practiceCtx=await newPage(mode);
