@@ -277,7 +277,7 @@ function createWindow(url) {
 				// height. Do not force the zoom-invariant native overlay to match
 				// the renderer's 60 CSS px bar: zooming out would cover its border.
 				// The renderer reserves the actual width via env(titlebar-area-*).
-				titleBarOverlay: { color: "#141414", symbolColor: "#e5e5e5" },
+				titleBarOverlay: { color: "#2a2825", symbolColor: "#f3eee5" },
 				// Keep the custom bar alone; Alt reveals the native menu.
 				autoHideMenuBar: true,
 			}),
@@ -294,7 +294,7 @@ function createWindow(url) {
 		// The app background (#141414) fills the lag instead. `show: false` +
 		// ready-to-show is the same treatment for first paint: the window
 		// appears only once the page has actually rendered.
-		backgroundColor: "#141414",
+		backgroundColor: "#2a2825",
 		show: false,
 		// Narrow-window behavior (owner, 2026-09-17): 640px is the floor —
 		// below it even a wrapped chrome row gets cramped and the chat header
@@ -589,6 +589,25 @@ async function main() {
 	// The renderer's first paint can race did-finish-load — it asks for
 	// the current factor itself (mirrors "lh:zoom" pushes).
 	ipcMain.handle("lh:zoom:get", (event) => BrowserWindow.fromWebContents(event.sender)?.webContents.getZoomFactor() ?? 1);
+	// The native Windows/Linux titlebar overlay lives OUTSIDE the web
+	// theme. Sync it with the resolved light/dark palette after every
+	// persisted appearance change; constrain messages to our loopback
+	// renderer and two known palettes (no arbitrary native color IPC).
+	ipcMain.on("lh:appearance-theme", (event, mode) => {
+		if (mode !== "light" && mode !== "dark") return;
+		const win = BrowserWindow.fromWebContents(event.sender);
+		if (!win) return;
+		try {
+			if (new URL(event.sender.getURL()).origin !== new URL(url).origin) return;
+		} catch { return; }
+		const light = mode === "light";
+		const background = light ? "#f2eddf" : "#2a2825";
+		const symbol = light ? "#1a1815" : "#f3eee5";
+		if (typeof win.setBackgroundColor === "function") win.setBackgroundColor(background);
+		if (typeof win.setTitleBarOverlay === "function" && process.platform !== "darwin") {
+			win.setTitleBarOverlay({ color: background, symbolColor: symbol });
+		}
+	});
 	ipcMain.on("lh:expand-window", (event) => {
 		const win = BrowserWindow.fromWebContents(event.sender);
 		if (!win) return;
