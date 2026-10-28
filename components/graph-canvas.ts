@@ -783,6 +783,18 @@ export class GraphCanvasRenderer {
 		this.markDirty();
 	}
 
+	/** Palette/font channel: changing light/dark or accent must repaint the
+	 * canvas immediately, WITHOUT calling setData (which resets the force
+	 * simulation, pending drag commits and camera-related geometry). */
+	setAppearance(colors: CanvasColors, fontFamily: string): void {
+		if (!this.data) return;
+		const fontChanged = this.data.fontFamily !== fontFamily;
+		this.data.colors = colors;
+		this.data.fontFamily = fontFamily;
+		if (fontChanged) this.geoVersion++; // cached text measurements need refresh
+		this.markDirty();
+	}
+
 	setSettings(settings: GraphRenderSettings): void {
 		this.settings = settings;
 		this.geoVersion++; // sizes/wrap width changed → rebuild geometry
