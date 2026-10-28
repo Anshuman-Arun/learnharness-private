@@ -43,6 +43,9 @@ test('trusted HTTPS pairing scopes, replay, reconnect and desktop revocation', a
  });
  try {
   assert.equal((await request('/')).status, 200);
+  assert.equal((await request('/vendor/excalidraw/LICENSE')).status, 200);
+  assert.equal((await request('/vendor/excalidraw/FONT-NOTICES.txt')).status, 200);
+  assert.equal((await request('/vendor/excalidraw/../../package.json')).status, 404);
   assert.equal((await request('/api/scene')).status, 401);
   assert.equal((await request('/control/create', { padId: pad.id, pageId: 'public-page' })).status, 401);
   const paired = await createTabletLink(pad.id, 'public-page');
