@@ -39,7 +39,7 @@ const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]
 /** Local agent tools must never ingest application secrets, OAuth vaults,
  * private session data, or common OS credentials. The model can be exposed
  * to untrusted web/PDF text that attempts prompt-injection exfiltration. */
-const PRIVATE_DIR_PARTS = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", ".configstore"]);
+const PRIVATE_DIR_PARTS = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", ".configstore", ".local/share/keyrings"]);
 const PRIVATE_FILENAMES = new Set([
 	"auth.json", ".netrc", ".npmrc", ".pypirc", ".git-credentials",
 	"chatgpt-oauth.enc.json", "chatgpt-device-id", "id_rsa", "id_ed25519",
@@ -54,6 +54,10 @@ function pathWithin(candidate: string, root: string): boolean {
 /** Pure lexical check. Call on the real path, not just a symlink alias. */
 export function isPrivateSourcePath(p: string): boolean {
 	const resolved = path.resolve(p);
+	// Reject Linux pseudo-filesystems: /proc/self/environ exposes the
+	// Next child process's OAuth broker capability via an ordinary read.
+	if (process.platform !== "win32" &&
+		["/proc", "/sys", "/dev", "/run/secrets"].some((root) => pathWithin(resolved, root))) return true;
 	const parts = resolved.split(/[\\/]+/).map((x) => x.toLowerCase());
 	const base = parts[parts.length - 1] ?? "";
 	if (PRIVATE_DIR_PARTS.has(base) || parts.some((part) => PRIVATE_DIR_PARTS.has(part))) return true;

@@ -31,6 +31,12 @@ describe("adversarial local learner-file security policy", () => {
       }
       assert.equal(isPrivateSourcePath(path.join(tmp,"auth.json")),true);
       assert.equal(isPrivateSourcePath(path.join(pub,".npmrc")),true);
+      if (process.platform !== "win32") {
+        assert.equal(isPrivateSourcePath("/proc/self/environ"),true);
+        assert.equal(isPrivateSourcePath("/proc/self/fd/3"),true);
+        assert.equal(isPrivateSourcePath("/run/secrets/oauth-token"),true);
+        assert.equal(isPrivateSourcePath("/sys/kernel/debug"),true);
+      }
       const found:string[] = [];
       await walkFiles(pub, (p) => {found.push(p);return false;});
       assert.deepEqual(found,[notes]);
