@@ -1817,8 +1817,18 @@ export class GraphCanvasRenderer {
 			// Screen px ÷ k = world units — the lines stay evenly spaced
 			// at a constant on-screen pitch at any zoom.
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
+			// Cluster captions live in screen space; a centroid can overlap
+			// another region at fit. Suppress duplicates rather than stacking
+			// illegible session names (zoom/pan refreshes this cheaply).
+			const occupied: Array<{ l:number;r:number;t:number;b:number }> = [];
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
+				const captionWidth = Math.max(0,...rm.lines.map(line=>ctx.measureText(line).width));
+				const sx=rm.cx*k+tx,sy=rm.cy*k+ty;
+				const height=rm.lines.length*settings.clusterLabelSize*REGION_LABEL_LINE_HEIGHT;
+				const bounds={l:sx-captionWidth/2-7,r:sx+captionWidth/2+7,t:sy-height/2-7,b:sy+height/2+7};
+				if (occupied.some(box=>bounds.l<box.r&&bounds.r>box.l&&bounds.t<box.b&&bounds.b>box.t)) continue;
+				occupied.push(bounds);
 				ctx.fillStyle = `hsla(${rm.hue}, 55%, ${data.colors.regionLabelLightness ?? 78}%, 0.94)`;
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {
