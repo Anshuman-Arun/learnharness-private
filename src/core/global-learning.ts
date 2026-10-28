@@ -130,8 +130,13 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
         calls.set(block.id,{nodeId,conceptId,kind,question:typeof args.question==="string"?args.question:""});
       }
     }
+    const seenResults=new Set<string>();
     for(const message of record.messages??[]) {
       if(message.role!=="toolResult" || !["quiz","explain","probe","recall"].includes(message.toolName))continue;
+      // A replay or duplicate transport event must not inflate mastery
+      // evidence. One call id is one assessment observation per session.
+      if(seenResults.has(message.toolCallId))continue;
+      seenResults.add(message.toolCallId);
       const answer=message.details;
       if(!values(answer) || answer.dismissed===true)continue;
       const call=calls.get(message.toolCallId);
