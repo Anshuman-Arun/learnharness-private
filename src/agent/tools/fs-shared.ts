@@ -80,6 +80,8 @@ export function isPrivateSourcePath(p: string): boolean {
 		path.join(process.cwd(), ".env.local"),
 		path.join(process.cwd(), "auth.json"),
 		path.join(os.homedir(), ".config", "LearnHarness Private"),
+		path.join(os.homedir(), ".config", "LearnHarness"),
+		path.join(os.homedir(), "Library", "Application Support", "LearnHarness"),
 		path.join(os.homedir(), "Library", "Application Support", "LearnHarness Private"),
 		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness Private"),
 		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness PR20 Test"),

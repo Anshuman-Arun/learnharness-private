@@ -9,6 +9,14 @@ const ISSUER = "https://auth.openai.com";
 const RESOURCE = "https://api.openai.com/v1";
 const SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 const SHARING_SCOPE = "chatgpt.tokens.use.direct";
+const INVALID_GRANT_CODES = new Set([
+	"invalid_grant", "invalid_refresh_token", "token_expired",
+	"refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused",
+]);
+function unusableGrant(status, code) {
+	return [400, 401, 403].includes(status) && typeof code === "string" &&
+		INVALID_GRANT_CODES.has(code);
+}
 // Only the subscription-sharing grant is mandatory. OpenID identity and
 // refresh-token possession are validated independently; optional profile/email
 // grants must not break a previously successful ChatGPT login.
@@ -284,7 +292,7 @@ async function tokenRequest(body, signal) {
 	const data = await boundedJson(response).catch(() => undefined);
 	if (!response.ok) {
 		const error = new Error(`ChatGPT token request failed (${response.status}).`);
-		if (response.status === 400 && data?.error === "invalid_grant") error.oauthCode = "invalid_grant";
+		if (unusableGrant(response.status, data?.error)) error.oauthCode = "invalid_grant";
 		throw error;
 	}
 	if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("ChatGPT returned an invalid token response.");
@@ -824,4 +832,4 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 	};
 }
 
-module.exports = { createChatGPTOAuthRuntime, createEncryptedCredentialStore, loadOrCreateDeviceId, storageSecure, validCredential };
+module.exports = { createChatGPTOAuthRuntime, createEncryptedCredentialStore, loadOrCreateDeviceId, storageSecure, validCredential, unusableGrant };

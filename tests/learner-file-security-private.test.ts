@@ -36,6 +36,8 @@ describe("adversarial local learner-file security policy", () => {
         assert.equal(isPrivateSourcePath(path.join(process.env.APPDATA,"LearnHarness PR20 Test","data","sessions.json")),true);
       }
       assert.equal(isPrivateSourcePath(path.join(os.homedir(),".local","share","keyrings","login.keyring")),true);
+      assert.equal(isPrivateSourcePath(path.join(os.homedir(),"Library","Application Support","LearnHarness","auth.json")),true);
+      assert.equal(isPrivateSourcePath(path.join(os.homedir(),".config","LearnHarness","legacy-vault.json")),true);
       if (process.platform !== "win32") {
         assert.equal(isPrivateSourcePath("/proc/self/environ"),true);
         assert.equal(isPrivateSourcePath("/proc/self/fd/3"),true);

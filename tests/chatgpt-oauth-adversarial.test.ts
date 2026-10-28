@@ -43,6 +43,20 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+  it("recognizes every terminal refresh error without treating transient or invalid-client errors as logout", () => {
+    for (const code of ["invalid_grant","invalid_refresh_token","token_expired",
+      "refresh_token_expired","refresh_token_invalidated","refresh_token_reused"]) {
+      for (const status of [400,401,403]) {
+        assert.equal(native.unusableGrant(status,code),true,code+" status "+status);
+      }
+    }
+    for (const code of ["invalid_client","temporarily_unavailable","server_error","rate_limit_exceeded",null]) {
+      for (const status of [400,401,403,429,500,503]) {
+        assert.equal(native.unusableGrant(status,code),false,"transient/nonrefresh "+code);
+      }
+    }
+  });
+
 
   it("makes autonomous subscription use an explicit encrypted opt-in, changeable only by trusted UI", async () => {
     await scratch(async dir => {
