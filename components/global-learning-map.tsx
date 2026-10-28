@@ -92,7 +92,7 @@ export function GlobalLearningMap() {
     {x:size.w/2,y:size.h/2},box,size));
   const fit=()=>{if(size.w&&size.h)setView(fitGraphView(box,size,floor));};
   const down=(e:ReactPointerEvent<HTMLDivElement>)=>{
-    if(e.button!==0||view.zoom<=floor+1e-9)return;
+    if(e.button!==0||view.zoom<=floor+1e-9||(e.target as Element).closest("button"))return;
     suppressedClick.current=false;
     dragRef.current={startX:e.clientX,startY:e.clientY,x:view.x,y:view.y,moved:false};
     e.currentTarget.setPointerCapture(e.pointerId);
