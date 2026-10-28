@@ -18,49 +18,56 @@ import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/t
  *  instantly, the fresh one swaps in while the menu is open). */
 let catalogCache: ModelCatalogResponse | undefined;
 let catalogInflight: Promise<ModelCatalogResponse> | undefined;
+let catalogGeneration = 0;
+const catalogListeners = new Set<(value: ModelCatalogResponse | undefined) => void>();
 
-function fetchCatalog(force = false): Promise<ModelCatalogResponse> {
+/** A revoked/changed account invalidates earlier responses, including a
+ * request that started while its previous OAuth grant was still active. */
+export function fetchCatalog(force = false): Promise<ModelCatalogResponse> {
 	if (force) {
+		catalogGeneration += 1;
 		catalogCache = undefined;
 		catalogInflight = undefined;
+		for (const notify of catalogListeners) notify(undefined);
 	}
-	catalogInflight ??= fetch("/api/models")
+	if (catalogInflight) return catalogInflight;
+	const generation = catalogGeneration;
+	const request = fetch("/api/models", { cache: "no-store" })
 		.then((r) => {
 			if (!r.ok) throw new Error(`catalog request failed: ${r.status}`);
 			return r.json() as Promise<ModelCatalogResponse>;
 		})
 		.then((c) => {
+			if (generation !== catalogGeneration) throw new Error("Superseded model catalog request");
 			catalogCache = c;
+			for (const notify of catalogListeners) notify(c);
 			return c;
 		})
 		.catch((err) => {
-			catalogInflight = undefined; // retry on next mount/open
+			// Only the current request may clear its own retry marker.
+			if (generation === catalogGeneration) catalogInflight = undefined;
 			throw err;
 		});
-	return catalogInflight;
+	catalogInflight = request;
+	return request;
 }
 
 export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; refresh: () => void } {
 	const [catalog, setCatalog] = useState(catalogCache);
 	useEffect(() => {
-		if (catalogCache) return;
-		let alive = true;
-		fetchCatalog()
-			.then((c) => alive && setCatalog(c))
-			.catch(() => {
-				/* the picker stays closed on failure; the buttons still
-				   display the strong slot from the record fetch */
-			});
-		return () => {
-			alive = false;
-		};
+		catalogListeners.add(setCatalog);
+		if (catalogCache) setCatalog(catalogCache);
+		else void fetchCatalog().catch(() => {
+			/* No phantom provider models on outage. Retry when opening
+			   the model menu or when credentials change. */
+		});
+		return () => { catalogListeners.delete(setCatalog); };
 	}, []);
 	const refresh = useCallback(() => {
-		fetchCatalog(true)
-			.then(setCatalog)
-			.catch(() => {
-				/* refresh is best-effort: the cached list stays on failure */
-			});
+		void fetchCatalog(true).catch(() => {
+			/* All mounted pickers already invalidated; do not restore an
+			   old catalog after a disconnect or failed status request. */
+		});
 	}, []);
 	return { catalog, refresh };
 }
