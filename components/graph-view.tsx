@@ -69,6 +69,7 @@ import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
+import { KnowledgeDiagram } from "./knowledge-diagram.tsx";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
@@ -968,6 +969,9 @@ export function GraphView({
 	const cardRef = useRef<HTMLDivElement | null>(null);
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
+	// The ORIGINAL mini-DAG boxes/curved links are the default. The
+	// physics atlas remains as an opt-in for large free-form networks.
+	const [diagramMode, setDiagramMode] = useState(true);
 	// The latest snapshot for the renderer's click callbacks (they are
 	// constructed once, so they read through this ref, never a closure).
 	const snapshotRef = useRef<GraphSnapshot | null>(null);
@@ -1059,6 +1063,29 @@ export function GraphView({
 			}
 		return set;
 	}, [snapshot, query]);
+
+	const diagramData = useMemo(() => {
+		if (!snapshot) return {nodes:[],edges:[],hiddenCount:0};
+		const propositions = snapshot.nodes.filter(n=>!n.id.startsWith("arg_") && visibleIds.has(n.id));
+		const directed = snapshot.logicalEdges ?? snapshot.edges;
+		const degree = new Map<string,number>();
+		for(const e of directed) {
+			degree.set(e.from,(degree.get(e.from)??0)+1);
+			degree.set(e.to,(degree.get(e.to)??0)+1);
+		}
+		// Dense graphs need a focused diagram rather than a multi-thousand
+		// node synchronous Dagre freeze. Pick the most connected ideas first;
+		// the complete original atlas is one click away.
+		const selectedNodes=[...propositions].sort((a,b)=>
+			(degree.get(b.id)??0)-(degree.get(a.id)??0) ||
+			a.name.localeCompare(b.name) || a.id.localeCompare(b.id)).slice(0,110);
+		const chosen=new Set(selectedNodes.map(n=>n.id));
+		return {
+			nodes:selectedNodes.map(n=>({id:n.id,title:n.name})),
+			edges:directed.filter(e=>chosen.has(e.from)&&chosen.has(e.to)).map(e=>({from:e.from,to:e.to})),
+			hiddenCount:Math.max(0,propositions.length-selectedNodes.length),
+		};
+	},[snapshot,visibleIds]);
 
 	// Fetch the derived graph. Re-runs when a background pipeline run
 	// finishes (refreshTick) — its merges just landed in the ledger.
@@ -1545,7 +1572,21 @@ export function GraphView({
 				<div ref={containerRef} className="relative h-full w-full">
 					{/* THE single canvas: every layer (hulls, edges, nodes, both
 					    label systems, hover) draws into it, once per frame. */}
-					<canvas ref={canvasRef} className="block h-full w-full touch-none" />
+					<canvas ref={canvasRef} className="block h-full w-full touch-none"
+						style={{visibility:diagramMode?"hidden":"visible"}} />
+					{diagramMode&&<KnowledgeDiagram
+						nodes={diagramData.nodes}
+						edges={diagramData.edges}
+						hiddenCount={diagramData.hiddenCount}
+						selectedId={selected?.node.id}
+						onSelect={(nodeId,anchor)=>{
+							const snap=snapshotRef.current;
+							const node=snap?.nodes.find(n=>n.id===nodeId);
+							if(!snap||!node)return;
+							setSelected({node,sourceIds:snap.nodeSessions[node.id]??[],anchor});
+						}}
+						onStageClick={()=>setSelected(null)}
+					/>}
 					{/* The context menu's anchor: a zero-size point at the
 					    right-click position (canvas-relative == container-relative,
 					    the canvas fills this div). */}
@@ -1638,6 +1679,13 @@ export function GraphView({
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
 				    settings only when nodes exist, fading in on their mount. */}
+				{!isEmpty&&<button type="button"
+					data-testid="home-graph-view-toggle"
+					aria-label={diagramMode?"Switch to atlas":"Switch to diagram"}
+					aria-pressed={diagramMode}
+					onClick={()=>{setDiagramMode(v=>!v);setSelected(null);}}
+					className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-3 py-[9px] text-[11px] shadow-lg backdrop-blur"
+				>{diagramMode?"Diagram":"Atlas"}</button>}
 				<GraphChromeRow
 					isEmpty={isEmpty}
 					query={query}
