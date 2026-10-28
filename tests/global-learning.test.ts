@@ -102,3 +102,38 @@ describe("cross-session diagnostic probe binding",()=>{
     assert.equal(result.unlinkedAnswers,1);
   });
 });
+
+describe("learner solutions remain linked to the exact cross-session concept",()=>{
+  it("retains the learner's answer, explanation, and confidence without treating prose as mastery",()=>{
+    const lessonA=lesson("calc","Calculus III",[["div","Divergence"]],[]);
+    lessonA.messages.push({role:"assistant",content:[{type:"toolCall",id:"p-1",name:"quiz",
+      arguments:{nodeId:"div",type:"check",question:"Find the divergence"}}]} as never);
+    lessonA.messages.push({role:"toolResult",toolCallId:"p-1",toolName:"quiz",details:{
+      correct:true,answers:[{index:1,label:"4",value:"4"}],
+      thinking:"Differentiate each component and add.",confidence:80,
+      answeredAt:"2026-10-28T00:00:00Z",
+    }} as never);
+    const g=buildGlobalLearningGraph([lessonA]);
+    const e=g.concepts[0]!.evidence[0]!;
+    assert.equal(e.answerText,"4");
+    assert.equal(e.reasoning,"Differentiate each component and add.");
+    assert.equal(e.confidence,80);
+    assert.equal(g.concepts[0]!.correctChecks,1);
+  });
+  it("does not synthesize answer text, invalid confidence or correct free-recall grades",()=>{
+    const a=lesson("calc","Calculus III",[["div","Divergence"]],[]);
+    a.messages.push({role:"assistant",content:[{type:"toolCall",id:"e-1",name:"explain",
+      arguments:{nodeId:"div",type:"check",question:"Explain divergence"}}]} as never);
+    a.messages.push({role:"toolResult",toolCallId:"e-1",toolName:"explain",details:{
+      text:"The scalar flux density.",correct:undefined,confidence:400,
+      answeredAt:"2026-10-28T00:00:00Z",
+    }} as never);
+    const g=buildGlobalLearningGraph([a]);
+    const e=g.concepts[0]!.evidence[0]!;
+    assert.equal(e.answerText,"The scalar flux density.");
+    assert.equal(e.reasoning,null);
+    assert.equal(e.confidence,null);
+    assert.equal(e.outcome,"ungraded");
+    assert.equal(g.concepts[0]!.ungradedChecks,1);
+  });
+});
