@@ -42,6 +42,46 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+  it("retries one transient account-catalog failure but never caches a failing result", async()=>{
+    await scratch(async dir=>{
+      const safeStorage=encryptedBackend();
+      const store=native.createEncryptedCredentialStore(path.join(dir,"chatgpt-oauth.enc.json"),safeStorage);
+      await store.modify("openai",async()=>({
+        type:"oauth",access:"account-access",refresh:"refresh",clientId:"client",
+        subject:"user",expires:Date.now()+3600000,
+        scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"],
+      }));
+      const oldFetch=globalThis.fetch;
+      let attempts=0;
+      globalThis.fetch=async(input,init)=>{
+        const url=String(input);
+        if(url.startsWith("http://127.0.0.1:"))return oldFetch(input,init);
+        if(url==="https://api.openai.com/v1/models"){
+          assert.equal((init as RequestInit)?.redirect,"error");
+          attempts++;
+          return attempts===1
+            ? new Response(null,{status:503})
+            : Response.json({models:[{slug:"gpt-4o",display_name:"Enabled",visibility:"list"}]});
+        }
+        throw new Error("Unexpected remote request "+url);
+      };
+      const runtime=await native.createChatGPTOAuthRuntime({
+        userDataDir:dir,safeStorage,shell:{openExternal:async()=>undefined},
+        ipcMain:{handle:()=>undefined},authorizeIpc:()=>true,log:()=>undefined
+      });
+      try{
+        const headers={authorization:`Bearer ${runtime.brokerSecret}`};
+        const response=await fetch(runtime.brokerUrl+"/v1/models",{headers});
+        assert.equal(response.status,200);
+        assert.equal(attempts,2);
+        assert.deepEqual((await response.json()).models,[{id:"gpt-4o",name:"Enabled"}]);
+        await fetch(runtime.brokerUrl+"/v1/models",{headers});
+        assert.equal(attempts,2,"successful result is cached, transient failure is not");
+      }finally{runtime.close();globalThis.fetch=oldFetch;}
+    });
+  });
+
+
 
   it("revokes precisely the rotated refresh token that local disconnect actually deletes", async () => {
     await scratch(async dir => {

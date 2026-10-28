@@ -514,12 +514,31 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 		if (catalogCache && catalogCache.expires > Date.now()) return catalogCache.models;
 		if (catalogPending) return catalogPending;
 		const pending = (async () => {
-			const response = await fetch(`${RESOURCE}/models`, {
+			const fetchCatalog = () => fetch(`${RESOURCE}/models`, {
 				headers: { authorization: `Bearer ${credential.access}` },
 				signal: AbortSignal.timeout(15_000),
 				redirect: "error",
+				credentials: "omit",
 			});
-			if (!response.ok) throw new Error(`ChatGPT account model discovery failed (${response.status}).`);
+			let response;
+			for (let attempt = 0; attempt < 2; attempt++) {
+				try {
+					response = await fetchCatalog();
+				} catch (error) {
+					// Retry one transient network failure, not deliberate
+					// cancellation, timeout, or invalid OAuth authority.
+					if (attempt > 0 || error?.name === "AbortError" || error?.name === "TimeoutError") throw error;
+					await new Promise((resolve) => setTimeout(resolve, 150));
+					continue;
+				}
+				if (attempt === 0 && [429, 500, 502, 503, 504].includes(response.status)) {
+					await response.body?.cancel().catch(() => undefined);
+					await new Promise((resolve) => setTimeout(resolve, 150));
+					continue;
+				}
+				break;
+			}
+			if (!response?.ok) throw new Error(`ChatGPT account model discovery failed (${response?.status ?? "network"}).`);
 			const contentLength = Number(response.headers.get("content-length") ?? 0);
 			if (contentLength > 1_048_576) throw new Error("ChatGPT model catalog exceeds the size limit.");
 			// Do not allow an upstream server to force an unbounded response
