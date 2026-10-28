@@ -159,7 +159,7 @@ export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 					// enforce the subscription contract *after* it.
 					onPayload: async (payload, runtimeModel) => {
 						const changed = await options?.onPayload?.(payload, runtimeModel);
-						return prepareChatGPTResponsesPayload(changed ?? payload);
+						return prepareChatGPTResponsesPayload((changed ?? payload) as typeof payload);
 					},
 				} : {}),
 				reasoning: level === "off" ? undefined : level,
