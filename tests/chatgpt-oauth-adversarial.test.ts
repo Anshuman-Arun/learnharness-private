@@ -105,7 +105,7 @@ describe("adversarial ChatGPT private-provider checks", () => {
       assert.equal((await store.read("openai"))?.refresh,"refresh-after");
       const deleted=await store.delete("openai",{expectedRefresh:"refresh-after"});
       assert.notEqual(deleted,false);
-      assert.equal(deleted && deleted !== false ? deleted.refresh : undefined,"refresh-after");
+      assert.equal(deleted ? deleted.refresh : undefined,"refresh-after");
       assert.equal(await store.read("openai"),undefined);
     });
   });
