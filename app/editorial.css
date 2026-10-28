@@ -4,6 +4,71 @@
  * Source: Interview-App/apps/web/src/styles/theme.css, editorial-v10.css,
  * ProductFrame.css (bf7ef65ae44f13b34063b5c409eb658c04cd1447).
  */
+/* Interview-App's paper-and-ink light palette; root tokens override the
+ * legacy dark-only palette without changing the learning/runtime components. */
+[data-lh-editorial="v10"]:not(.dark) {
+  color-scheme: light;
+  --lh-font-ui: "IBM Plex Sans", var(--font-sans3), "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --lh-font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --background: #f2eddf;
+  --foreground: #1a1815;
+  --card: #fbf8ef;
+  --card-foreground: #1a1815;
+  --popover: #fbf8ef;
+  --popover-foreground: #1a1815;
+  --primary: #a74733;
+  --primary-foreground: #fffaf1;
+  --secondary: #f5f0e4;
+  --secondary-foreground: #48433c;
+  --muted: #f5f0e4;
+  --muted-foreground: #777066;
+  --accent: #eee7d8;
+  --accent-foreground: #1a1815;
+  --destructive: #a24b49;
+  --border: #cec5b3;
+  --input: #cec5b3;
+  --ring: #a74733;
+  --lh-editorial-border-subtle: rgba(26,24,21,.12);
+  --lh-editorial-surface-hover: #eee7d8;
+  --lh-editorial-primary-hover: #913b2b;
+  --lh-ink-strong: var(--foreground);
+  --lh-ink-italic: var(--foreground);
+}
+[data-lh-editorial="v10"] {
+  --lh-control-radius: 2px;
+  --lh-panel-radius: 4px;
+  --lh-dialog-radius: 5px;
+  --lh-accent-intensity: 16%;
+  --lh-editorial-primary-hover: #e28a73;
+}
+[data-lh-editorial="v10"][data-corners="square"] {--lh-control-radius:1px;--lh-panel-radius:2px;--lh-dialog-radius:3px;}
+[data-lh-editorial="v10"][data-corners="round"] {--lh-control-radius:6px;--lh-panel-radius:8px;--lh-dialog-radius:10px;}
+[data-lh-editorial="v10"][data-corners="generous"] {--lh-control-radius:10px;--lh-panel-radius:14px;--lh-dialog-radius:16px;}
+[data-lh-editorial="v10"][data-borders="quiet"] {--border:color-mix(in srgb,var(--foreground) 11%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 7%,transparent);}
+[data-lh-editorial="v10"][data-borders="strong"] {--border:color-mix(in srgb,var(--foreground) 29%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 17%,transparent);}
+[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in srgb,var(--foreground) 37%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 22%,transparent);}
+/* Accent selection is independent of the neutral hover surface (--accent).
+ * Keep foreground contrasting in both modes; intensity drives accent washes. */
+[data-lh-editorial="v10"][data-accent="ink"] {--primary:#30312f;--ring:var(--primary);--lh-editorial-primary-hover:#20211f;}
+[data-lh-editorial="v10"][data-accent="cobalt"] {--primary:#4a5d78;--ring:var(--primary);--lh-editorial-primary-hover:#394b65;}
+[data-lh-editorial="v10"][data-accent="teal"] {--primary:#477169;--ring:var(--primary);--lh-editorial-primary-hover:#385f58;}
+[data-lh-editorial="v10"][data-accent="amber"] {--primary:#a06c28;--ring:var(--primary);--lh-editorial-primary-hover:#87591e;}
+[data-lh-editorial="v10"][data-accent="violet"] {--primary:#74617f;--ring:var(--primary);--lh-editorial-primary-hover:#5f4c69;}
+[data-lh-editorial="v10"][data-accent="rose"] {--primary:#a65a65;--ring:var(--primary);--lh-editorial-primary-hover:#8d4651;}
+[data-lh-editorial="v10"]:not(.dark)[data-accent="coral"] {--lh-editorial-primary-hover:#913b2b;}
+.dark[data-lh-editorial="v10"][data-accent="ink"] {--primary:#e3ddd4;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#fffaf1;}
+.dark[data-lh-editorial="v10"][data-accent="cobalt"] {--primary:#8799b7;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#9bacc8;}
+.dark[data-lh-editorial="v10"][data-accent="teal"] {--primary:#78a29a;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#8eb4ad;}
+.dark[data-lh-editorial="v10"][data-accent="amber"] {--primary:#c69452;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#d7a868;}
+.dark[data-lh-editorial="v10"][data-accent="violet"] {--primary:#a894b4;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#baa5c5;}
+.dark[data-lh-editorial="v10"][data-accent="rose"] {--primary:#ce7d87;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#dc9099;}
+[data-lh-editorial="v10"] .lh-editorial-home-composer:focus-within {
+  border-color:color-mix(in srgb,var(--primary) var(--lh-accent-intensity),var(--border));
+}
+[data-lh-editorial="v10"] [data-active="true"][data-testid^="session-row"] {
+  box-shadow:inset 2px 0 0 var(--primary);
+}
+
 .dark[data-lh-editorial="v10"] {
   color-scheme: dark;
   --lh-font-ui: "IBM Plex Sans", var(--font-sans3), "Segoe UI Variable Text", "Segoe UI", sans-serif;
@@ -51,10 +116,10 @@
   outline-offset: 2px;
 }
 [data-lh-editorial="v10"] :is(button, input, textarea, select):disabled {cursor: not-allowed;}
-[data-lh-editorial="v10"] button[data-slot="button"] {border-radius: 3px;}
+[data-lh-editorial="v10"] button[data-slot="button"] {border-radius: var(--lh-control-radius);}
 [data-lh-editorial="v10"] :is([role="dialog"], [role="menu"], [data-lh-menu]) {
   border-color: var(--border);
-  border-radius: 5px;
+  border-radius: var(--lh-dialog-radius);
   background-color: var(--card);
   box-shadow: 0 20px 48px rgb(0 0 0 / .28);
 }
@@ -71,7 +136,7 @@
   min-width: 0;
   color: var(--foreground);
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--lh-control-radius);
 }
 [data-lh-editorial="v10"] .lh-editorial-brand:hover {
   border-color: var(--lh-editorial-border-subtle);
@@ -89,7 +154,7 @@
   color: var(--primary-foreground);
   background: var(--primary);
   border: 1px solid var(--primary);
-  border-radius: 2px;
+  border-radius: var(--lh-control-radius);
   font-family: var(--lh-font-ui);
   font-size: 12px;
   font-weight: 650;
@@ -98,7 +163,7 @@
   box-shadow: 3px 3px 0 rgb(0 0 0 / .14);
 }
 [data-lh-editorial="v10"] [data-testid="new-session"]:hover {
-  background: #e28a73;
+  background: var(--lh-editorial-primary-hover);
   color: var(--primary-foreground);
   transform: translate(-1px, -1px);
 }
@@ -106,7 +171,7 @@
   min-height: 39px;
   padding: 0 13px;
   border: 1px solid var(--lh-editorial-border-subtle);
-  border-radius: 2px;
+  border-radius: var(--lh-control-radius);
   color: var(--foreground);
   background: transparent;
   font-size: 12px;
@@ -122,22 +187,22 @@
   height: 29px;
   padding-left: 25px;
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: var(--lh-control-radius);
   background: var(--background);
 }
 [data-lh-editorial="v10"] [data-testid="session-kind-filter"],
 [data-lh-editorial="v10"] [data-testid="home-mode-switch"] {
   border: 1px solid var(--lh-editorial-border-subtle);
-  border-radius: 2px;
+  border-radius: var(--lh-control-radius);
   background: var(--background);
 }
 [data-lh-editorial="v10"] [data-testid="session-kind-filter"] button,
-[data-lh-editorial="v10"] [data-testid="home-mode-switch"] button {border-radius: 2px;}
+[data-lh-editorial="v10"] [data-testid="home-mode-switch"] button {border-radius: var(--lh-control-radius);}
 [data-lh-editorial="v10"] [data-testid="session-row"],
 [data-lh-editorial="v10"] [data-testid="session-row-kbd"] {
   min-height: 51px;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--lh-control-radius);
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 [data-lh-editorial="v10"] [data-testid="session-row"]:hover,
@@ -154,7 +219,7 @@
   width: 100%;
   min-height: 36px;
   border-top: 1px solid var(--lh-editorial-border-subtle);
-  border-radius: 2px;
+  border-radius: var(--lh-control-radius);
   text-transform: none;
   font-size: 12px;
   letter-spacing: .02em;
@@ -180,7 +245,7 @@
   margin: 0 8px;
 }
 [data-lh-editorial="v10"] .lh-editorial-home-composer {
-  border-radius: 5px;
+  border-radius: var(--lh-dialog-radius);
   background: var(--card);
   border-color: var(--border);
   box-shadow: 0 9px 28px rgb(0 0 0 / .18);
@@ -191,7 +256,7 @@
   caret-color: var(--primary);
 }
 [data-lh-editorial="v10"] :is(.lh-editorial-home-composer, .lh-editorial-session-composer) button[type="submit"]:not([data-testid="next-problem-button"]) {
-  border-radius: 3px;
+  border-radius: var(--lh-control-radius);
 }
 [data-lh-editorial="v10"] .lh-editorial-knowledge-summary {
   width: min(85vw, 440px);
