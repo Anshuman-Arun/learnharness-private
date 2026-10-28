@@ -86,11 +86,11 @@ export function createTabletServer({ key, cert, controlToken, backendUrl = "http
 			if (request.method === "GET" && url.pathname === "/favicon.ico") { response.writeHead(204); response.end(); return; }
 			if (request.method === "GET" && !url.pathname.startsWith("/api/") && !url.pathname.startsWith("/control/")) {
 				let root = path.join(ROOT, "public/tablet-companion"), relative = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
-				if (url.pathname.startsWith("/vendor/excalidraw/fonts/")) { root = path.join(ROOT, "public/vendor/excalidraw"); relative = decodeURIComponent(url.pathname.slice("/vendor/excalidraw/".length)); }
+				if ((url.pathname.startsWith("/vendor/excalidraw/fonts/") || ["/vendor/excalidraw/LICENSE", "/vendor/excalidraw/FONT-NOTICES.txt"].includes(url.pathname))) { root = path.join(ROOT, "public/vendor/excalidraw"); relative = decodeURIComponent(url.pathname.slice("/vendor/excalidraw/".length)); }
 				const file = path.resolve(root, relative);
-				if (!file.startsWith(root + path.sep) || !/\.(html|js|css|woff2?|wasm|txt)$/.test(file) || !fs.existsSync(file) || !fs.statSync(file).isFile() || !fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep)) throw fail(404, "Not found");
+				if (!file.startsWith(root + path.sep) || (!/\.(html|js|css|woff2?|wasm|txt)$/.test(file) && path.basename(file) !== "LICENSE") || !fs.existsSync(file) || !fs.statSync(file).isFile() || !fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep)) throw fail(404, "Not found");
 				const extension = path.extname(file), types = { ".html": "text/html; charset=utf-8", ".js": "application/javascript", ".css": "text/css", ".woff2": "font/woff2", ".woff": "font/woff", ".wasm": "application/wasm", ".txt": "text/plain" };
-				response.writeHead(200, { "Content-Type": types[extension], "Cache-Control": extension === ".html" ? "no-store" : "public, max-age=86400", "Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff" }); fs.createReadStream(file).pipe(response); return;
+				response.writeHead(200, { "Content-Type": types[extension] ?? "text/plain; charset=utf-8", "Cache-Control": extension === ".html" ? "no-store" : "public, max-age=86400", "Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff" }); fs.createReadStream(file).pipe(response); return;
 			}
 			const isControl = url.pathname.startsWith("/control/");
 			if (isControl && !equal(request.headers["x-lh-tablet-control"], controlToken)) throw fail(401, "Unauthorized");

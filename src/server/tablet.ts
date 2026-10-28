@@ -30,15 +30,20 @@ async function control<T>(route: string, body: unknown): Promise<T> {
 export function tabletLinks(padId: string, now = Date.now()): TabletLink[] {
 	return stores.trainingStore.list<TabletLink>("tablet-link").filter((link) => link.padId === padId && link.active && link.expiresAt > now);
 }
+const pendingPairings = new Set<string>();
 export async function createTabletLink(padId: string, pageId: string) {
-	const pad = stores.trainingStore.read<Scratchpad>("scratchpad", padId);
-	if (!pad || !pad.pages.some((page) => page.id === pageId)) throw new Error("Save this scratch page before pairing");
-	if (tabletLinks(padId).length) throw new Error("Disconnect the current tablet before pairing another");
-	const created = await control<{ id: string; code: string; expiresAt: number; url: string | null }>("/control/create", { padId, pageId });
-	const link: TabletLink = { version: 1, id: created.id, padId, pageId, active: true, state: "waiting", expiresAt: created.expiresAt, lastSequence: 0 };
-	stores.trainingStore.write("tablet-link", link);
-	emit("tablet-link-changed", { padId });
-	return { link, code: created.code, url: created.url };
+	if (pendingPairings.has(padId)) throw new Error("A pairing is already being created for this pad");
+	pendingPairings.add(padId);
+	try {
+		const pad = stores.trainingStore.read<Scratchpad>("scratchpad", padId);
+		if (!pad || !pad.pages.some((page) => page.id === pageId)) throw new Error("Save this scratch page before pairing");
+		if (tabletLinks(padId).length) throw new Error("Disconnect the current tablet before pairing another");
+		const created = await control<{ id: string; code: string; expiresAt: number; url: string | null }>("/control/create", { padId, pageId });
+		const link: TabletLink = { version: 1, id: created.id, padId, pageId, active: true, state: "waiting", expiresAt: created.expiresAt, lastSequence: 0 };
+		stores.trainingStore.write("tablet-link", link);
+		emit("tablet-link-changed", { padId });
+		return { link, code: created.code, url: created.url };
+	} finally { pendingPairings.delete(padId); }
 }
 export async function revokeTabletLink(id: string) {
 	const link = stores.trainingStore.read<TabletLink>("tablet-link", id);
