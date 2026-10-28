@@ -41,7 +41,7 @@ export interface PracticeDockProps {
 	expanded: boolean;
 	onExpand: () => void;
 	/** text — POST {type:"thinking"} (one lane; the register is read from the text). */
-	onSubmit: (text: string, evidence?: LearningEvidence) => void;
+	onSubmit: (text: string, evidence?: LearningEvidence) => Promise<boolean>;
 	/** Escape in the thinking field stops dictation (threaded from the page). */
 	onEscape?: () => void;
 	/** Compaction is running for this chat (owner round 14): the thinking
@@ -55,15 +55,19 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	const [thinking, setThinking] = useState("");
 	const [evidence, setEvidence] = useState<LearningEvidence>();
 	const [evidenceReading, setEvidenceReading] = useState(false);
+	const [sending, setSending] = useState(false);
+	const [submitError, setSubmitError] = useState<string>();
 	const submitting = useRef(false);
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
 	// the tail, never a stale closure.
 	const thinkingRef = useRef("");
+	const draftRevision = useRef(0);
 
 	useDictationTarget(
 		useCallback(
 			(t: string) => {
+				draftRevision.current++;
 				const v = joinDictation(thinkingRef.current, t);
 				thinkingRef.current = v;
 				setThinking(v);
@@ -76,14 +80,19 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	const submit = () => {
 		if (compactionRunning || evidenceReading || submitting.current) return;
 		submitting.current = true;
-		void finishDictation().then(() => {
+		setSending(true); setSubmitError(undefined);
+		void finishDictation().then(async () => {
 			const text = thinkingRef.current.trim();
 			if (!text && !hasLearningEvidence(evidence)) return;
-			onSubmit(text, evidence);
+			const revision = draftRevision.current;
+			if (!await onSubmit(text, evidence)) return;
+			if (draftRevision.current !== revision) return;
 			thinkingRef.current = "";
 			setThinking("");
 			setEvidence(undefined);
-		}).finally(() => { submitting.current = false; });
+		}).catch((error) => {
+			setSubmitError(error instanceof Error ? error.message : "Could not submit your work. Try again.");
+		}).finally(() => { submitting.current = false; setSending(false); });
 	};
 
 	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): dictation
@@ -111,7 +120,8 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	/* ── the expanded form ── */
 	return (
 		<div data-testid="practice-dock" data-problem={problemCallId}>
-			<EvidenceInput value={evidence} onChange={setEvidence} disabled={compactionRunning} onBusyChange={setEvidenceReading} />
+			<EvidenceInput value={evidence} onChange={setEvidence} disabled={compactionRunning || sending} onBusyChange={setEvidenceReading} />
+			{submitError && <p role="alert">{submitError}</p>}
 			{/* The agent's half: the 'Problem' eyebrow (mirroring the quiz
 			    cards' label row — owner round, 2026-10-05) + the statement,
 			    markdown + LaTeX rendered, capped by the measured column
@@ -133,8 +143,10 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 					YOUR THINKING
 				</div>
 				<textarea
+					disabled={sending}
 					value={thinking}
 					onChange={(e) => {
+						draftRevision.current++;
 						thinkingRef.current = e.target.value;
 						setThinking(e.target.value);
 					}}
@@ -171,7 +183,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 					<Button
 						type="button"
 						data-testid="practice-send"
-						disabled={(!thinking.trim() && !hasLearningEvidence(evidence)) || compactionRunning || evidenceReading}
+						disabled={(!thinking.trim() && !hasLearningEvidence(evidence)) || compactionRunning || evidenceReading || sending}
 						onClick={() => submit()}
 						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 					>

@@ -495,10 +495,10 @@ export function Chat({
 	// the dock stays mounted (the problem is still active until the agent
 	// concludes).
 	const submitThinking = useCallback(
-		(text: string, evidence?: LearningEvidence) => {
+		async (text: string, evidence?: LearningEvidence) => {
 			const problem = activeProblemRef.current;
-			if (!problem) return;
-			void send({ type: "thinking", problemCallId: problem.toolCallId, text, evidence });
+			if (!problem) return false;
+			return send({ type: "thinking", problemCallId: problem.toolCallId, text, evidence });
 		},
 		[send],
 	);
@@ -1872,7 +1872,7 @@ function DockOverlay({
 	 *  question (the composer is replaced); null in teaching sessions. */
 	practice: { toolCallId: string; input: unknown } | null;
 	/** (commit, text) — the practice dock's two submit lanes. */
-	onSubmitThinking: (text: string, evidence?: LearningEvidence) => void;
+	onSubmitThinking: (text: string, evidence?: LearningEvidence) => Promise<boolean>;
 	/** Teach-phase pending question: arrives collapsed behind the reveal button (W5). */
 	requiresReveal: boolean;
 	/** The reading-thinking draft (owner 2026-10-03) — owned by ChatView so
