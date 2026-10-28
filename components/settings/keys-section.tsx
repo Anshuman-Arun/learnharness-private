@@ -163,7 +163,7 @@ function ChatGPTPlanRow() {
 							type="button"
 							disabled={busy}
 							data-testid={connected ? "chatgpt-disconnect" : "chatgpt-connect"}
-							onClick={() => connected ? void change(window.lh?.chatGPTDisconnect) : void connect()}
+							onClick={() => connected ? void change(window.lh?.chatGPTDisconnect) : status?.connecting ? setDialogOpen(true) : void connect()}
 							className="text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40"
 						>
 							{busy ? "Workingâ€¦" : connected ? "Disconnect" : status?.connecting ? "View progress" : "Connect"}

@@ -35,13 +35,14 @@ describe("PR20 real localhost broker (no account/network required)", () => {
         return Buffer.concat([decipher.update(input.subarray(28)),decipher.final()]).toString("utf8");
       }
     };
-    const ipcHandlers = new Map<string,()=>Promise<unknown>>();
+    const ipcHandlers = new Map<string,(event?: unknown)=>Promise<unknown>>();
     let runtime:Awaited<ReturnType<typeof createChatGPTOAuthRuntime>>|undefined;
     try {
       runtime=await createChatGPTOAuthRuntime({
         userDataDir:directory,safeStorage,
         shell:{openExternal:async()=>undefined},
-        ipcMain:{handle:(channel:string,handler:()=>Promise<unknown>)=>ipcHandlers.set(channel,handler)},
+        ipcMain:{handle:(channel:string,handler:(event?: unknown)=>Promise<unknown>)=>ipcHandlers.set(channel,handler)},
+        authorizeIpc:()=>true,
         log:()=>undefined
       });
       const base=runtime.brokerUrl;

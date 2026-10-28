@@ -20,7 +20,7 @@ const PROGRESS: Record<NonNullable<ChatGPTStatus["phase"]>, { label: string; per
 	exchanging: { label: "Exchanging the authorization code…", percent: 72 },
 	verifying: { label: "Verifying your ChatGPT account…", percent: 90 },
 	connected: { label: "ChatGPT is connected", percent: 100 },
-	error: { label: "Connection was not completed", percent: 100 },
+	error: { label: "Connection was not completed", percent: 0 },
 };
 
 export function ChatGPTConnectDialog({

@@ -41,6 +41,102 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+  it("refuses insecure Linux-style basic_text key storage even when encryption reports available", async () => {
+    const { storageSecure } = native as unknown as {storageSecure: (backend: RecordValue) => boolean};
+    assert.equal(storageSecure({
+      isEncryptionAvailable: () => true,
+      getSelectedStorageBackend: () => "basic_text",
+    }), false);
+    assert.equal(storageSecure({
+      isEncryptionAvailable: () => true,
+      getSelectedStorageBackend: () => "unknown",
+    }), false);
+    await scratch(async dir => {
+      const file = path.join(dir, "vault.json");
+      const store = native.createEncryptedCredentialStore(file, {
+        ...encryptedBackend(),
+        getSelectedStorageBackend: () => "basic_text",
+      });
+      await assert.rejects(store.modify("openai", async () => ({type: "oauth", access: "secret"})), /Secure credential storage is unavailable/);
+      await assert.rejects(fs.readFile(file), {code:"ENOENT"});
+    });
+  });
+
+  it("denies status, login and disconnect IPC from untrusted frames, allowing only the exact approved event", async () => {
+    await scratch(async dir => {
+      const handlers = new Map<string,(event?: unknown) => Promise<unknown>>();
+      const goodEvent = { trusted: true };
+      const runtime = await native.createChatGPTOAuthRuntime({
+        userDataDir: dir,
+        safeStorage: encryptedBackend(),
+        shell: {openExternal: async () => undefined},
+        ipcMain: {handle: (channel:string, handler:(event?:unknown)=>Promise<unknown>) => {handlers.set(channel,handler);}},
+        authorizeIpc: (event:unknown) => event === goodEvent,
+        log: () => undefined,
+      });
+      try {
+        for (const channel of ["lh:chatgpt:status", "lh:chatgpt:sign-in", "lh:chatgpt:disconnect", "lh:chatgpt:open-authorization"]) {
+          await assert.rejects(handlers.get(channel)!({trusted:true}), /Untrusted ChatGPT IPC sender/);
+          await assert.rejects(handlers.get(channel)!(), /Untrusted ChatGPT IPC sender/);
+        }
+        assert.equal((await handlers.get("lh:chatgpt:status")!(goodEvent) as {connected:boolean}).connected, false);
+      } finally {runtime.close();}
+    });
+  });
+
+  it("disconnects LOCALLY after remote revocation fails and never serves the old token again", async () => {
+    await scratch(async dir => {
+      const handlers = new Map<string,(event?:unknown)=>Promise<unknown>>();
+      const safeStorage = encryptedBackend();
+      const oldFetch = globalThis.fetch;
+      const file = path.join(dir, "chatgpt-oauth.enc.json");
+      const store = native.createEncryptedCredentialStore(file, safeStorage);
+      await store.modify("openai", async () => ({
+        type: "oauth",
+        access: "old-token",
+        refresh: "old-refresh",
+        clientId: "local-test",
+        expires: Date.now() + 3600000,
+      }));
+      globalThis.fetch = async (input) => {
+        const target = String(input);
+        if (target.endsWith("/.well-known/openid-configuration")) {
+          return Response.json({
+            issuer: "https://auth.openai.com",
+            authorization_endpoint: "https://auth.openai.com/oauth/authorize",
+            token_endpoint: "https://auth.openai.com/oauth/token",
+            jwks_uri: "https://auth.openai.com/.well-known/jwks.json",
+            revocation_endpoint: "https://auth.openai.com/oauth/revoke",
+          });
+        }
+        if (target.endsWith("/oauth/revoke")) return new Response("outage", {status: 503});
+        throw new Error("Unexpected network request: " + target);
+      };
+      const runtime = await native.createChatGPTOAuthRuntime({
+        userDataDir: dir,
+        safeStorage,
+        shell: {openExternal: async () => undefined},
+        ipcMain: {handle: (channel:string, handler:(event?:unknown)=>Promise<unknown>) => {handlers.set(channel, handler);}},
+        authorizeIpc: () => true,
+        log: () => undefined,
+      });
+      try {
+        const outcome = await handlers.get("lh:chatgpt:disconnect")!() as {connected:boolean,error?:string};
+        assert.equal(outcome.connected,false);
+        assert.match(outcome.error ?? "", /Disconnected locally/);
+        assert.equal(await store.read("openai"), undefined);
+        const token = await fetch(runtime.brokerUrl + "/v1/token", {
+          method: "POST",
+          headers: {authorization: `Bearer ${runtime.brokerSecret}`},
+        });
+        assert.equal(token.status, 401);
+      } finally {
+        runtime.close();
+        globalThis.fetch = oldFetch;
+      }
+    });
+  });
+
   it("refuses to write credentials when OS encryption is unavailable; never falls back to plaintext", async () => {
     await scratch(async dir => {
       const file = path.join(dir, "vault.json");
@@ -102,6 +198,7 @@ describe("adversarial ChatGPT private-provider checks", () => {
         shell: {openExternal: async () => { opened++; }},
         ipcMain: {handle: (name: string, handler: () => Promise<unknown>) => {handlers.set(name, handler);}},
         log: () => undefined,
+        authorizeIpc: () => true,
       });
       try {
         assert.equal((await fetch(runtime.brokerUrl + "/v1/status")).status, 404);
