@@ -362,3 +362,14 @@ html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in sr
     font-size: 11px;
   }
 }
+
+/* A theme change must be atomic. The dark and light pairs cross in the
+ * middle of transition-colors, briefly making active tabs unreadable.
+ * The appearance provider adds this class for one frame on mode flips. */
+[data-lh-editorial="v10"].lh-theme-changing,
+[data-lh-editorial="v10"].lh-theme-changing *,
+[data-lh-editorial="v10"].lh-theme-changing *::before,
+[data-lh-editorial="v10"].lh-theme-changing *::after {
+  transition-property: none !important;
+  transition-duration: 0s !important;
+}
