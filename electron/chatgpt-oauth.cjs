@@ -212,7 +212,11 @@ async function tokenRequest(body, signal) {
 		signal,
 	});
 	const data = await response.json().catch(() => undefined);
-	if (!response.ok) throw new Error(`ChatGPT token request failed (${response.status}).`);
+	if (!response.ok) {
+		const error = new Error(`ChatGPT token request failed (${response.status}).`);
+		if (response.status === 400 && data?.error === "invalid_grant") error.oauthCode = "invalid_grant";
+		throw error;
+	}
 	if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("ChatGPT returned an invalid token response.");
 	return data;
 }
@@ -434,10 +438,22 @@ async function createChatGPTOAuthRuntime({ userDataDir, safeStorage, shell, ipcM
 	let catalogPending = null;
 	const invalidateCatalog = () => { catalogEpoch++; catalogCache = null; catalogPending = null; };
 	async function accessCredential() {
-		return credentials.modify(PROVIDER_ID, async (current) => {
-			if (current?.type !== "oauth") return undefined;
-			return current.expires <= Date.now() + 10 * 60_000 ? refreshCredential(current) : undefined;
-		});
+		try {
+			return await credentials.modify(PROVIDER_ID, async (current) => {
+				if (current?.type !== "oauth") return undefined;
+				return current.expires <= Date.now() + 10 * 60_000 ? refreshCredential(current) : undefined;
+			});
+		} catch (error) {
+			// A revoked/consumed refresh token is not a transient network
+			// failure. Stop claiming this account is still connected.
+			if (error?.oauthCode === "invalid_grant") {
+				await credentials.delete(PROVIDER_ID);
+				invalidateCatalog();
+				loginState = { connecting: false, phase: "error",
+					error: "Your ChatGPT authorization expired. Reconnect to continue." };
+			}
+			throw error;
+		}
 	}
 	async function discoverAccountModels() {
 		const epoch = catalogEpoch;

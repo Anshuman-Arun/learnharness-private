@@ -41,6 +41,48 @@ async function scratch(run: (dir: string) => Promise<void>) {
   finally { await fs.rm(dir, {recursive: true, force: true, maxRetries: 3, retryDelay: 50}); }
 }
 describe("adversarial ChatGPT private-provider checks", () => {
+  it("invalid_grant refresh invalidates the saved connection rather than retrying forever", async () => {
+    await scratch(async dir => {
+      const safeStorage=encryptedBackend();
+      const store=native.createEncryptedCredentialStore(path.join(dir,"chatgpt-oauth.enc.json"),safeStorage);
+      await store.modify("openai",async()=>({
+        type:"oauth", access:"expired",refresh:"revoked",clientId:"client",
+        expires:Date.now()-5000,scopes:["openid","profile","email","offline_access","resource.invoke","chatgpt.tokens.use.direct"],
+      }));
+      const oldFetch=globalThis.fetch;
+      globalThis.fetch=async(input,init)=>{
+        const url=String(input);
+        if(url.startsWith("http://127.0.0.1:")) return oldFetch(input,init);
+        if(url.endsWith("/.well-known/openid-configuration")) return Response.json({
+          issuer:"https://auth.openai.com",
+          authorization_endpoint:"https://auth.openai.com/oauth/authorize",
+          token_endpoint:"https://auth.openai.com/oauth/token",
+          jwks_uri:"https://auth.openai.com/.well-known/jwks.json",
+          revocation_endpoint:"https://auth.openai.com/oauth/revoke"
+        });
+        if(url.endsWith("/oauth/token"))return Response.json({error:"invalid_grant"}, {status:400});
+        throw new Error("Unexpected remote request "+url);
+      };
+      const runtime=await native.createChatGPTOAuthRuntime({
+        userDataDir:dir,safeStorage,
+        shell:{openExternal:async()=>undefined}, ipcMain:{handle:()=>undefined},
+        authorizeIpc:()=>true,log:()=>undefined
+      });
+      try {
+        const headers={authorization:`Bearer ${runtime.brokerSecret}`};
+        const denied=await fetch(runtime.brokerUrl+"/v1/token",{method:"POST",headers});
+        assert.equal(denied.status,500);
+        assert.equal(await store.read("openai"),undefined);
+        const status=await (await fetch(runtime.brokerUrl+"/v1/status",{headers})).json();
+        assert.equal(status.connected,false);
+        assert.match(status.error,/Reconnect/);
+        const noToken=await fetch(runtime.brokerUrl+"/v1/token",{method:"POST",headers});
+        assert.equal(noToken.status,401);
+      } finally {runtime.close();globalThis.fetch=oldFetch;}
+    });
+  });
+
+
   it("filters available ChatGPT models to the signed-in account's visible roster, never leaking bearer tokens", async () => {
     await scratch(async dir => {
       const oldFetch = globalThis.fetch;
