@@ -125,25 +125,23 @@ function model(opts: Partial<ConstructorParameters<typeof SessionModel>[0]> = {}
 
 
 describe("SSE transport adversarial framing", () => {
-	it("accepts CRLF frames split between CR and LF without falsely truncating", async () => {
+	it("accepts CRLF frames even when every CRLF is split into individual bytes", async () => {
 		for (const chunkSize of [1, 2, 5, 17]) {
 			const m = model();
-			const wire = "data: {\\"type\\":\\"agent_start\\"}\\r\\n\\r\\ndata: [DONE]\\r\\n\\r\\n"
-				.replaceAll("\\r", "\r").replaceAll("\\n", "\n");
+			const wire = 'data: {"type":"agent_start"}\r\n\r\ndata: [DONE]\r\n\r\n';
 			await m.consumeStream(dripped(wire, chunkSize), false);
-			assert.equal(m.getState().status, "ready", `chunk size ${chunkSize}`);
+			assert.equal(m.getState().status, "ready");
 		}
 	});
 	it("accepts standard multi-line data blocks and ignores SSE comments", async () => {
 		const m = model();
-		const wire = ":heartbeat\\ndata: {\\"type\\":\\ndata: \\"agent_start\\"}\\n\\ndata:[DONE]\\n\\n"
-			.replaceAll("\\n", "\n");
+		const wire = ':heartbeat\ndata: {"type":\ndata: "agent_start"}\n\ndata:[DONE]\n\n';
 		await m.consumeStream(dripped(wire, 2), false);
 		assert.equal(m.getState().status, "ready");
 	});
-	it("cannot mark an EOF-without-DONE stream as successfully settled", async () => {
+	it("cannot settle a stream which ended before the [DONE] terminal", async () => {
 		const m = model();
-		await m.consumeStream(dripped("data: {\\"type\\":\\"agent_start\\"}\\n\\n".replaceAll("\\n", "\n"), 1), false);
+		await m.consumeStream(dripped('data: {"type":"agent_start"}\n\n', 1), false);
 		assert.equal(m.getState().status, "error");
 	});
 });
