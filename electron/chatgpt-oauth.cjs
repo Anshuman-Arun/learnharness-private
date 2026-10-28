@@ -46,7 +46,7 @@ function storageSecure(safeStorage) {
 function validCredential(c) {
 	return !!(c && c.type === "oauth" &&
 		typeof c.access === "string" && c.access.length > 0 &&
-		!c.access.startsWith("sk-") &&
+		!c.access.startsWith("sk-") && !/[\x00-\x20\x7f]/.test(c.access) &&
 		typeof c.refresh === "string" && c.refresh.length > 0 &&
 		typeof c.clientId === "string" && /^[a-zA-Z0-9_-]{1,200}$/.test(c.clientId) &&
 		c.clientId !== DYNAMIC_CLIENT_ID &&
@@ -272,6 +272,8 @@ function credentialFields(data, previousScopes) {
 	if (
 		typeof data.access_token !== "string" ||
 		!data.access_token ||
+		data.access_token.startsWith("sk-") ||
+		/[\x00-\x20\x7f]/.test(data.access_token) ||
 		typeof data.token_type !== "string" ||
 		data.token_type.toLowerCase() !== "bearer" ||
 		typeof data.expires_in !== "number" ||
