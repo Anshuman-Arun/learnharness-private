@@ -44,9 +44,9 @@
 [data-lh-editorial="v10"][data-corners="square"] {--lh-control-radius:1px;--lh-panel-radius:2px;--lh-dialog-radius:3px;}
 [data-lh-editorial="v10"][data-corners="round"] {--lh-control-radius:6px;--lh-panel-radius:8px;--lh-dialog-radius:10px;}
 [data-lh-editorial="v10"][data-corners="generous"] {--lh-control-radius:10px;--lh-panel-radius:14px;--lh-dialog-radius:16px;}
-[data-lh-editorial="v10"][data-borders="quiet"] {--border:color-mix(in srgb,var(--foreground) 11%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 7%,transparent);}
-[data-lh-editorial="v10"][data-borders="strong"] {--border:color-mix(in srgb,var(--foreground) 29%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 17%,transparent);}
-[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in srgb,var(--foreground) 37%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 22%,transparent);}
+html[data-lh-editorial="v10"][data-borders="quiet"] {--border:color-mix(in srgb,var(--foreground) 11%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 7%,transparent);}
+html[data-lh-editorial="v10"][data-borders="strong"] {--border:color-mix(in srgb,var(--foreground) 29%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 17%,transparent);}
+html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in srgb,var(--foreground) 37%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 22%,transparent);}
 /* Accent selection is independent of the neutral hover surface (--accent).
  * Keep foreground contrasting in both modes; intensity drives accent washes. */
 [data-lh-editorial="v10"][data-accent="ink"] {--primary:#30312f;--ring:var(--primary);--lh-editorial-primary-hover:#20211f;}
