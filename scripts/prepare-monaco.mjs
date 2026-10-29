@@ -1,0 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
+const root = path.resolve(import.meta.dirname, "..");
+const source = path.join(root, "node_modules/monaco-editor");
+const target = path.join(root, "public/vendor/monaco");
+const marker = path.join(target, ".learnharness-generated");
+if (fs.existsSync(target) && !fs.existsSync(marker)) throw new Error("Refusing to replace an unknown public/vendor/monaco directory");
+fs.mkdirSync(target, { recursive: true });
+fs.writeFileSync(marker, "Generated from the locked monaco-editor package.\n");
+fs.cpSync(path.join(source, "min/vs"), path.join(target, "vs"), { recursive: true });
+for (const name of ["LICENSE", "ThirdPartyNotices.txt"]) fs.copyFileSync(path.join(source, name), path.join(target, name));

@@ -13,14 +13,51 @@ import React from "react";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import { MermaidError } from "../components/mermaid-error.tsx";
-import { transformMathDelimiters, healOverescapedCommands } from "../src/core/math-delims.ts";
+import { parseQuizInput, parseAskInput, parseExplainInput } from "../src/core/tool-parts.ts";
+import { transformMathDelimiters, healOverescapedCommands, repairMathForDisplay } from "../src/core/math-delims.ts";
 
 /** Render through MessageResponse in static mode (no streaming/remend artifacts). */
 function render(md: string): string {
 	return renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
 }
+
+describe("currency mixed with math", () => {
+	it("keeps dollar amounts and paragraph breaks while rendering percentage math", () => {
+		const question = "Contribute $100 million and receive $6 million yearly, plus $100 million at maturity.\n\nAssume a $4\\%$ annual return.";
+		assert.equal(repairMathForDisplay(question), question, "currency must not trigger escape repair");
+		for (const mode of ["static", "streaming"] as const) {
+			const { document } = parseHTML(renderToStaticMarkup(<MessageResponse mode={mode}>{repairMathForDisplay(question)}</MessageResponse>));
+			assert.equal(document.querySelectorAll("p").length, 2);
+			assert.ok(document.querySelector("p")!.textContent!.includes("$100 million and receive $6 million yearly, plus $100 million"));
+			assert.deepEqual([...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent), [String.raw`4\%`]);
+			assert.equal(document.querySelectorAll(".katex-error").length, 0);
+		}
+	});
+
+	it("keeps a lone amount literal without consuming the next variable", () => {
+		const { document } = parseHTML(render("Pay $5 and let $x$ vary; keep $10. Range: $5–$10."));
+		assert.deepEqual([...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent), ["x"]);
+		assert.ok(document.firstElementChild!.textContent!.includes("Pay $5 and let"));
+		assert.ok(document.firstElementChild!.textContent!.includes("keep $10."));
+		assert.ok(document.firstElementChild!.textContent!.includes("Range: $5–$10."));
+	});
+
+	it("preserves numeric formulas, escaped currency, and literal code", () => {
+		const md = String.raw`$100$ and $5 + 10$; \$5; ` + "`$5 and $10`\n\n```text\n$5 and $10\n```";
+		const { document } = parseHTML(render(md));
+		assert.deepEqual([...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent), ["100", "5 + 10"]);
+		assert.equal(document.querySelectorAll("code").length, 2);
+		assert.ok([...document.querySelectorAll("code")].every((n) => n.textContent!.includes("$5 and $10")));
+	});
+
+	it("does not repair inline dollars across a paragraph boundary", () => {
+		const md = "$x\n\n+y$";
+		assert.equal(repairMathForDisplay(md), md);
+	});
+});
 
 describe("math delimiter transform (pure unit)", () => {
 	it("converts inline \\(...\\) to the two-dollar inline form", () => {
@@ -53,9 +90,9 @@ describe("math delimiter transform (pure unit)", () => {
 		);
 	});
 
-	it("leaves currency untouched", () => {
+	it("escapes bare currency without changing math", () => {
 		const md = "It costs $5 and $10 more. $$big$$ sums too.";
-		assert.equal(transformMathDelimiters(md), md);
+		assert.equal(transformMathDelimiters(md), "It costs \\$5 and \\$10 more. $$big$$ sums too.");
 	});
 
 	it("leaves escaped delimiters untouched (\\\\( is a literal backslash)", () => {
@@ -285,9 +322,9 @@ describe("escaped dollars inside math — transform units", () => {
 		assert.equal(transformMathDelimiters(md), md);
 	});
 
-	it("leaves prose escaped dollars and bare currency untouched", () => {
+	it("preserves escaped dollars and escapes bare currency", () => {
 		const md = "It costs \\$5 flat, then $5 and $10 more.";
-		assert.equal(transformMathDelimiters(md), md);
+		assert.equal(transformMathDelimiters(md), "It costs \\$5 flat, then \\$5 and \\$10 more.");
 	});
 
 	it("leaves display spans untouched — a lone $ can't close $$, \\$ already survives", () => {
@@ -414,13 +451,12 @@ describe("over-escaped command heal — doubled backslashes in tool args (owner 
 		assert.equal(healOverescapedCommands("$\\\\nabla"), "$\\\\nabla");
 	});
 
-	it("the raw doubled gradient-descent question renders the word-signature (the bug this heal exists for)", () => {
-		// The real session record (chat_mv7r02og, msg 3), expressed as the
-		// clean form with every backslash doubled — exactly what mimo emitted.
+		it("the ordinary chat renderer now repairs the raw doubled gradient-descent question", () => {
 		const raw = GD_QUESTION.replace(/\\/g, "\\\\");
 		const html = render(raw);
-		assert.ok(!html.includes("∇"), "doubled form does not produce the glyph");
-		assert.ok(html.includes("katex-error"), "doubled form errors in KaTeX");
+		assert.ok(html.includes("∇"), "the unmodified stored input renders nabla");
+		assert.ok(html.includes("⊤"), "transpose renders");
+		assert.ok(!html.includes("katex-error"), "no KaTeX errors");
 	});
 
 	it("the healed question renders ∇ and ⊤ with zero KaTeX errors", () => {
@@ -444,3 +480,57 @@ describe("over-escaped command heal — doubled backslashes in tool args (owner 
 	});
 });
 
+
+describe("question code blocks", () => {
+	const markdown = [
+		"In C++, what does this program do?", "", "```cpp",
+		"#include <string>", "#include <iostream>", "", "int main() {",
+		'    std::string s = "hello";',
+		String.raw`    std::cout << s << "\n";`,
+		String.raw`    auto path = "C:\\new\\test";`,
+		"}", "```",
+	].join("\n");
+	const quiz = { question: markdown, options: [{ label: "Prints hello", value: "yes" }, { label: "Compile error", value: "no" }], correctAnswer: "yes", explanation: "It prints the string." };
+
+	it("repairs a double-escaped question from the saved tool call and renders a code block", () => {
+		const raw = { ...quiz, question: JSON.stringify(markdown).slice(1, -1) };
+		const parsed = parseQuizInput(raw);
+		assert.ok(parsed);
+		assert.equal(parsed.question, markdown);
+		assert.notEqual(raw.question, parsed.question, "the persisted input remains untouched");
+		const html = render(parsed.question);
+		assert.ok(html.includes('data-streamdown="code-block"'));
+		assert.ok(html.includes("#include &lt;string&gt;"));
+		assert.ok(!html.includes("```cpp"), "the fence is not shown as text");
+	});
+
+	it("repairs code questions in ask and free-recall tools too", () => {
+		const question = JSON.stringify(markdown).slice(1, -1);
+		assert.equal(parseAskInput({ question })?.question, markdown);
+		assert.equal(parseExplainInput({ question, correctAnswer: "It prints hello." })?.question, markdown);
+	});
+
+	it("repairs before math processing and leaves answer identities untouched", () => {
+		const question = markdown + "\n\nWhat is $\\nu$?";
+		const encoded = JSON.stringify(question).slice(1, -1);
+		const value = JSON.stringify(markdown).slice(1, -1);
+		const raw = { ...quiz, question: encoded, options: [{ label: "Yes", value }, { label: "No", value: "no" }], correctAnswer: value };
+		const parsed = parseQuizInput(raw);
+		assert.ok(parsed);
+		assert.equal(parsed.question, question);
+		assert.equal(parsed.options[0]?.value, value);
+		assert.equal(parsed.correctAnswer, value);
+		const html = render(parsed.question);
+		assert.ok(html.includes('data-streamdown="code-block"'));
+		assert.ok(html.includes("katex"));
+		assert.ok(html.includes("ν"), "the LaTeX command survives decoding");
+		assert.ok(!html.includes("katex-error"));
+	});
+
+	it("preserves correctly encoded code, string escapes, paths, inline code, and math", () => {
+		assert.equal(parseQuizInput(quiz)?.question, markdown);
+		for (const question of [String.raw`What does \n mean in C++?`, String.raw`Read C:\new\test and $\nu$.`, 'Explain the inline code `print("\\n")`.']) {
+			assert.equal(parseQuizInput({ ...quiz, question })?.question, question);
+		}
+	});
+});

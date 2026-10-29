@@ -39,17 +39,18 @@ import {
 	pendingProblemDismissalOf,
 } from "./native-messages.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
+import { hasLearningEvidence, parseLearningEvidence, type LearningEvidence } from "./learning-evidence.ts";
 
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
-	| { type: "text"; text: string }
+	| { type: "text"; text: string; evidence?: LearningEvidence }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData }
 	| { type: "continue" }
 	/** The practice dock's two buttons (owner, 2026-10-04): the learner's
 	 *  thinking on the ACTIVE problem — one lane (owner 2026-10-05):
 	 *  whether it claims an answer is read from the text. One
 	 *  problem may carry many submissions; each is its own turn. */
-	| { type: "thinking"; problemCallId: string; text: string }
+	| { type: "thinking"; problemCallId: string; text: string; evidence?: LearningEvidence }
 	/** The practice move-on signal (owner round 16): the learner's
 	 *  explicit go-ahead during the between-problems pause — the Next
 	 *  chip or Enter on an empty composer. Practice sessions only, and
@@ -150,34 +151,46 @@ export function dismissAppends(record: { messages: LhMessage[] }, input: Dismiss
 /** A malformed input event (the honest 400 — the orphan-trap discipline). */
 export class ChatInputError extends Error {}
 
+function parseEvidence(value: unknown): LearningEvidence | undefined {
+	try { return parseLearningEvidence(value); }
+	catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid learning evidence"); }
+}
+
 /** Parse and validate an input event off a request body. */
 export function parseChatInput(input: unknown): ChatInput {
 	if (typeof input !== "object" || input === null) throw new ChatInputError("input must be an object");
 	const i = input as Record<string, unknown>;
 	switch (i.type) {
-		case "text":
-			if (typeof i.text !== "string" || (i.text as string).trim().length === 0) {
+		case "text": {
+			const evidence = parseEvidence(i.evidence);
+			if (typeof i.text !== "string" || (!i.text.trim() && !hasLearningEvidence(evidence))) {
 				throw new ChatInputError("text input requires non-empty text");
 			}
-			return { type: "text", text: i.text };
-		case "answer":
+			return { type: "text", text: i.text, ...(evidence ? { evidence } : {}) };
+		}
+		case "answer": {
 			if (typeof i.toolCallId !== "string" || i.toolCallId.length === 0) {
 				throw new ChatInputError("answer input requires toolCallId");
 			}
 			if (typeof i.answer !== "object" || i.answer === null) {
 				throw new ChatInputError("answer input requires the graded answer object");
 			}
-			return { type: "answer", toolCallId: i.toolCallId, answer: i.answer as QuestionAnswerData };
+			const { evidence: rawEvidence, ...answer } = i.answer as QuestionAnswerData;
+			const evidence = parseEvidence(rawEvidence);
+			return { type: "answer", toolCallId: i.toolCallId, answer: { ...answer, ...(evidence ? { evidence } : {}) } };
+		}
 		case "continue":
 			return { type: "continue" };
-		case "thinking":
+		case "thinking": {
+			const evidence = parseEvidence(i.evidence);
 			if (typeof i.problemCallId !== "string" || i.problemCallId.length === 0) {
 				throw new ChatInputError("thinking input requires problemCallId");
 			}
-			if (typeof i.text !== "string" || i.text.trim().length === 0) {
+			if (typeof i.text !== "string" || (!i.text.trim() && !hasLearningEvidence(evidence))) {
 				throw new ChatInputError("thinking input requires non-empty text");
 			}
-			return { type: "thinking", problemCallId: i.problemCallId, text: i.text };
+			return { type: "thinking", problemCallId: i.problemCallId, text: i.text, ...(evidence ? { evidence } : {}) };
+		}
 		case "next":
 			return { type: "next" };
 		default:
@@ -200,13 +213,14 @@ export function inputAppends(
 ): LhMessage[] {
 	switch (input.type) {
 		case "text":
-			return [...dismissalConclusion(record), newUserMessage(input.text)];
+			return [...dismissalConclusion(record), newUserMessage(input.text, parseEvidence(input.evidence))];
 		case "answer": {
 			const pending = danglingQuestionOf(record.messages);
 			if (!pending || pending.toolCallId !== input.toolCallId) {
 				throw new ChatInputError("answer input targets no pending question call");
 			}
-			return [newAnswerResult(input.toolCallId, pending.tool, input.answer)];
+			const evidence = parseEvidence(input.answer.evidence);
+			return [newAnswerResult(input.toolCallId, pending.tool, { ...input.answer, ...(evidence ? { evidence } : {}) })];
 		}
 		case "continue":
 			return dismissalConclusion(record);
@@ -215,7 +229,7 @@ export function inputAppends(
 			if (!active || active.toolCallId !== input.problemCallId) {
 				throw new ChatInputError("thinking input targets no active problem");
 			}
-			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text)];
+			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text, parseEvidence(input.evidence))];
 		}
 		case "next": {
 			// Honest 400s, the thinking gate's discipline: the signal is a

@@ -38,8 +38,15 @@ export function parseSettingsBody(body: unknown): SettingsBodyResult<ChatSetting
 	const raw = body as {
 		model?: { provider?: unknown; id?: unknown };
 		thinkingLevel?: unknown;
+		teachingMode?: unknown;
 	};
 	const settings: ChatSettings = {};
+	if (raw.teachingMode !== undefined) {
+		if (raw.teachingMode !== "guided" && raw.teachingMode !== "explain") {
+			return { ok: false, error: "teachingMode must be guided or explain" };
+		}
+		settings.teachingMode = raw.teachingMode;
+	}
 	if (raw.model !== undefined) {
 		if (
 			typeof raw.model !== "object" ||
@@ -75,7 +82,7 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
-/** general: { autoUpdate?: boolean } */
+/** general: { autoUpdate?: boolean, microphoneId?: string, microphoneLabel?: string } */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -87,15 +94,18 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 		settings.autoUpdate = raw.autoUpdate;
 	}
 	if (raw.microphoneId !== undefined) {
-		if (typeof raw.microphoneId !== "string" || raw.microphoneId.length === 0 ||
-			raw.microphoneId.length > 512 || /[\x00-\x1f\x7f]/.test(raw.microphoneId))
-			return { ok: false, error: "microphoneId must be a nonempty device ID (max 512 characters)" };
+		if (
+			typeof raw.microphoneId !== "string" ||
+			raw.microphoneId.length === 0 ||
+			raw.microphoneId.length > 512 ||
+			/[\x00-\x1f\x7f]/.test(raw.microphoneId)
+		) return { ok: false, error: "microphoneId must be a nonempty device ID (max 512 characters)" };
 		settings.microphoneId = raw.microphoneId;
 	}
 	if (raw.microphoneLabel !== undefined) {
-		if (typeof raw.microphoneLabel !== "string" || raw.microphoneLabel.length > 256 ||
-			/[\x00-\x1f\x7f]/.test(raw.microphoneLabel))
+		if (typeof raw.microphoneLabel !== "string" || raw.microphoneLabel.length > 256 || /[\x00-\x1f\x7f]/.test(raw.microphoneLabel)) {
 			return { ok: false, error: "microphoneLabel must be a device name (max 256 characters)" };
+		}
 		settings.microphoneLabel = raw.microphoneLabel;
 	}
 	return { ok: true, settings };

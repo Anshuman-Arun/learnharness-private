@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { ThinkingBlock } from "@/components/thinking-block";
+import { EvidencePreview } from "@/components/learning-evidence";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 
 /* TARGET NAMES (owner round 17, 2026-10-06): targets are normalized to
@@ -49,6 +50,7 @@ function nodeNameMap(): Promise<Record<string, string>> {
 
 /** The practice-thinking marker's details (native-messages.ts). */
 export interface PracticeThinkingData {
+	evidence?: import("@/src/core").LearningEvidence;
 	problemCallId: string;
 	/** Legacy records (pre 2026-10-05) carry the old two-lane flag; ignored. */
 	commit?: boolean;
@@ -294,5 +296,5 @@ export function ThinkingCard({ data }: { data: PracticeThinkingData }) {
 	// 50%-italic quote block on expand. Legacy records' commit flag is
 	// deliberately unread (one lane now). A TRANSCRIPT row (owner round,
 	// 2026-10-07): full-width band + rail, arriving expanded.
-	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen />;
+	return <><ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen /><EvidencePreview evidence={data.evidence} /></>;
 }

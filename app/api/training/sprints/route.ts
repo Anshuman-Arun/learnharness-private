@@ -1,0 +1,1 @@
+import{changeSprint,sprintViews}from'@/src/server';export const dynamic='force-dynamic';export function GET(){return Response.json({sprints:sprintViews()});}export async function POST(r:Request){try{return Response.json({sprint:changeSprint(await r.json())});}catch(e){return Response.json({error:e instanceof Error?e.message:'Invalid sprint action'},{status:400});}}

@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import {describe,it,after} from 'node:test';
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
+import {estimateQuestion,estimateScore,estimationCalibration,parseEstimateAnswer,ESTIMATION_KINDS} from '../src/core/estimation.ts';
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'lh-estimate-'));process.env.LH_DATA_DIR=dir;
+const {changeEstimate,listEstimates}=await import('../src/server/estimation.ts');
+after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+describe('estimation and interval calibration',()=>{
+ it('generates reproducible positive references and handles birthday complements',()=>{for(const kind of ESTIMATION_KINDS)for(const seed of [0,1,4294967295]){const q=estimateQuestion(kind,seed);assert.deepEqual(q,estimateQuestion(kind,seed));assert.ok(q.reference>0&&Number.isFinite(q.reference));}const q=estimateQuestion('probability',0);assert.ok(Math.abs(q.reference-(1-365*364*363*362*361/365**5))<1e-12);});
+ it('penalizes width and overconfidence in log units symmetrically',()=>{const q=estimateQuestion('product',0),y=q.reference;const a={estimate:y,low:y/1.1,high:y*1.1,reasoning:'bracket'};assert.equal(estimateScore(q,a).factorError,1);assert.ok(estimateScore(q,a).covered);assert.ok(estimateScore(q,{...a,low:y/10,high:y*10}).intervalScore>estimateScore(q,a).intervalScore);assert.ok(estimateScore(q,{...a,estimate:y/2,low:y/2,high:y/2}).intervalScore>6);assert.equal(estimateScore(q,{...a,estimate:y*2,low:y,high:y*2}).factorError,estimateScore(q,{...a,estimate:y/2,low:y/2,high:y}).factorError);});
+ it('excludes assumption-dependent Fermi references from coverage',()=>{const base={version:1 as const,id:'x',seed:0,startedAt:0,submittedAt:1,answer:{estimate:1,low:1,high:1,reasoning:'test'}};assert.equal(estimationCalibration([{...base,kind:'fermi'}]).count,0);assert.equal(estimationCalibration([{...base,kind:'product'}]).coverage,0);});
+ it('rejects inverted intervals, missing reasoning and invalid probabilities',()=>{assert.throws(()=>parseEstimateAnswer({estimate:2,low:3,high:4,reasoning:'x'}));assert.throws(()=>parseEstimateAnswer({estimate:2,low:1,high:4,reasoning:''}));const a=changeEstimate({action:'start',kind:'probability'});assert.throws(()=>changeEstimate({action:'answer',id:a.id,answer:{estimate:1,low:.1,high:2,reasoning:'x'}}),/Probability/);});
+ it('hides reference and explanation until commitment, persists reasoning and locks the attempt',()=>{const a=changeEstimate({action:'start',kind:'root'},100);assert.equal('reference'in a.question,false);assert.equal('explanation'in a.question,false);const answer={estimate:20,low:1,high:100,reasoning:'bounded by integer squares'};const done=changeEstimate({action:'answer',id:a.id,answer},200);assert.ok('reference'in done.question);assert.equal(done.answer?.reasoning,answer.reasoning);assert.equal(listEstimates().find(x=>x.id===a.id)?.submittedAt,200);assert.throws(()=>changeEstimate({action:'answer',id:a.id,answer}),/already committed/);});
+});
+
+it('keeps log scores finite for accepted subnormal estimates and reports factor overflow explicitly',()=>{
+ const answer=parseEstimateAnswer({estimate:Number.MIN_VALUE,low:Number.MIN_VALUE,high:Number.MIN_VALUE,reasoning:'A very small positive estimate'});
+ const score=estimateScore(estimateQuestion('product',0),answer);
+ assert.ok(Number.isFinite(score.logError));
+ assert.ok(Number.isFinite(score.intervalScore));
+ assert.equal(score.factorError,null);
+ assert.equal(JSON.parse(JSON.stringify(score)).logError,score.logError);
+});

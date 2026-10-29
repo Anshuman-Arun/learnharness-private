@@ -77,25 +77,47 @@ async function turnInFlight(model: SessionModel): Promise<boolean | null> {
 	}
 }
 
-/** One wire event off the SSE body: parsed JSON, or the [DONE] terminal. */
-async function* sseEvents(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Record<string, unknown>> {
+/** One wire event off the SSE body, or the [DONE] terminal. RETURNS whether the
+ *  body actually reached its terminal: an SSE body that merely CLOSES — a
+ *  dropped connection, a proxy idle timeout, a server that died mid-turn — is
+ *  indistinguishable from a finished turn at the transport level, and telling
+ *  the two apart is the whole point of this return value (a truncated stream
+ *  used to settle the view to "ready" exactly like a completed one, which is
+ *  how a dead turn came to look like a finished, empty one). */
+async function* sseEvents(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+): AsyncGenerator<Record<string, unknown>, boolean> {
 	const decoder = new TextDecoder();
+	const MAX_SSE_EVENT = 16 * 1024 * 1024;
 	let buf = "";
+	let pendingCR = false;
 	for (;;) {
 		const { done, value } = await reader.read();
-		if (done) return;
-		buf += decoder.decode(value, { stream: true });
+		let chunk: string = (pendingCR ? "\r" : "") +
+			(done ? decoder.decode() : decoder.decode(value, { stream: true }));
+		pendingCR = !done && chunk.endsWith("\r");
+		if (pendingCR) chunk = chunk.slice(0, -1);
+		buf += chunk.replace(/\r\n?/g, "\n");
 		for (;;) {
 			const end = buf.indexOf("\n\n");
 			if (end === -1) break;
+			if (end > MAX_SSE_EVENT) throw new Error("SSE event exceeds the safety limit.");
 			const event = buf.slice(0, end);
 			buf = buf.slice(end + 2);
-			const dataLine = event.split("\n").find((l) => l.startsWith("data: "));
-			if (!dataLine) continue;
-			const data = dataLine.slice("data: ".length);
-			if (data === "[DONE]") return;
+			// Standard SSE allows 'data:' with or without a following space,
+			// multiple data lines, CRLF frames, and comment/metadata lines.
+			const dataLines = event.split("\n")
+				.filter((line) => line.startsWith("data:"))
+				.map((line) => line.slice(5).replace(/^ /, ""));
+			if (!dataLines.length) continue;
+			const data = dataLines.join("\n");
+			if (data === "[DONE]") return true;
 			yield JSON.parse(data) as Record<string, unknown>;
 		}
+		// Bound only the incomplete pending event, not a combined network
+		// chunk containing many individually small, valid SSE frames.
+		if (buf.length > MAX_SSE_EVENT) throw new Error("SSE event exceeds the safety limit.");
+		if (done) return false;
 	}
 }
 
@@ -125,7 +147,7 @@ export function absorbed(m: LhMessage, record: readonly LhMessage[]): boolean {
 	if (role === "user") {
 		const content = (m as { content?: unknown }).content;
 		return record.some(
-			(r) => (r as { role?: string }).role === "user" && (r as { content?: unknown }).content === content,
+			(r) => (r as { role?: string }).role === "user" && sameDetails((r as { content?: unknown }).content, content),
 		);
 	}
 	if (role === "toolResult") {
@@ -250,6 +272,7 @@ export class SessionModel {
 	}
 
 	getState(): SessionState {
+		const latest = [...this.base, ...this.tail].at(-1);
 		const live =
 			this.statusValue === "submitted" || this.statusValue === "streaming"
 				? { executions: this.executions, inFlight: true, streamingIds: this.streamingIds }
@@ -258,7 +281,10 @@ export class SessionModel {
 			messages: projectView([...this.base, ...this.tail], live),
 			nativeMessages: [...this.base, ...this.tail],
 			status: this.statusValue,
-			error: this.errorValue,
+			// A finished turn may be loaded from disk without its live error event.
+			error: this.errorValue ?? (latest?.role === "assistant" && latest.stopReason === "error"
+				? { message: latest.errorMessage ?? "An error occurred." }
+				: null),
 			steerQueue: this.steerQueueValue,
 		};
 	}
@@ -275,7 +301,9 @@ export class SessionModel {
 
 	private setStatus(status: SessionStatus): void {
 		this.statusValue = status;
-		this.readyRef = status === "ready";
+		// A refused/failed turn is idle too; retry still passes the server's
+		// conflict gate and must not be silently discarded by the client.
+		this.readyRef = status === "ready" || status === "error";
 		this.onChange?.();
 	}
 
@@ -425,18 +453,49 @@ export class SessionModel {
 	}
 
 	/** Consume one SSE body to its [DONE] terminal. The turn-settled
-	 *  terminal (stream-route only) fires the settle hook and ends. */
-	async consumeStream(res: Response): Promise<void> {
+	 *  terminal (stream-route only) fires the settle hook and ends.
+	 *
+	 *  A BODY THAT CLOSES WITHOUT [DONE] IS NOT A FINISHED TURN: it is a
+	 *  truncation (dropped connection, proxy idle timeout, a server that died
+	 *  mid-turn), and settling to "ready" on it is what made a dead turn look
+	 *  like a completed, silent one. `allowTruncationRecovery` spends the single
+	 *  recovery attempt — one reattach, which is a correct recovery rather than
+	 *  a guess, because the turn is server-owned and server-side state is the
+	 *  truth: a turn still running replays from its log, and one that finished
+	 *  while we were away answers turn-settled, whose refetch lands the reply. */
+	async consumeStream(res: Response, allowTruncationRecovery = true): Promise<void> {
 		if (!res.body) throw new Error("The turn stream body is empty.");
 		const reader = res.body.getReader();
 		let sawEvent = false;
+		let sawDone = false;
 		try {
-			for await (const event of sseEvents(reader)) {
+			const events = sseEvents(reader);
+			for (;;) {
+				let next: IteratorResult<Record<string, unknown>, boolean>;
+				try {
+					next = await events.next();
+				} catch (err) {
+					// A read failure is a truncation — same handling below. ONLY
+					// the read is caught: a throw from applying an event is a bug
+					// in this file, and must keep travelling to the caller's catch
+					// as itself rather than being relabelled "connection dropped".
+					if ((err as Error)?.name === "AbortError") throw err; // a newer consume won
+					break;
+				}
+				if (next.done) {
+					sawDone = next.value === true;
+					break;
+				}
+				const event = next.value;
 				if (event.type === "turn-settled") {
 					// The raced-settle terminal: no turn to attach to — the
 					// record is current; the settle hook refetches.
 					await reader.cancel().catch(() => {});
 					this.onReattachSettled?.();
+					// The hook may have refetched the record; either way this is
+					// a CLEAN end (the turn finished, there was just nothing left
+					// to attach to), so it settles the view exactly as [DONE] does.
+					if (this.statusValue !== "error") this.setStatus("ready");
 					return;
 				}
 				const acted = this.applyWireEvent(event);
@@ -448,8 +507,18 @@ export class SessionModel {
 		} finally {
 			this.streamingIds = new Set();
 			this.executions = new Map();
-			if (this.statusValue !== "error") this.setStatus("ready");
 		}
+		if (this.statusValue === "error") return; // already announced — never mask it
+		if (sawDone) {
+			this.setStatus("ready");
+			return;
+		}
+		if (allowTruncationRecovery) {
+			await this.resumeStream(false, false);
+			return;
+		}
+		this.setError("the connection dropped before the teacher replied — reload the page to see the transcript.");
+		this.setStatus("error");
 	}
 
 	/**
@@ -464,8 +533,12 @@ export class SessionModel {
 	 * and the refetch absorbs it (write-ahead adoption) before the replay
 	 * lands on top. The stream then replays the turn from its first event
 	 * through the SAME consume path.
+	 *
+	 * `allowTruncationRecovery` is the one-shot budget consumeStream spends on
+	 * a body that closed without [DONE] (read it there): the recovery IS a
+	 * reattach, so it passes false and can never recurse.
 	 */
-	async resumeStream(refetchRecordFirst = true): Promise<void> {
+	async resumeStream(refetchRecordFirst = true, allowTruncationRecovery = true): Promise<void> {
 		this.consumeAbort?.abort();
 		const controller = new AbortController();
 		this.consumeAbort = controller;
@@ -518,7 +591,7 @@ export class SessionModel {
 				signal: controller.signal,
 			});
 			if (!res.ok) throw new Error((await res.text()) || "Failed to attach to the running turn.");
-			await this.consumeStream(res);
+			await this.consumeStream(res, allowTruncationRecovery);
 		} catch (err) {
 			if ((err as Error).name === "AbortError") return; // a newer consume won
 			this.setError((err as Error).message);
@@ -532,7 +605,7 @@ export class SessionModel {
 	 * POST + consume. Ready-gated: one turn per client at a time (the
 	 * server's 409 + identity retry covers the wake-race window).
 	 */
-	async send(input: ChatInput): Promise<void> {
+	async send(input: ChatInput, onAccepted?: () => void): Promise<void> {
 		if (!this.readyRef) return;
 		this.consumeAbort?.abort();
 		const controller = new AbortController();
@@ -543,12 +616,12 @@ export class SessionModel {
 		// write-ahead will persist (inputAppends), with LOCAL ids so
 		// adoption can tell them from the record's absorbed copies.
 		const optimistic: LhMessage[] = [];
-		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text), id: localId() });
+		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text, input.evidence), id: localId() });
 		else if (input.type === "thinking") {
 			// The practice submissions (2026-10-04): the marker lands
 			// optimistically — the card renders from its details the
 			// moment the button fires.
-			optimistic.push({ ...newThinkingMessage(input.problemCallId, input.text), id: localId() });
+			optimistic.push({ ...newThinkingMessage(input.problemCallId, input.text, input.evidence), id: localId() });
 		} else if (input.type === "next") {
 			// The move-on signal (owner round 16): the NEXT PROBLEM line
 			// renders the instant the chip/Enter fires.
@@ -559,6 +632,11 @@ export class SessionModel {
 		}
 		if (optimistic.length > 0) this.mutate(() => {
 			this.tail = [...this.tail, ...optimistic];
+		});
+		let accepted = false;
+		const discardRefused = () => this.mutate(() => {
+			const ids = new Set(optimistic.map((message) => message.id));
+			this.tail = this.tail.filter((message) => !ids.has(message.id));
 		});
 		try {
 			// SUBMITS ARE NOT ABORTABLE BY VIEW TEARDOWN (owner, 2026-10-10 —
@@ -575,6 +653,7 @@ export class SessionModel {
 			// connection is Diet A's whole job.
 			const res = await this.postInputEvent(input);
 			if (res.status === 409) {
+				discardRefused();
 				this.setError("A turn is already running — try again in a moment.");
 				this.setStatus("error");
 				return;
@@ -585,6 +664,8 @@ export class SessionModel {
 				// page's refusal flow JSON-parses the envelope out of it.
 				throw new Error((await res.text()) || `The send failed (${res.status}).`);
 			}
+			accepted = true;
+			onAccepted?.();
 			// CONNECTION DIET B (owner, 2026-10-10 — parallel-session freeze
 			// postmortem): the POST acknowledges and closes; there is no stream
 			// on this response to consume. Attach through the SAME reattach wire
@@ -599,6 +680,7 @@ export class SessionModel {
 			if (this.consumeAbort !== controller) return;
 			await this.resumeStream(true);
 		} catch (err) {
+			if (!accepted) discardRefused();
 			if ((err as Error).name === "AbortError") return; // stop() or a newer consume won
 			this.setError((err as Error).message);
 			this.setStatus("error");

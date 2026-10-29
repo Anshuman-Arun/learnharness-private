@@ -1,4 +1,7 @@
 node_modules/
+/public/vendor/monaco/
+/public/vendor/excalidraw/
+/public/tablet-companion/
 data/
 .next/
 *.log

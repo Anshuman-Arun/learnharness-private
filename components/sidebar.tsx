@@ -52,6 +52,15 @@ const SIDEBAR_AUTOCLOSE = 928;
 // Module scope, guarded for SSR (the server has no navigator).
 const IS_ELECTRON = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
 
+interface ChatGPTConnectionStatus {
+	available: boolean;
+	connected: boolean;
+	connecting?: boolean;
+	phase?: "idle" | "preparing" | "waiting" | "exchanging" | "verifying" | "connected" | "error";
+	authorizationUrl?: string;
+	error?: string;
+}
+
 declare global {
 	interface Window {
 		/** Preload bridge (electron/preload.cjs) — Electron only, absent in the browser. */
@@ -63,6 +72,11 @@ declare global {
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
 			getZoom?: () => Promise<number>;
+			getChatGPTStatus?: () => Promise<ChatGPTConnectionStatus>;
+			chatGPTSignIn?: () => Promise<ChatGPTConnectionStatus>;
+			chatGPTCancelSignIn?: () => Promise<ChatGPTConnectionStatus>;
+			chatGPTOpenAuthorization?: () => Promise<ChatGPTConnectionStatus>;
+			chatGPTDisconnect?: () => Promise<ChatGPTConnectionStatus>;
 			/** Auto-update channel (Wave C, 2026-10-10): "lh:update-status" pushes once a staged update exists. */
 			onUpdateStatus?: (cb: (status: { status: string; version: string | null }) => void) => () => void;
 			installUpdate?: () => void;
@@ -680,6 +694,7 @@ function SessionsSidebar() {
 				    labels room; teaching keeps the original draft route,
 				    practice carries its mode. */}
 				<div className="mx-3 mb-2 flex flex-col gap-1.5">
+					<Link href="/training" className="rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent">Quant training</Link>
 					<button
 						type="button"
 						data-testid="new-session"

@@ -1,0 +1,198 @@
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createRequire } from "node:module";
+import { afterEach, describe, it } from "node:test";
+import {
+	CHATGPT_PROVIDER_ID,
+	ChatGPTBrokerCredentialStore,
+	getChatGPTBrokerStatus,
+	getChatGPTBrokerModels,
+} from "../src/agent/chatgpt-broker.ts";
+import { piEngineForSpec } from "../src/agent/models.ts";
+import { modelCatalog, validateModelsSettings, validateAccountAwareChatSettings, validateAccountAwareModelsSettings, validateAccountAwareAgentModels } from "../src/server/model-catalog.ts";
+
+const require = createRequire(import.meta.url);
+const { createEncryptedCredentialStore } = require("../electron/chatgpt-oauth.cjs") as {
+	createEncryptedCredentialStore: (
+		filePath: string,
+		safeStorage: {
+			isEncryptionAvailable(): boolean;
+			encryptString(value: string): Buffer;
+			decryptString(value: Buffer): string;
+		},
+	) => {
+		read(providerId: string): Promise<Record<string, unknown> | undefined>;
+		list(): Promise<Array<{ providerId: string; type: string }>>;
+		modify(
+			providerId: string,
+			fn: (current: Record<string, unknown> | undefined) => Promise<Record<string, unknown>>,
+		): Promise<Record<string, unknown> | undefined>;
+		delete(providerId: string): Promise<void>;
+	};
+};
+
+const originalBrokerUrl = process.env.LH_CHATGPT_BROKER_URL;
+const originalBrokerSecret = process.env.LH_CHATGPT_BROKER_SECRET;
+const originalOpenAIKey = process.env.OPENAI_API_KEY;
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+	if (originalBrokerUrl === undefined) delete process.env.LH_CHATGPT_BROKER_URL;
+	else process.env.LH_CHATGPT_BROKER_URL = originalBrokerUrl;
+	if (originalBrokerSecret === undefined) delete process.env.LH_CHATGPT_BROKER_SECRET;
+	else process.env.LH_CHATGPT_BROKER_SECRET = originalBrokerSecret;
+	if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
+	else process.env.OPENAI_API_KEY = originalOpenAIKey;
+	globalThis.fetch = originalFetch;
+});
+
+describe("ChatGPT OAuth provider alias", () => {
+	it("refuses every non-loopback or redirect-capable broker URL before sending the bearer capability", async () => {
+		const oldUrl=process.env.LH_CHATGPT_BROKER_URL;
+		const oldSecret=process.env.LH_CHATGPT_BROKER_SECRET;
+		const oldFetch=globalThis.fetch;
+		try {
+			process.env.LH_CHATGPT_BROKER_SECRET="sensitive-broker-capability";
+			globalThis.fetch=async()=>{ throw new Error("Broker must not access the network"); };
+			for(const url of [
+				"https://evil.example:443","http://evil.example:3000","http://localhost:3000",
+				"http://127.0.0.1:3000/path", "http://user@127.0.0.1:3000",
+				"http://127.0.0.1:3000/?redirect=1","javascript:alert(1)",
+			]) {
+				process.env.LH_CHATGPT_BROKER_URL=url;
+				assert.deepEqual(await getChatGPTBrokerStatus(),{available:false,connected:false});
+				assert.deepEqual(await getChatGPTBrokerModels(),[]);
+			}
+		}finally{
+			if(oldUrl===undefined)delete process.env.LH_CHATGPT_BROKER_URL;
+			else process.env.LH_CHATGPT_BROKER_URL=oldUrl;
+			if(oldSecret===undefined)delete process.env.LH_CHATGPT_BROKER_SECRET;
+			else process.env.LH_CHATGPT_BROKER_SECRET=oldSecret;
+			globalThis.fetch=oldFetch;
+		}
+	});
+
+	it("adds a separate ChatGPT catalog without replacing OpenAI API-key models", () => {
+		process.env.LH_CHATGPT_BROKER_URL = "http://127.0.0.1:12345";
+		process.env.LH_CHATGPT_BROKER_SECRET = "test-secret";
+		process.env.OPENAI_API_KEY = "sk-test";
+
+		const catalog = modelCatalog({ chatGPTConnected: true });
+		const openAI = catalog.models.filter((model) => model.provider === "openai");
+		const chatGPT = catalog.models.filter((model) => model.provider === CHATGPT_PROVIDER_ID);
+
+		assert.ok(openAI.length > 0);
+		assert.deepEqual(chatGPT.map((model) => model.id), openAI.map((model) => model.id));
+		assert.equal(catalog.providers.find((provider) => provider.id === CHATGPT_PROVIDER_ID)?.keyPresent, true);
+		assert.deepEqual(
+			validateModelsSettings({ strong: { model: { provider: CHATGPT_PROVIDER_ID, id: chatGPT[0]!.id } } }),
+			{ ok: true },
+		);
+
+		const engine = piEngineForSpec({ provider: CHATGPT_PROVIDER_ID, id: chatGPT[0]!.id });
+		assert.equal(engine.model.provider, "openai");
+		assert.equal(engine.providerId, CHATGPT_PROVIDER_ID, "billing gate must use the subscription provider, not OpenAI API key transport");
+	});
+
+	it("projects broker tokens as OAuth credentials without persisting them in Next", async () => {
+		process.env.LH_CHATGPT_BROKER_URL = "http://127.0.0.1:12345";
+		process.env.LH_CHATGPT_BROKER_SECRET = "test-secret";
+		globalThis.fetch = async (_input, init) => {
+			assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-secret");
+			return Response.json({ accessToken: "oauth-access-token", expires: Date.now() + 3_600_000 });
+		};
+
+		const credential = await new ChatGPTBrokerCredentialStore().read("openai");
+		assert.equal(credential?.type, "oauth");
+		assert.equal(credential && "access" in credential ? credential.access : undefined, "oauth-access-token");
+	});
+});
+
+describe("Electron ChatGPT credential storage", () => {
+	it("encrypts the persisted credential and can read it after restart", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "learnharness-chatgpt-"));
+		const file = path.join(directory, "chatgpt-oauth.enc.json");
+		const key = crypto.randomBytes(32);
+		const safeStorage = {
+			isEncryptionAvailable: () => true,
+			encryptString(value: string) {
+				const iv = crypto.randomBytes(12);
+				const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+				const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+				return Buffer.concat([iv, cipher.getAuthTag(), encrypted]);
+			},
+			decryptString(value: Buffer) {
+				const decipher = crypto.createDecipheriv("aes-256-gcm", key, value.subarray(0, 12));
+				decipher.setAuthTag(value.subarray(12, 28));
+				return Buffer.concat([decipher.update(value.subarray(28)), decipher.final()]).toString("utf8");
+			},
+		};
+
+		try {
+			const first = createEncryptedCredentialStore(file, safeStorage);
+			await first.modify("openai", async () => ({
+				type: "oauth",
+				access: "secret-access-token",
+				refresh: "secret-refresh-token",
+				expires: Date.now() + 3_600_000,
+			}));
+
+			const raw = await fs.readFile(file, "utf8");
+			assert.doesNotMatch(raw, /secret-access-token|secret-refresh-token/);
+
+			const restarted = createEncryptedCredentialStore(file, safeStorage);
+			assert.equal((await restarted.read("openai"))?.type, "oauth");
+			assert.deepEqual(await restarted.list(), [{ providerId: "openai", type: "oauth" }]);
+			await restarted.delete("openai");
+			assert.equal(await restarted.read("openai"), undefined);
+		} finally {
+			await fs.rm(directory, { recursive: true, force: true });
+		}
+	});
+});
+
+
+describe("account-aware model write validation", () => {
+	it("refuses disconnected, unauthorized, or unsupported ChatGPT picks BEFORE storing settings", async () => {
+		const saved = {
+			brokerUrl: process.env.LH_CHATGPT_BROKER_URL,
+			brokerSecret: process.env.LH_CHATGPT_BROKER_SECRET,
+			fetch: globalThis.fetch,
+		};
+		const modelId = modelCatalog({chatGPTConnected: true}).models.find((m) => m.provider === "openai-chatgpt")!.id;
+		try {
+			process.env.LH_CHATGPT_BROKER_URL = "http://127.0.0.1:32199";
+			process.env.LH_CHATGPT_BROKER_SECRET = "synthetic-secret";
+			let connected = false;
+			let allowed: string[] = [];
+			globalThis.fetch = async (input) => {
+				const url = String(input);
+				if (url.endsWith("/v1/status")) return Response.json({available:true,connected});
+				if (url.endsWith("/v1/models")) return Response.json({models: allowed.map(id => ({id, name:id}))});
+				throw new Error("Unexpected request " + url);
+			};
+			const input = {model:{provider:"openai-chatgpt",id:modelId}};
+			assert.equal((await validateAccountAwareChatSettings(input)).ok,false);
+			connected = true;
+			assert.equal((await validateAccountAwareChatSettings(input)).ok,false);
+			allowed = [modelId];
+			assert.equal((await validateAccountAwareChatSettings(input)).ok,true);
+			assert.equal((await validateAccountAwareModelsSettings({strong:input})).ok,true);
+			assert.equal((await validateAccountAwareAgentModels({models:{researcher:input}})).ok,true);
+			allowed = [];
+			assert.equal((await validateAccountAwareModelsSettings({strong:input})).ok,false);
+			assert.equal((await validateAccountAwareAgentModels({models:{researcher:input}})).ok,false);
+			const invalid = {model:{provider:"invented-provider",id:"ghost-model"}};
+			assert.equal((await validateAccountAwareAgentModels({models:{researcher:invalid}})).ok,false);
+		} finally {
+			if(saved.brokerUrl === undefined) delete process.env.LH_CHATGPT_BROKER_URL;
+			else process.env.LH_CHATGPT_BROKER_URL = saved.brokerUrl;
+			if(saved.brokerSecret === undefined) delete process.env.LH_CHATGPT_BROKER_SECRET;
+			else process.env.LH_CHATGPT_BROKER_SECRET = saved.brokerSecret;
+			globalThis.fetch = saved.fetch;
+		}
+	});
+});

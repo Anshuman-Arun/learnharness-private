@@ -19,6 +19,7 @@
 
 import { Type, type Static } from "typebox";
 import { stripModelValueDebris } from "./value-debris.ts";
+import { evidenceDescription, parseLearningEvidence, type LearningEvidence } from "./learning-evidence.ts";
 
 // ─── shared types ───────────────────────────────────────────────────────────
 
@@ -274,7 +275,15 @@ export const quizInputObject = Type.Object({
  *  teacher, so nothing invites misuse). Structurally identical to
  *  quizInputBase (the old superRefine never reached the wire — it ran at
  *  the call boundary, where quizInputProblems runs now). */
-export const probeQuizInputSchema = quizInputBase;
+/** Optional canonical knowledge goal for cross-session diagnostic evidence.
+ * This is NOT a plan nodeId: there is no lesson plan in the probe phase.
+ * The server only binds it if it resolves to a real shared concept. */
+export const probeQuizInputSchema = Type.Object({
+	...quizInputBase.properties,
+	conceptId: Type.Optional(Type.String({
+		description: "Optional EXACT canonical concept id returned by list_learning_concepts. Include only when the question directly tests that concept; otherwise omit.",
+	})),
+});
 
 /** The DISPLAY parse for persisted quiz calls (tool-parts.ts): the base
  *  + `type` as an OPTIONAL plain string (old records carry none, and
@@ -315,6 +324,14 @@ export const explainInputBase = Type.Object({
 	details: Type.Optional(
 		Type.String({ description: "Optional extra context or instructions shown under the question." }),
 	),
+});
+
+/** Optional canonical concept binding in the probing/free-recall phase. */
+export const probeExplainInputSchema = Type.Object({
+	...explainInputBase.properties,
+	conceptId: Type.Optional(Type.String({
+		description: "Optional EXACT canonical concept id returned by list_learning_concepts. Include only when this question tests the known concept; otherwise omit.",
+	})),
 });
 
 /** The TEACH-side explain object: base + the plan-position field (same
@@ -434,6 +451,7 @@ export interface QuestionData {
  *  NO questionId (owner, tool-result diet 2026-10-02): it was the
  *  toolCallId restated — the toolResult message already carries it. */
 export interface QuestionAnswerData {
+	evidence?: LearningEvidence;
 	kind: QuestionKind;
 	/** The persisted call's tool NAME (owner, 2026-10-09): probe-phase
 	 *  calls are `probe`/`recall`, teach calls `quiz`/`explain` — the
@@ -483,6 +501,7 @@ export interface ClientQuestion {
 
 /** What the server passes to the bridge when the learner answers. */
 export interface AnswerRequest {
+	evidence?: LearningEvidence;
 	dontKnow?: boolean;
 	values?: string[]; // option values
 	other?: string; // ask "Other"
@@ -692,6 +711,7 @@ function formatOptionRef(options: QuizOption[], index: number): string {
  */
 export function buildAnswer(qd: QuestionData, req: AnswerRequest, tool?: string): QuestionAnswerData {
 	const base: QuestionAnswerData = {
+		...(req.evidence ? { evidence: parseLearningEvidence(req.evidence) } : {}),
 		kind: qd.kind,
 		...(tool ? { tool } : {}),
 		questionType: qd.questionType,
@@ -783,5 +803,6 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	const thinking = ad.thinking ?? ad.note;
 	if (thinking) out.thinking = thinking;
 	if (ad.readingThinking) out.thinkingWhileReading = ad.readingThinking;
+	if (ad.evidence) out.submittedWork = evidenceDescription(ad.evidence);
 	return out;
 }
