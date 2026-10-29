@@ -35,9 +35,10 @@ describe("editorial accessibility and palette", () => {
     }
     assert.ok(css.includes("--primary:#946321"),"corrected amber");
   });
-  it("the real LearnHarness logo is accent/ink colored and offline bundled fonts are declared",()=>{
+  it("the real LearnHarness logo is uniformly accent colored and offline bundled fonts are declared",()=>{
     assert.ok(logo.includes("var(--primary, #d47760)"));
-    assert.ok(logo.includes("var(--foreground, #f3eee5)"));
+    assert.equal((logo.match(/var\(--primary, #d47760\)/g) ?? []).length, 3);
+    assert.ok(!logo.includes("var(--foreground, #f3eee5)"));
     assert.ok(layout.includes("Newsreader"));
     assert.ok(layout.includes("IBM_Plex_Sans"));
     assert.ok(css.includes("--font-plex"));
