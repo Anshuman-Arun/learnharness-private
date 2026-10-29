@@ -183,6 +183,10 @@ try{
     const ctx=await newPage(mode);
     const {page}=ctx;
     await open(ctx,"/");
+    await page.waitForSelector('[data-testid="dashboard-home"]',{timeout:25000});
+    await snap(ctx,"study-desk-"+mode);
+    // Graph must be one click away, with the ORIGINAL mini-DAG renderer.
+    await page.click('[data-testid="home-surface-toggle"]');
     await page.waitForSelector('svg[aria-label="Plan diagram"]',{timeout:25000});
     await snap(ctx,"home-"+mode);
     // Verify all seven selectable accent colors on the real brand mark.
@@ -201,8 +205,8 @@ try{
       },color);
       assert.ok(contrast(rgb(palette.background),rgb(palette.primary))>=3,
         `accent ${color} legible on ${mode}`);
-      assert.equal(palette.fills[0],palette.fills[2],
-        `accent ${color} has no mismatched terminal color`);
+      assert.ok(palette.fills.every(fill=>fill===palette.fills[0]),
+        `accent ${color} must color every spiral shape consistently`);
       const brand=await page.$(".lh-editorial-brand");
       assert.ok(brand,"Brand link exists");
       await brand.screenshot({path:join(out,`brand-${mode}-${color}.png`)});
@@ -275,10 +279,8 @@ try{
     const bg=rgb(row.background),fg=rgb(row.foreground),primary=rgb(row.primary);
     assert.ok(contrast(bg,fg)>=7,`base text contrast ${row.name}`);
     assert.ok(contrast(bg,primary)>=3,`brand-accent contrast ${row.name}`);
-    assert.equal(row.logoPaths[0],row.logoPaths[2],
-      `spiral and filled dot must share exact saved accent ${row.name}`);
-    assert.notEqual(row.logoPaths[1],row.logoPaths[2],
-      `outlined terminal uses independent theme ink ${row.name}`);
+    assert.ok(row.logoPaths.every(fill=>fill===row.logoPaths[0]),
+      `all spiral shapes share exact saved accent ${row.name}`);
   }
   console.log("PAGE-AUDIT",JSON.stringify({pass:true,
     screenshots:audit.map(r=>r.name),themes:[...new Set(audit.map(r=>r.mode))],
