@@ -572,3 +572,71 @@ html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Pl
 @media (max-width:540px) {
   [data-lh-editorial="v10"] .lh-editorial-home-masthead { display:none; }
 }
+
+
+/* Compact, numbered editorial navigation (design review). The numeric
+   glyphs are deliberately 11px inside 29 × 28px chips; the original
+   13px+ appearance was too tight in the screenshot's boxes. */
+[data-lh-editorial="v10"] .lh-sidebar-numbered-nav {
+  display:grid; gap:6px;
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-heading {
+  padding:2px 3px 7px;
+  color:var(--muted-foreground);
+  font:600 10px/1.2 var(--font-mono);
+  letter-spacing:.14em; text-transform:uppercase;
+}
+[data-lh-editorial="v10"] .lh-sidebar-numbered-nav .lh-sidebar-nav-item {
+  display:grid;
+  width:100%;
+  min-height:43px;
+  grid-template-columns:29px minmax(0,1fr) 12px;
+  gap:10px;
+  align-items:center;
+  padding:6px 10px;
+  color:var(--muted-foreground);
+  border:1px solid var(--lh-editorial-border-subtle);
+  border-radius:var(--lh-control-radius);
+  background:color-mix(in srgb,var(--card) 50%,transparent);
+  text-align:left;
+  font:500 13px/1.25 var(--lh-font-ui);
+  letter-spacing:0;
+  text-transform:none;
+  transition:background-color .12s ease,border-color .12s ease,color .12s ease;
+}
+[data-lh-editorial="v10"] .lh-sidebar-numbered-nav .lh-sidebar-nav-item:hover {
+  color:var(--foreground);
+  background:var(--lh-editorial-surface-hover);
+  border-color:var(--border);
+}
+[data-lh-editorial="v10"] .lh-sidebar-numbered-nav .lh-sidebar-nav-item[aria-current="page"] {
+  color:var(--foreground);
+  background:var(--card);
+  border-color:var(--border);
+  box-shadow:3px 3px 0 rgb(0 0 0 / .09);
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-number {
+  display:grid; place-items:center;
+  width:29px; height:28px;
+  border:1px solid var(--border);
+  border-radius:var(--lh-control-radius);
+  color:var(--muted-foreground);
+  font:600 11px/1 var(--font-mono);
+  letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-item[aria-current="page"] .lh-sidebar-nav-number {
+  color:var(--primary);
+  border-color:var(--primary);
+  background:var(--lh-highlight-wash);
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-copy {
+  min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap;
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-arrow {
+  color:var(--primary); font-size:13px; text-align:right;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-lh-editorial="v10"] .lh-sidebar-nav-item { transition:none; }
+}
