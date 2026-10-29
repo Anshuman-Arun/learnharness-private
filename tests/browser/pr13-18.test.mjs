@@ -26,7 +26,7 @@ test('pre-merge production browser workflows', { timeout: 600000 }, async t => {
  const certFile = path.join(temporary, 'tablet/cert.pem'), keyFile = path.join(temporary, 'tablet/key.pem');
  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-keyout', keyFile, '-out', certFile, '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'], { stdio: 'ignore' });
  const cert = fs.readFileSync(certFile), key = fs.readFileSync(keyFile);
- const port = 3107, origin = `http://127.0.0.1:${port}`;
+ const port = 3117, origin = `http://127.0.0.1:${port}`;
  const tablet = createTabletServer({ key, cert, controlToken: loadTabletControlToken(), backendUrl: origin, publicUrl: 'https://localhost' }); await listen(tablet);
  // Browser-only loopback adapter; real HTTPS upstream always verifies the explicit test CA.
  let holdNextScene = false, releaseScene;

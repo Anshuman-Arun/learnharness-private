@@ -1,24 +1,26 @@
 # Feature delivery and review map
 
-All 15 features are implemented on separate pushed branches. They form a stack so each intended PR uses the preceding branch as its base; main has not been changed or merged. The final branch includes the full implementation. **No PRs have been created:** GitHub's API (`api.github.com/graphql`) returns proxy Forbidden in this cloud environment, although Git HTTPS pushes work. PR descriptions and base/head pairs are prepared in [feature-prs.json](feature-prs.json).
+At the 2026-10-28 review, PRs **#8–#18 are merged** after Windows quality and standalone validation. The remaining feature PRs **#19–#22** and [validation PR #23](https://github.com/Anshuman-Arun/learnharness-private/pull/23) remain open. #19 targets main; each later PR targets its preceding feature branch. Merge the remaining stack in order, retargeting the next PR to main after its parent lands. Tablet reconnect/concurrency/Windows fixes are already present from #14; #23 adds validation coverage and evidence. See [pre-merge-validation.md](pre-merge-validation.md).
 
-| Feature | Head branch | Intended base |
-|---|---|---|
-| Reversible session Guided / Explain control and answer reveal | `feat/session-teaching-mode` | `main` |
-| Question-linked sketch, dictation and code evidence | `feat/multimodal-learning-evidence` | `feat/session-teaching-mode` |
-| Zetamac-style arithmetic arena | `feat/quant-arithmetic-arena` | `feat/multimodal-learning-evidence` |
-| Persistent multi-file C++ / Monaco workspace | `feat/cpp-workspace` | `feat/quant-arithmetic-arena` |
-| Isolated C++20 compiler, runs, cases and sanitizers | `feat/isolated-cpp-runner` | `feat/cpp-workspace` |
-| Persistent vector scratchpad and question capture | `feat/session-scratchpad` | `feat/isolated-cpp-runner` |
-| Scoped HTTPS Windows/iPad drawing companion | `feat/ipad-companion` | `feat/session-scratchpad` |
-| Estimation and confidence calibration | `feat/estimation-confidence` | `feat/ipad-companion` |
-| Predict-first probability experiment lab | `feat/probability-experiment-lab` | `feat/estimation-confidence` |
-| Finite-horizon optimal stopping and policy comparison | `feat/optimal-stopping-lab` | `feat/probability-experiment-lab` |
-| Timed sectioned quant OA simulator | `feat/timed-quant-oa` | `feat/optimal-stopping-lab` |
-| Source-linked mistake notebook and targeted retries | `feat/mistake-notebook` | `feat/timed-quant-oa` |
-| Spaced retrieval, snooze and explainable intervals | `feat/spaced-retrieval` | `feat/mistake-notebook` |
-| Twelve 4.5-hour quant curricula and exit checks | `feat/quant-study-sprints` | `feat/spaced-retrieval` |
-| Server-owned C++ challenges and hidden checks | `feat/cpp-challenge-judge` | `feat/quant-study-sprints` |
+Descriptions and base/head pairs are in [feature-prs.json](feature-prs.json).
+
+| Feature | Head branch | Base | PR |
+|---|---|---|---|
+| Reversible session Guided / Explain control and answer reveal | `feat/session-teaching-mode` | `main` | [#8](https://github.com/Anshuman-Arun/learnharness-private/pull/8) |
+| Question-linked sketch, dictation and code evidence | `feat/multimodal-learning-evidence` | `main` | [#9](https://github.com/Anshuman-Arun/learnharness-private/pull/9) |
+| Zetamac-style arithmetic arena | `feat/quant-arithmetic-arena` | `main` | [#10](https://github.com/Anshuman-Arun/learnharness-private/pull/10) |
+| Persistent multi-file C++ / Monaco workspace | `feat/cpp-workspace` | `main` | [#11](https://github.com/Anshuman-Arun/learnharness-private/pull/11) |
+| Isolated C++20 compiler, runs, cases and sanitizers | `feat/isolated-cpp-runner` | `main` | [#12](https://github.com/Anshuman-Arun/learnharness-private/pull/12) |
+| Persistent vector scratchpad and question capture | `feat/session-scratchpad` | `main` | [#13](https://github.com/Anshuman-Arun/learnharness-private/pull/13) |
+| Scoped HTTPS Windows/iPad drawing companion | `feat/ipad-companion` | `main` | [#14](https://github.com/Anshuman-Arun/learnharness-private/pull/14) |
+| Estimation and confidence calibration | `feat/estimation-confidence` | `main` | [#15](https://github.com/Anshuman-Arun/learnharness-private/pull/15) |
+| Predict-first probability experiment lab | `feat/probability-experiment-lab` | `main` | [#16](https://github.com/Anshuman-Arun/learnharness-private/pull/16) |
+| Finite-horizon optimal stopping and policy comparison | `feat/optimal-stopping-lab` | `main` | [#17](https://github.com/Anshuman-Arun/learnharness-private/pull/17) |
+| Timed sectioned quant OA simulator | `feat/timed-quant-oa` | `main` | [#18](https://github.com/Anshuman-Arun/learnharness-private/pull/18) |
+| Source-linked mistake notebook and targeted retries | `feat/mistake-notebook` | `main` | [#19](https://github.com/Anshuman-Arun/learnharness-private/pull/19) |
+| Spaced retrieval, snooze and explainable intervals | `feat/spaced-retrieval` | `feat/mistake-notebook` | [#20](https://github.com/Anshuman-Arun/learnharness-private/pull/20) |
+| Twelve 4.5-hour quant curricula and exit checks | `feat/quant-study-sprints` | `feat/spaced-retrieval` | [#21](https://github.com/Anshuman-Arun/learnharness-private/pull/21) |
+| Server-owned C++ challenges and hidden checks | `feat/cpp-challenge-judge` | `feat/quant-study-sprints` | [#22](https://github.com/Anshuman-Arun/learnharness-private/pull/22) |
 
 The original twelve-feature proposal is covered. Teaching control and multimodal evidence address the subsequent feedback; the challenge judge completes the hidden-check portion of the runner scope. No PDF feature was added. More than ten features remain even excluding evidence and drawing work.
 
@@ -33,16 +35,14 @@ Quant topics, sequencing and readiness criteria are in [quant-study-sprints.md](
 ## Verification
 
 - Frozen-lockfile `npm ci` passed and rebuilt local Monaco, Excalidraw and companion assets.
-- All **1,976** default tests passed; typecheck and architectural lint passed.
+- All **1,977** default tests passed; typecheck and architectural lint passed.
 - Seven real Docker runner tests passed for compilation/cases, diagnostics, isolation, timeout/output limits, sanitizers, cancellation/authentication and cleanup.
 - The additional real judge integration compiled three general solutions and two deliberately wrong/echoing programs, checking hidden-output redaction and persisted source snapshots.
 - Certificate-verified HTTPS integration passed for pairing, page scope, replay/reconnect, notice assets and revocation. Deterministic tests cover expiry, rate limits and offline merging.
 - Chromium checks exercised each visible feature, including two-browser drawing sync, code/report and sprint teaching/practice handoffs, reload recovery, delayed references and correction/review workflows.
 - Native image/code provider transport was tested through an injected provider. Paid live model behavior and improved retention were not measured. Physical iPad/Pencil pressure/palm rejection and Windows certificate setup require device validation.
-- Development HTTP pages work. Production build remains blocked on Google Fonts downloads under the current network policy; it has not passed. Electron packaging was not validated.
+- The optimized production build and supported standalone bundle startup now pass. Electron installer packaging and physical device behavior remain separate checks.
 
-## Remaining external action
+## Review status
 
-The saved cloud draft includes the Node/install/start instructions, C++/tablet service instructions, and custom network additions `api.github.com`, `fonts.googleapis.com`, `fonts.gstatic.com`. Review and save the changes in environment settings, then publish the environment. Saving a draft does not apply runtime policy or publish a snapshot.
-
-After that policy is active, verify GitHub API access, create one PR per row with the recorded base/head and prepared description, and attach every created PR to the task. Do not merge automatically. Re-run the font-dependent production build after font access is available. No new GitHub token is required merely because the current proxy denies API traffic.
+GitHub API and Google Fonts access now work. All 15 feature PRs and validation PR #23 were created and attached to the task. The iPad PR's typecheck/tests/lint and standalone Linux, macOS and Windows checks passed; remaining PR check results are available on GitHub. Every PR remains a draft and nothing has been merged. Review the expanded validation/fixes together with the feature stack before merging. Physical iPad/Safari/Pencil validation still requires the user's device.

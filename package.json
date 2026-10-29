@@ -28,7 +28,8 @@
 		"dev:fresh": "bash scripts/dev-fresh.sh",
 		"desktop:dist": "rm -rf dist .next/standalone && next build && node scripts/build-server.mjs && node scripts/smoke-server.mjs && DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} APPLE_KEYCHAIN_PROFILE=LH_NOTARY APPLE_TEAM_ID=JS6XN22HY6 electron-builder --mac --arm64",
 		"test:tablet": "node --import tsx --test tests/runner/tablet-service.test.mjs",
-		"test:cpp-challenges": "node --import tsx --test tests/runner/cpp-challenges.test.mjs"
+		"test:cpp-challenges": "node --import tsx --test tests/runner/cpp-challenges.test.mjs",
+		"test:premerge": "npm run build && node scripts/build-server.mjs && node --import tsx --test tests/browser/premerge.test.mjs tests/browser/pr13-18.test.mjs tests/browser/scratchpad-drafts.test.mjs"
 	},
 	"dependencies": {
 		"@earendil-works/pi-agent-core": "1.4.0",

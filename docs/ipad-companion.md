@@ -38,3 +38,7 @@ In Scratch work on the PC, choose **Pair iPad**. Open the displayed HTTPS addres
 `npm run test:tablet` tests real certificate-verified HTTPS, single-use codes, scoped access, acknowledged replay, reconnect and desktop revocation. `tests/tablet.test.ts` tests expiry/rate limits, page isolation and offline recovery. Local Chromium interaction checks exercise pairing and drawing. Physical iPad/Apple Pencil pressure, Safari storage behavior and palm rejection require testing on your device; these have not been verified in the cloud environment.
 
 Excalidraw supplies the drawing interface under MIT; see `third-party/excalidraw-LICENSE` and font notices. No third-party screen-sharing driver is needed. EasyCanvas or Astropad are separate options if you also want to use the iPad as a general Windows pen display.
+
+## Additional pre-merge regressions
+
+The production-browser suite now checks touch pressure, portrait/landscape rotation, offline reload recovery, delayed acknowledgments, switching paired pages and reclaiming PC editing when the helper is down. It also captures the synced drawing into session evidence. It found and fixed pending-frame/late-response state surviving a pairing change. A concurrent HTTPS regression now enforces one writer when two PC tabs pair simultaneously. See [pre-merge-validation.md](pre-merge-validation.md) for reproduction and hardware limits.
