@@ -1,0 +1,114 @@
+name: Build main snapshot Windows installer
+
+on:
+  push:
+    branches:
+      - build/main-0c075b1-windows-installer
+
+permissions:
+  contents: write
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  MAIN_SNAPSHOT_SHA: "0c075b1e149c77158772f5b985575a1ac464d854"
+  npm_config_script_shell: 'C:\Program Files\Git\bin\bash.exe'
+
+jobs:
+  installer:
+    name: Build signed-out-safe Windows setup EXE from main
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Check out main snapshot (plus workflow only)
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+
+      - name: Verify app source matches original main
+        shell: pwsh
+        run: |
+          $parent = (git rev-parse HEAD^).Trim()
+          if ($parent -ne $env:MAIN_SNAPSHOT_SHA) { throw "Unexpected base. Refusing to build a non-main snapshot." }
+          $changed = @(git diff --name-only $env:MAIN_SNAPSHOT_SHA HEAD)
+          if ($changed.Count -ne 1 -or $changed[0] -ne ".github/workflows/build-main-snapshot-installer.yml") { throw "Unexpected source changes: $changed" }
+          Write-Host "Building exact app sources from main commit $env:MAIN_SNAPSHOT_SHA"
+
+      - name: Install reproducible dependencies
+        run: npm ci
+
+      - name: Validate types and lint
+        run: |
+          npm run typecheck
+          if ($LASTEXITCODE -ne 0) { throw "Typecheck failed" }
+          npm run lint
+          if ($LASTEXITCODE -ne 0) { throw "Lint failed" }
+        shell: pwsh
+
+      - name: Run regression tests
+        run: npm test
+        env:
+          NODE_ENV: test
+
+      - name: Build and smoke-test standalone Electron server
+        shell: pwsh
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "Web build failed" }
+          node scripts/build-server.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Standalone bundle failed" }
+          node scripts/smoke-server.mjs --electron
+          if ($LASTEXITCODE -ne 0) { throw "Server smoke failed" }
+          node scripts/pr20-isolate-package.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Private identity check failed" }
+
+      - name: Build NSIS single-file Windows setup EXE
+        shell: pwsh
+        run: |
+          npx.cmd --no-install electron-builder --win nsis --x64 --publish never
+          if ($LASTEXITCODE -ne 0) { throw "Windows setup build failed" }
+
+      - name: Verify installer and capture SHA-256
+        id: exe
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -LiteralPath dist -Filter "*-setup.exe" -File | Select-Object -First 1
+          if (-not $exe) { throw "No Windows setup EXE created" }
+          if ($exe.Length -lt 20000000) { throw "Suspiciously small Windows EXE" }
+          $hash = (Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash
+          Write-Host "Installer: $($exe.Name); size: $($exe.Length); sha256: $hash"
+          "installer=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "filename=$($exe.Name)" >> $env:GITHUB_OUTPUT
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Preserve exact installer in Actions artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: main-0c075b1-windows-installer
+          path: dist/*-setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish direct EXE download on private GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "main-0c075b1-windows"
+          $title = "LearnHarness Private for Windows - main 0c075b1 (no PR #6)"
+          $notes = @"
+          This release is built from LearnHarness Private main commit $env:MAIN_SNAPSHOT_SHA.
+          Its only additional commit is a build workflow; the application code is unchanged.
+          PR #6 and all editorial UI changes are excluded.
+          Download the attached `.exe` setup directly; no source ZIP extraction required.
+          Windows may show SmartScreen warnings because the setup is unsigned.
+          The installer creates a distinct LearnHarness Private profile. Back up any prior data first.
+          SHA256: ${{ steps.exe.outputs.sha256 }}
+          "@
+          gh release create $tag "${{ steps.exe.outputs.installer }}" --target $env:MAIN_SNAPSHOT_SHA --title $title --notes $notes --prerelease
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish private release" }
+          gh release view $tag --json url,assets
+          if ($LASTEXITCODE -ne 0) { throw "Release verification failed" }
