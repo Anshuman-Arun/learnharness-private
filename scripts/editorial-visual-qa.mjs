@@ -71,9 +71,12 @@ try {
       return void request.continue();
     });
     await page.goto(base,{waitUntil:"networkidle2",timeout:60000});
+    await page.waitForSelector('[data-testid="dashboard-home"]',{timeout:30000});
+    await page.screenshot({path:join(outDir,`study-desk-dark-${size.width}x${size.height}.png`),fullPage:false});
+    await page.click('[data-testid="home-surface-toggle"]');
+    // The original PlanDiagram SVG remains the graph's default renderer;
+    // the physics Atlas is still selectable from within that graph.
     await page.waitForSelector("canvas",{timeout:30000});
-    // The original PlanDiagram SVG, not a field of circle glyphs, must be
-    // the first-frame/default home graph. The canvas remains as Atlas.
     await page.waitForSelector('svg[aria-label="Plan diagram"]',{timeout:30000});
     await new Promise(r=>setTimeout(r,1200)); // allow graph bitmap and fonts to settle
     await page.evaluate(()=>document.fonts.ready);
