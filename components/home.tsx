@@ -33,6 +33,25 @@ export function Home({
 }) {
 	const router = useRouter();
 	const [showAtlas, setShowAtlas] = useState(false);
+	// The numbered sidebar and the Home graph toggle share the same view
+	// state. Deep-linking from Learning map/Training to Knowledge opens the
+	// original atlas without a new route or a duplicate graph renderer.
+	useEffect(() => {
+		const showRequestedAtlas = new URLSearchParams(window.location.search).get("view") === "atlas";
+		if (showRequestedAtlas) setShowAtlas(true);
+		const onHomeView = (event: Event) => {
+			const view = (event as CustomEvent<"home" | "knowledge">).detail;
+			if (view === "home" || view === "knowledge") setShowAtlas(view === "knowledge");
+		};
+		window.addEventListener("lh:home-view", onHomeView);
+		return () => window.removeEventListener("lh:home-view", onHomeView);
+	}, []);
+	useEffect(() => {
+		window.dispatchEvent(new CustomEvent("lh:home-surface", {
+			detail: showAtlas ? "knowledge" : "home",
+		}));
+	}, [showAtlas]);
+
 	const [topic, setTopic] = useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
 	 * mechanics as the chat composer, owner's consistency ruling): a
