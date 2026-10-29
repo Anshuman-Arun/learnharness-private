@@ -13,7 +13,6 @@ function StudyPrints() {
   return (
     <div className="lh-study-prints" aria-hidden="true">
       <figure className="lh-study-print">
-        <div className="lh-study-print-meta"><span>FIELD NOTE 07</span><span>GRAPH THEORY</span></div>
         <svg viewBox="0 0 165 205" role="presentation">
           <g className="lh-study-print-lines" fill="none" strokeWidth="1">
             <path d="M23 45L49 26L68 49L23 45L37 81L68 49L91 75L37 81L68 49M91 75L119 47L143 72L91 75L124 106L143 72M23 45L19 127L52 149L84 129L37 81L52 149M84 129L124 106L144 147L106 168L84 129L52 149L79 187L106 168L144 147"/>
@@ -27,7 +26,6 @@ function StudyPrints() {
         <figcaption>Connected ideas<span>STUDIES IN STRUCTURE</span></figcaption>
       </figure>
       <figure className="lh-study-print lh-study-print-second">
-        <div className="lh-study-print-meta"><span>FIELD NOTE 12</span><span>PROBABILITY</span></div>
         <svg viewBox="0 0 165 205" role="presentation">
           <g className="lh-study-print-lines" fill="none" strokeWidth=".8">
             <path d="M17 180V23M17 180H152"/>
@@ -89,7 +87,6 @@ export function DashboardHome({ onOpenAtlas }: { onOpenAtlas: () => void }) {
       <div className="lh-study-inner">
         <div className="lh-study-hero">
           <div className="lh-study-hero-copy">
-            <div className="lh-study-kicker">A SPACE FOR DEEPER THINKING</div>
             <h1>Follow your<br/><em>curiosity.</em></h1>
             <p>A living notebook of lessons, connections and open questions. Pick up a thought or begin somewhere new.</p>
           </div>
