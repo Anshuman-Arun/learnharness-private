@@ -456,7 +456,7 @@ html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Pl
   font-family: var(--lh-font-ui); font-size: 15px; line-height: 1.65;
 }
 [data-lh-editorial="v10"] .lh-study-prints {
-  display:flex; align-items:flex-start; gap:18px; padding:3px 8px 0 0;
+  display:flex; align-items:flex-start; gap:38px; padding:3px 8px 0 0;
   flex-shrink:0; user-select:none; pointer-events:none;
 }
 [data-lh-editorial="v10"] .lh-study-print {
@@ -466,11 +466,7 @@ html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Pl
   transform: rotate(-2.5deg);
 }
 [data-lh-editorial="v10"] .lh-study-print-second { transform: rotate(2.5deg); margin-top: 25px; }
-[data-lh-editorial="v10"] .lh-study-print-meta {
-  display:flex; justify-content:space-between; gap:4px;
-  font-family: var(--font-mono); font-size:8px; font-weight:600;
-  letter-spacing: .05em; white-space: nowrap; margin-bottom: 9px;
-}
+
 [data-lh-editorial="v10"] .lh-study-print svg { display:block; width:100%; height:auto; background: #cbc3b6; }
 [data-lh-editorial="v10"] .lh-study-print-lines { stroke:#80776e; }
 [data-lh-editorial="v10"] .lh-study-print-accent-path { stroke:var(--primary); }
