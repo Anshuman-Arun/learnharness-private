@@ -2,20 +2,26 @@
  * learning map UI. Four loosely linked subjects; no hand positions,
  * clusters/colors, rerouting, or production data written. */
 import assert from "node:assert/strict";
-import {spawn,execFileSync} from "node:child_process";
-import {mkdirSync,existsSync} from "node:fs";
+import {spawn} from "node:child_process";
+import {mkdirSync,existsSync,mkdtempSync,rmSync} from "node:fs";
 import {join} from "node:path";
+import { tmpdir } from "node:os";
 import puppeteer from "puppeteer-core";
 import {exampleFields,exampleBridges,exampleGlobalLearningGraph as fixture}
   from "./fixtures/global-learning-four-fields.mjs";
 
 const dir=join(process.cwd(),"artifacts","global-learning-large");
 mkdirSync(dir,{recursive:true});
-const chrome=["/usr/bin/google-chrome","/usr/bin/google-chrome-stable","/usr/bin/chromium","/usr/bin/chromium-browser"].find(existsSync)
-  ??execFileSync("which",["google-chrome"],{encoding:"utf8"}).trim();
+const chrome=[process.env.LH_CHROMIUM_PATH,process.env.CHROME_PATH,
+  process.env.PROGRAMFILES&&join(process.env.PROGRAMFILES,"Google/Chrome/Application/chrome.exe"),
+  process.env["PROGRAMFILES(X86)"]&&join(process.env["PROGRAMFILES(X86)"],"Google/Chrome/Application/chrome.exe"),
+  "/usr/bin/google-chrome","/usr/bin/google-chrome-stable","/usr/bin/chromium","/usr/bin/chromium-browser"]
+  .find(p=>p&&existsSync(p));
+assert.ok(chrome,"Chrome not found; set LH_CHROMIUM_PATH");
+const temporary=mkdtempSync(join(tmpdir(),"lh-learning-map-qa-"));
 const base="http://127.0.0.1:4382";
 const server=spawn(process.execPath,[".next/standalone/server.js"],{
-  stdio:"inherit",env:{...process.env,HOSTNAME:"127.0.0.1",PORT:"4382"}
+  stdio:"inherit",env:{...process.env,LH_DATA_DIR:join(temporary,"data"),LH_AUTH_FILE:join(temporary,"auth.json"),HOSTNAME:"127.0.0.1",PORT:"4382"}
 });
 let browser;
 function checkFixture(){
@@ -175,4 +181,4 @@ try {
     nodes:g.nodes,edges:g.edges,crossFieldLinks:exampleBridges.length,
     curvedEdges:g.curved,nodeOverlaps:0,invalidPaths:0,
     naturalSize:g.viewBox,mobileWidth:m.viewportWidth},null,2));
-} finally {await browser?.close();server.kill("SIGTERM");}
+} finally {await browser?.close();server.kill("SIGTERM");await new Promise(resolve=>{if(server.exitCode!==null||server.signalCode!==null)resolve();else server.once("exit",resolve);});rmSync(temporary,{recursive:true,force:true,maxRetries:5});}

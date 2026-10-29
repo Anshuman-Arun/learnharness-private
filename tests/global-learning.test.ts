@@ -137,3 +137,42 @@ describe("learner solutions remain linked to the exact cross-session concept",()
     assert.equal(g.concepts[0]!.ungradedChecks,1);
   });
 });
+
+it("ignores failed question executions and never grades free recall even with a stale correct flag",()=>{
+  const a=lesson("a","A",[["g","Gradient"]],[],[
+    {id:"error",nodeId:"g",correct:true},{id:"free",nodeId:"g",kind:"explain",correct:true}]);
+  (a.messages[1] as unknown as {isError:boolean}).isError=true;
+  const g=buildGlobalLearningGraph([a]);
+  assert.equal(g.concepts[0]!.evidence.length,1);
+  assert.equal(g.concepts[0]!.correctChecks,0);
+  assert.equal(g.concepts[0]!.ungradedChecks,1);
+  assert.equal(g.concepts[0]!.evidence[0]!.outcome,"ungraded");
+});
+it("counts unique canonical objectives and keeps generic multiword labels session-local",()=>{
+  for(const title of ["Learning objectives","Key concepts","Basic ideas"])
+    assert.notEqual(learningIdentity(title,"a","n"),learningIdentity(title,"b","n"));
+  const g=buildGlobalLearningGraph([lesson("a","A",[["g1","Gradient"],["g2","gradient"]],[])]);
+  assert.equal(g.sessions[0]!.concepts,1);
+});
+
+it("search keeps exactly one hop, puts matches before a capped neighborhood, and respects lesson provenance",async()=>{
+  const {learningConceptsForView,learningDependenciesForView}=await import("../src/core/global-learning.ts");
+  const g=buildGlobalLearningGraph([lesson("a","A",[["a","Alpha field"],["b","Beta field"],["z","Zebra needle"]],[["z","a"],["a","b"]])]);
+  assert.deepEqual(learningConceptsForView(g,"","needle").map(c=>c.title),["Zebra needle","Alpha field"]);
+  g.dependencies.reverse();
+  assert.deepEqual(learningConceptsForView(g,"","needle").map(c=>c.title),["Zebra needle","Alpha field"]);
+  g.dependencies.forEach(e=>e.sessions=["other"]);
+  assert.deepEqual(learningConceptsForView(g,"a","needle").map(c=>c.title),["Zebra needle"]);
+  assert.equal(learningDependenciesForView(g,new Set(g.concepts.map(c=>c.id)),"a").length,0);
+  const many=buildGlobalLearningGraph([lesson("a","A",[["z","Zebra needle"],...Array.from({length:110},(_,i)=>[String(i),`Alpha field ${i}`] as [string,string])],Array.from({length:110},(_,i)=>["z",String(i)]))]);
+  assert.equal(learningConceptsForView(many,"","needle").slice(0,100)[0]!.title,"Zebra needle");
+});
+it("does not accept a mismatched tool result or let a failed event suppress a later real answer",()=>{
+  const a=lesson("a","A",[["g","Gradient"]],[],[{id:"q",nodeId:"g",correct:true}]);
+  const result=a.messages[1]!;
+  a.messages.splice(1,0,{...result,isError:true} as never,{...result,toolName:"explain"} as never);
+  a.messages.push({...result} as never);
+  const g=buildGlobalLearningGraph([a]);
+  assert.equal(g.concepts[0]!.correctChecks,1);
+  assert.equal(g.concepts[0]!.evidence.length,1);
+});

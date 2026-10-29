@@ -17,7 +17,7 @@ export interface LearningSource {
   localNodeId: string;
   summary: string | null;
 }
-export interface LearningEvidence {
+export interface LearningAssessmentEvidence {
   chatId: string;
   toolCallId: string;
   localNodeId: string;
@@ -35,7 +35,7 @@ export interface LearningConcept {
   id: string;
   title: string;
   sources: LearningSource[];
-  evidence: LearningEvidence[];
+  evidence: LearningAssessmentEvidence[];
   correctChecks: number;
   incorrectChecks: number;
   ungradedChecks: number;
@@ -59,6 +59,7 @@ const GENERIC = new Set([
   "definition","definitions","main result","theorem","proof","summary",
   "review","core ideas","concepts","problem solving","implementation",
   "intuition","conclusion","extensions","background",
+  "learning objectives","key concepts","basic ideas",
 ]);
 const SAFE_SINGLE = new Set([
   "gradient","divergence","curl","jacobian","hessian","eigenvalues",
@@ -101,7 +102,7 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
   const sessions:GlobalLearningGraph["sessions"]=[];
   const sorted=[...records].sort((a,b)=>a.id.localeCompare(b.id));
   let unlinkedAnswers=0;
-  const pending: Array<{id:string;evidence:LearningEvidence}> = [];
+  const pending: Array<{id:string;evidence:LearningAssessmentEvidence}> = [];
   for(const record of sorted) {
     const bindings=new Map<string,string>();
     for(const node of record.tree?.nodes??[]) {
@@ -117,10 +118,10 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
       concept.sources.push({chatId:record.id,chatTitle:record.title,
         localNodeId:node.id,summary:node.summary??null});
     }
-    if(bindings.size) sessions.push({id:record.id,title:record.title,concepts:bindings.size});
+    if(bindings.size) sessions.push({id:record.id,title:record.title,concepts:new Set(bindings.values()).size});
     // Tool-call inputs are the plan-node source of truth; tool results
     // are the graded evidence. Probe questions can bind to conceptId.
-    const calls=new Map<string,{nodeId:string;conceptId:string;kind:LearningEvidence["kind"];question:string}>();
+    const calls=new Map<string,{toolName:string;nodeId:string;conceptId:string;kind:LearningAssessmentEvidence["kind"];question:string}>();
     for(const message of record.messages??[]) {
       if(message.role!=="assistant" || !Array.isArray(message.content))continue;
       for(const block of message.content) {
@@ -132,7 +133,7 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
         if(!nodeId && !conceptId)continue;
         const kind=args.type==="predict" ? "predict" :
           (block.name==="explain"||block.name==="recall") ? "explain" : "check";
-        calls.set(block.id,{nodeId,conceptId,kind,question:typeof args.question==="string"?args.question:""});
+        calls.set(block.id,{toolName:block.name,nodeId,conceptId,kind,question:typeof args.question==="string"?args.question:""});
       }
     }
     const seenResults=new Set<string>();
@@ -141,15 +142,16 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
       // A replay or duplicate transport event must not inflate mastery
       // evidence. One call id is one assessment observation per session.
       if(seenResults.has(message.toolCallId))continue;
-      seenResults.add(message.toolCallId);
       const answer=message.details;
-      if(!values(answer) || answer.dismissed===true)continue;
+      if(message.isError || !values(answer) || answer.dismissed===true)continue;
       const call=calls.get(message.toolCallId);
+      if(call && call.toolName!==message.toolName)continue;
       if(!call || (!bindings.has(call.nodeId) && !call.conceptId)) {unlinkedAnswers++;continue;}
+      seenResults.add(message.toolCallId);
       const identity=bindings.get(call.nodeId) || call.conceptId;
-      const outcome=answer.correct===true ? "correct" :
+      const outcome=call.kind==="explain" ? "ungraded" : answer.correct===true ? "correct" :
         answer.correct===false ? "incorrect" : "ungraded";
-      const evidence:LearningEvidence={
+      const evidence:LearningAssessmentEvidence={
         chatId:record.id,toolCallId:message.toolCallId,localNodeId:call.nodeId,
         question:call.question,kind:call.kind,outcome,
         answeredAt:typeof answer.answeredAt==="string"?answer.answeredAt:null,
@@ -205,4 +207,23 @@ export function buildGlobalLearningGraph(records: readonly ChatRecord[]): Global
     dependencies:[...dependencies.values()].sort((a,b)=>a.from.localeCompare(b.from)||a.to.localeCompare(b.to)),
     conflicts,sessions,unlinkedAnswers,
   };
+}
+
+/** Match first, then add exactly one hop of context from the selected lesson. */
+export function learningConceptsForView(graph: GlobalLearningGraph, session="", query=""): LearningConcept[] {
+  const items=graph.concepts.filter(c=>!session||c.sources.some(s=>s.chatId===session));
+  const term=query.trim().toLocaleLowerCase("en-US");
+  if(!term)return items;
+  const matches=new Set(items.filter(c=>c.title.toLocaleLowerCase("en-US").includes(term)||
+    c.sources.some(s=>(!session||s.chatId===session)&&(s.summary??"").toLocaleLowerCase("en-US").includes(term))).map(c=>c.id));
+  const found=new Set(matches);
+  const allowed=new Set(items.map(c=>c.id));
+  for(const e of learningDependenciesForView(graph,allowed,session)) {
+    if(matches.has(e.from)||matches.has(e.to)){found.add(e.from);found.add(e.to);}
+  }
+  // Keep the actual matches visible when the initial view is capped.
+  return items.filter(c=>matches.has(c.id)).concat(items.filter(c=>found.has(c.id)&&!matches.has(c.id)));
+}
+export function learningDependenciesForView(graph: GlobalLearningGraph, ids: ReadonlySet<string>, session=""): LearningDependency[] {
+  return graph.dependencies.filter(e=>ids.has(e.from)&&ids.has(e.to)&&(!session||e.sessions.includes(session)));
 }

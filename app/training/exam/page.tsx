@@ -1,0 +1,1 @@
+import{TrainingShell}from'@/components/training-shell';import{QuantExamView}from'@/components/quant-exam';export default function Page(){return <TrainingShell title="Timed quant OA simulator" description="Practice arithmetic, probability and reasoning under one persisted deadline. Solutions stay hidden until you finish or time expires."><QuantExamView/></TrainingShell>;}

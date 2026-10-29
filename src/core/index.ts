@@ -21,6 +21,12 @@ export * from "./chains.ts";
 export * from "./render-settings.ts";
 
 export * from "./question-core.ts";
+export * from "./learning-evidence.ts";
+export * from "./arithmetic.ts";
+export * from "./cpp-workspace.ts";
+export * from "./cpp-run.ts";
+export * from "./scratchpad.ts";
+export * from "./tablet.ts";
 // The event bus (push architecture, 2026-10-02): vocabulary + emit/subscribe
 // for every layer; the browser shell consumes the types + the runtime names
 // through this barrel (shell law: pure core via @/src/core only).
@@ -75,6 +81,16 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+export * from "./estimation";
+export * from "./probability-lab";
+export * from "./stopping";
+export * from "./quant-questions";
+export * from "./quant-exam";
+export * from "./mistakes";
+export * from "./retrieval";
+export * from "./quant-sprints";
+export * from "./cpp-challenges";
+export * from "./training-evidence";
 
 // Read-only canonical cross-session learning map (pure; browser-safe).
 export * from "./global-learning.ts";

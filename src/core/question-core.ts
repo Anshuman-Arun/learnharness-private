@@ -19,6 +19,7 @@
 
 import { Type, type Static } from "typebox";
 import { stripModelValueDebris } from "./value-debris.ts";
+import { evidenceDescription, parseLearningEvidence, type LearningEvidence } from "./learning-evidence.ts";
 
 // ─── shared types ───────────────────────────────────────────────────────────
 
@@ -450,6 +451,7 @@ export interface QuestionData {
  *  NO questionId (owner, tool-result diet 2026-10-02): it was the
  *  toolCallId restated — the toolResult message already carries it. */
 export interface QuestionAnswerData {
+	evidence?: LearningEvidence;
 	kind: QuestionKind;
 	/** The persisted call's tool NAME (owner, 2026-10-09): probe-phase
 	 *  calls are `probe`/`recall`, teach calls `quiz`/`explain` — the
@@ -499,6 +501,7 @@ export interface ClientQuestion {
 
 /** What the server passes to the bridge when the learner answers. */
 export interface AnswerRequest {
+	evidence?: LearningEvidence;
 	dontKnow?: boolean;
 	values?: string[]; // option values
 	other?: string; // ask "Other"
@@ -708,6 +711,7 @@ function formatOptionRef(options: QuizOption[], index: number): string {
  */
 export function buildAnswer(qd: QuestionData, req: AnswerRequest, tool?: string): QuestionAnswerData {
 	const base: QuestionAnswerData = {
+		...(req.evidence ? { evidence: parseLearningEvidence(req.evidence) } : {}),
 		kind: qd.kind,
 		...(tool ? { tool } : {}),
 		questionType: qd.questionType,
@@ -799,5 +803,6 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	const thinking = ad.thinking ?? ad.note;
 	if (thinking) out.thinking = thinking;
 	if (ad.readingThinking) out.thinkingWhileReading = ad.readingThinking;
+	if (ad.evidence) out.submittedWork = evidenceDescription(ad.evidence);
 	return out;
 }

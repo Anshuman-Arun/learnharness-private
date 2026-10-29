@@ -69,7 +69,7 @@ export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentToo
 					c.sources.some(s=>(s.summary??"").toLocaleLowerCase("en-US").includes(term)));
 				if(!matches.length)return "No matching canonical lesson concepts. Probe normally, without conceptId.";
 				return matches.slice(0,25).map(c=>{
-					const heading=`${c.id} :: ${c.title} | ${c.correctChecks} correct / ${c.incorrectChecks} incorrect / ${c.ungradedChecks} ungraded check(s) in ${c.sources.length} lesson(s)`;
+					const heading=`${c.id} :: ${c.title} | ${c.correctChecks} correct / ${c.incorrectChecks} incorrect / ${c.ungradedChecks} ungraded check(s) in ${new Set(c.sources.map(s=>s.chatId)).size} lesson(s)`;
 					if(!includeEvidence) return heading;
 					const examples=c.evidence.slice(-3).reverse().map(e=>{
 						const question=e.question.slice(0,200);

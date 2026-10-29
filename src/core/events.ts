@@ -24,6 +24,8 @@
 
 /** The full event vocabulary — fixed from day one (slice plan, 2026-10-02). */
 export interface ServerEvents {
+	"scratchpad-changed": { id: string; revision: number };
+	"tablet-link-changed": { padId: string };
 	/** A teach turn began server-side (beginTurn) — client-initiated sends,
 	 *  wake turns, other-tab turns: every origin rides the same event. */
 	"turn-started": { chatId: string };
@@ -56,6 +58,8 @@ export type ServerEventType = keyof ServerEvents;
  *  name (types are erased; this list is the single source of truth for
  *  what the SSE channel can carry). */
 export const SERVER_EVENT_TYPES = [
+	"scratchpad-changed",
+	"tablet-link-changed",
 	"turn-started",
 	"turn-settled",
 	"jobs-changed",
@@ -66,9 +70,9 @@ export const SERVER_EVENT_TYPES = [
 ] as const satisfies readonly ServerEventType[];
 
 /** One notification: the type discriminates the payload. */
-export type ServerEvent<K extends ServerEventType = ServerEventType> = {
+export type ServerEvent<K extends ServerEventType = ServerEventType> = K extends ServerEventType ? {
 	type: K;
-} & ServerEvents[K];
+} & ServerEvents[K] : never;
 
 export type ServerEventListener = (event: ServerEvent) => void;
 

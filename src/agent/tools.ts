@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { buildGlobalLearningGraph } from "../core/global-learning.ts";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { invalidInputResult, questionResult, serverExecute } from "./tool-execute.ts";
 import {
@@ -311,7 +312,20 @@ export function createProberTools(
 	// differently-typed literals makes the whole object's type a union —
 	// unusable as Record<string, AgentTool<any>> downstream).
 	const quizzing: Record<string, AgentTool<any>> =
-		mechanics === "free" ? { recall: probeExplainTool } : { probe: probeQuizTool };
+		mechanics === "free" ? { recall: boundProbe(probeExplainTool) } : { probe: boundProbe(probeQuizTool) };
+	function boundProbe(tool: AgentTool<any>): AgentTool<any> {
+		return { ...tool, execute: async (id, input, ...rest) => {
+			const conceptId = input && typeof input === "object" && "conceptId" in input ? input.conceptId : undefined;
+			if (conceptId !== undefined) {
+				const records = ctx.graphStore ? ctx.chatStore.listChats().flatMap(s => {
+					const record = ctx.chatStore.getChat(s.id); return record ? [record] : [];
+				}) : [];
+				if (!buildGlobalLearningGraph(records).concepts.some(c => c.id === conceptId))
+					return invalidInputResult(tool.name, ["conceptId must be an exact ID from list_learning_concepts. Omit it for an unbound question."]);
+			}
+			return tool.execute(id, input, ...rest);
+		} };
+	}
 	// healToolRecord (owner, 2026-10-09 — the whitehead generalization):
 	// the standard argument heal over the WHOLE registry — every tool,
 	// not just the one the latest wobble incident landed on.

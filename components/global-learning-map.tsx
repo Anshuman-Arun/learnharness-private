@@ -6,7 +6,7 @@ import Link from "next/link";
 import { MaximizeIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { PlanDiagram, blockLayout, GRAPH_PAD } from "@/components/plan-block";
 import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/components/pan-zoom";
-import type { GlobalLearningGraph } from "@/src/core";
+import { learningConceptsForView, learningDependenciesForView, type GlobalLearningGraph } from "@/src/core";
 
 /** The same Dagre + hand-built SVG skin as the original mini lesson DAGs.
  * Do not replace it with React Flow, circles, or a second diagram engine.
@@ -57,28 +57,11 @@ export function GlobalLearningMap() {
     ro.observe(el);return ()=>ro.disconnect();
   },[]);
 
-  const relevant=useMemo(()=>{
-    let items=data.concepts;
-    if(session)items=items.filter(c=>c.sources.some(s=>s.chatId===session));
-    const term=query.trim().toLocaleLowerCase();
-    if(term) {
-      const found=new Set(items.filter(c=>c.title.toLocaleLowerCase().includes(term)||
-        c.sources.some(s=>(s.summary??"").toLocaleLowerCase().includes(term))).map(c=>c.id));
-      // A one-hop neighborhood makes prerequisite context visible without
-      // changing the canonical concept set or fabricating dependencies.
-      const allowed=new Set(items.map(c=>c.id));
-      for(const e of data.dependencies)if(found.has(e.from)||found.has(e.to)){
-        if(allowed.has(e.from))found.add(e.from);
-        if(allowed.has(e.to))found.add(e.to);
-      }
-      items=items.filter(c=>found.has(c.id));
-    }
-    return items;
-  },[data,session,query]);
+  const relevant=useMemo(()=>learningConceptsForView(data,session,query),[data,session,query]);
   const shown=useMemo(()=>all?relevant:relevant.slice(0,INITIAL_LIMIT),[relevant,all]);
   const ids=useMemo(()=>new Set(shown.map(c=>c.id)),[shown]);
-  const edges=useMemo(()=>data.dependencies.filter(e=>ids.has(e.from)&&ids.has(e.to))
-    .map(e=>({from:e.from,to:e.to})),[data,ids]);
+  const edges=useMemo(()=>learningDependenciesForView(data,ids,session)
+    .map(e=>({from:e.from,to:e.to})),[data,ids,session]);
   const nodes=useMemo(()=>shown.map(c=>({id:c.id,title:c.title})),[shown]);
   const layout=useMemo(()=>blockLayout(nodes,edges),[nodes,edges]);
   const box=useMemo(()=>({w:layout.width+2*PAD,h:layout.height+2*PAD}),[layout]);
