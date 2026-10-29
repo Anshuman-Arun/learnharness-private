@@ -13,6 +13,11 @@ jobs:
   windows:
     runs-on: windows-2025
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      npm_config_script_shell: 'C:\Program Files\Git\bin\bash.exe'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,14 +30,11 @@ jobs:
         run: node --import tsx --test tests/chatgpt-oauth.test.ts
         env:
           NODE_ENV: test
-      # The full upstream suite runs on Linux. A few existing fixtures use
-      # POSIX-only file modes and absolute ESM paths that are invalid on Windows.
-      # Windows checks the actual OAuth, credential broker, billing boundary
-      # and native desktop integration instead.
       - name: Focused PR20 Windows security and desktop tests
         run: node --import tsx --test tests/chatgpt-oauth.test.ts tests/chatgpt-pr20-broker.test.ts tests/chatgpt-oauth-adversarial.test.ts tests/private-release-policy.test.ts tests/pr20-billing-isolation.test.ts tests/desktop-platform.test.ts tests/auth-provider-keys.test.ts
         env:
           NODE_ENV: test
+      - run: npm test
       - run: npm run lint
       - run: npm run build
       - run: node scripts/build-server.mjs
@@ -85,17 +87,3 @@ jobs:
           if (Test-Path "$root/resources/server/standalone/.env") { throw 'Refusing payload containing .env' }
           if (Test-Path "$root/resources/server/standalone/.env.local") { throw 'Refusing payload containing .env.local' }
           Write-Host 'Downloaded portable app has its executable, OAuth archive, Next server and hidden .next runtime.'
-  linux:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '26'
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run lint
-      - run: npm run build

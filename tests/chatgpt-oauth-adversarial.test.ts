@@ -722,3 +722,24 @@ describe("adversarial ChatGPT private-provider checks", () => {
     }
   });
 });
+
+it("never exposes malformed decrypted credential contents through status or logs",async()=>{
+  await scratch(async dir=>{
+    const safeStorage=encryptedBackend();
+    const secret="SECRET";
+    await fs.writeFile(path.join(dir,"chatgpt-oauth.enc.json"),JSON.stringify({version:1,
+      ciphertext:safeStorage.encryptString(secret+" invalid json").toString("base64")}));
+    const handlers=new Map<string,(...args:unknown[])=>Promise<unknown>>();
+    const logs:string[]=[];
+    const runtime=await native.createChatGPTOAuthRuntime({userDataDir:dir,safeStorage,
+      ipcMain:{handle:(name:string,handler:(...args:unknown[])=>Promise<unknown>)=>handlers.set(name,handler)},
+      shell:{openExternal:async()=>{}},authorizeIpc:()=>true,log:(s:string)=>logs.push(s)});
+    try {
+      const status=await handlers.get("lh:chatgpt:status")!({});
+      assert.doesNotMatch(JSON.stringify(status),new RegExp(secret));
+      const signin=await handlers.get("lh:chatgpt:sign-in")!({});
+      assert.doesNotMatch(JSON.stringify(signin),new RegExp(secret));
+      assert.doesNotMatch(logs.join("\n"),new RegExp(secret));
+    }finally{runtime.close();}
+  });
+});

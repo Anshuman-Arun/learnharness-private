@@ -44,6 +44,7 @@ import {
 } from "./contracts/chat.ts";
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
+import { evidenceDescription, evidenceImageContent, hasLearningEvidence, type LearningEvidence } from "./learning-evidence.ts";
 
 /** The hard-invariant wording for an aborted turn's unanswered calls —
  *  carried over verbatim from the pre-native era so the model's view
@@ -109,11 +110,12 @@ export function newMessageId(): string {
 //     core/input-events.ts; steers in core/contracts/jobs.ts) ─────────────────
 
 /** A learner-authored user message (text input, verdict note). */
-export function newUserMessage(text: string): LhMessage & UserMessage {
+export function newUserMessage(text: string, evidence?: LearningEvidence): LhMessage & UserMessage & { evidence?: LearningEvidence; learnerText?: string } {
 	return {
 		id: newMessageId(),
 		role: "user",
-		content: text,
+		content: hasLearningEvidence(evidence) ? [{ type: "text", text: `${text}\n${evidenceDescription(evidence)}` }, ...evidenceImageContent(evidence)] : text,
+		...(hasLearningEvidence(evidence) ? { evidence, learnerText: text } : {}),
 		timestamp: Date.now(),
 	};
 }
@@ -143,7 +145,7 @@ export function newAnswerResult(
 		role: "toolResult",
 		toolCallId,
 		toolName,
-		content: [{ type: "text", text: JSON.stringify(compactAnswerForModel(answer as QuestionAnswerData)) }],
+		content: [{ type: "text", text: JSON.stringify(compactAnswerForModel(answer as QuestionAnswerData)) }, ...evidenceImageContent((answer as QuestionAnswerData).evidence)],
 		// 0.87.1 narrowed ToolResultMessage.details to JsonRepresentation —
 		// our payloads are JSON-safe answer structures, so the cast is honest.
 		details: answer as ToolResultMessage["details"],
@@ -243,14 +245,14 @@ export function newGraphContextMessage(picks: readonly GraphContextPick[], chain
  *  content label is the single "Your thinking"; `details` keeps the raw
  *  payload for the transcript card. One problem may carry many
  *  submissions. */
-export function newThinkingMessage(problemCallId: string, text: string): LhMarkerMessage {
+export function newThinkingMessage(problemCallId: string, text: string, evidence?: LearningEvidence): LhMarkerMessage {
 	return {
 		id: newMessageId(),
 		role: "custom",
 		customType: "practice-thinking",
 		content: `${THINKING_LABEL}:\n${text}`,
 		display: true,
-		details: { problemCallId, text },
+		details: { problemCallId, text, ...(hasLearningEvidence(evidence) ? { evidence } : {}) },
 		timestamp: Date.now(),
 	};
 }
@@ -560,15 +562,17 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			// marker whose cut could not resolve has no head and renders as
 			// its user text — honest degradation.)
 			if (marker.customType === "compaction" && head !== null && marker.id === active!.id) continue;
+			const evidence = marker.customType === "practice-thinking" ? (marker.details as { evidence?: LearningEvidence }).evidence : undefined;
+			const description = evidenceDescription(evidence);
 			out.push({
 				role: "user",
-				content: [{ type: "text", text: marker.content }],
+				content: [{ type: "text", text: description ? `${marker.content}\n${description}` : marker.content }, ...evidenceImageContent(evidence)],
 			timestamp: marker.timestamp,
 			});
 			continue;
 		}
 		// Strip the record id: the wire carries the native shape only.
-		const { id: _id, ...native } = m as LhMessage;
+		const { id: _id, evidence: _evidence, learnerText: _learnerText, ...native } = m as LhMessage & { evidence?: LearningEvidence; learnerText?: string };
 		out.push(native as Message);
 		// Dangling-call synthesis: an assistant message whose toolCalls have
 		// no results in the remaining tail (abort mid-question) — the

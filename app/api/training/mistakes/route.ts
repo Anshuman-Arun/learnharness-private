@@ -1,0 +1,3 @@
+import{changeMistake,mistakeCandidates,mistakeEntries,mistakeRetries}from'@/src/server';export const dynamic='force-dynamic';
+export function GET(r:Request){try{return Response.json({entries:mistakeEntries(),candidates:mistakeCandidates(Number(new URL(r.url).searchParams.get('slowMs')??5000)),retries:mistakeRetries()});}catch(e){return Response.json({error:e instanceof Error?e.message:'Could not load notebook'},{status:400});}}
+export async function POST(r:Request){try{return Response.json(changeMistake(await r.json()));}catch(e){return Response.json({error:e instanceof Error?e.message:'Invalid notebook action'},{status:400});}}

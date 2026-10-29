@@ -100,7 +100,7 @@ function createEncryptedCredentialStore(filePath, safeStorage) {
 			envelope = JSON.parse(await fs.promises.readFile(filePath, "utf8"));
 		} catch (error) {
 			if (error?.code === "ENOENT") return {};
-			throw error;
+			throw new Error("Saved ChatGPT credential vault could not be read.");
 		}
 		if (envelope?.version !== FILE_VERSION || typeof envelope.ciphertext !== "string") {
 			throw new Error("Saved ChatGPT credentials have an unsupported format.");
@@ -108,8 +108,15 @@ function createEncryptedCredentialStore(filePath, safeStorage) {
 		if (!storageSecure(safeStorage)) {
 			throw new Error("Secure credential storage is unavailable on this system.");
 		}
-		const plaintext = safeStorage.decryptString(Buffer.from(envelope.ciphertext, "base64"));
-		const parsed = JSON.parse(plaintext);
+		let parsed;
+		try {
+			const plaintext = safeStorage.decryptString(Buffer.from(envelope.ciphertext, "base64"));
+			parsed = JSON.parse(plaintext);
+		} catch {
+			// JSON errors can quote decrypted credential fragments. Never forward
+			// those messages to renderer status, broker logs, or IPC callers.
+			throw new Error("Saved ChatGPT credentials could not be decrypted or decoded.");
+		}
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 			throw new Error("Saved ChatGPT credentials are invalid.");
 		}

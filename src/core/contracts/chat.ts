@@ -71,6 +71,8 @@ export const CURRENT_CHAT_VERSION = 1;
  *  turn by construction. Background sub-agents are NEVER overridden
  *  (config-pinned: they're infrastructure, not conversation). */
 export interface ChatSettings {
+	/** Session-local teaching preference; absent preserves the existing method. */
+	teachingMode?: "guided" | "explain";
 	/** pi-ai catalog coordinates: the provider that owns the model. Only
 	 *  "openrouter" is configured today; the field exists so a second
 	 *  provider needs no schema change. */

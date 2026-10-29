@@ -1,0 +1,8 @@
+import {decideStopping,parseStopping,stoppingOffer,stoppingTable,type StoppingGame}from'../core/stopping.ts';import{stores}from'./stores.ts';
+export function stoppingGames(){return stores.trainingStore.list<StoppingGame>('stopping').sort((a,b)=>b.createdAt-a.createdAt);}
+export function stoppingView(g:StoppingGame){const{seed:_seed,decisions,...publicGame}=g;return{...publicGame,decisions:g.finished?decisions:decisions.map(({regret:_r,stopValue:_s,continueValue:_c,...d})=>d),...(!g.finished?{offer:stoppingOffer(g),remaining:g.config.horizon-g.decisions.length-1}:{seed:g.seed,table:stoppingTable(g.config),totalRegret:decisions.reduce((sum,d)=>sum+d.regret,0)})};}
+export function changeStopping(raw:unknown,now=Date.now()){
+ const a=raw as Record<string,unknown>;if(!a||typeof a!=='object')throw Error('Invalid stopping action');
+ if(a.action==='start'){const config=parseStopping(a.config);if(typeof a.predictedValue!=='number'||!Number.isFinite(a.predictedValue)||Math.abs(a.predictedValue)>10000)throw Error('Predict the game value');if(typeof a.reasoning!=='string'||!a.reasoning.trim()||a.reasoning.length>8000)throw Error('Explain your strategy');const g:StoppingGame={version:1,id:crypto.randomUUID(),seed:crypto.getRandomValues(new Uint32Array(1))[0]!,config,predictedValue:a.predictedValue,reasoning:a.reasoning.trim(),createdAt:now,decisions:[],finished:false};stores.trainingStore.write('stopping',g);return stoppingView(g);}
+ if(a.action!=='decide'||typeof a.id!=='string')throw Error('Invalid stopping action');const g=stores.trainingStore.read<StoppingGame>('stopping',a.id);if(!g)throw Error('Game not found');const next=decideStopping(g,a.choice,a.index);stores.trainingStore.write('stopping',next);return stoppingView(next);
+}

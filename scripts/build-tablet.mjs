@@ -1,0 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
+import { build } from "esbuild";
+import { EXCALIDRAW_FONT_CHUNKS } from "./excalidraw-font-chunks.mjs";
+const root = path.resolve(import.meta.dirname, ".."), target = path.join(root, "public/tablet-companion");
+const marker = path.join(target, ".learnharness-generated");
+if (fs.existsSync(target) && !fs.existsSync(marker)) throw new Error("Refusing to replace an unknown tablet-assets directory");
+fs.mkdirSync(target, { recursive: true }); fs.writeFileSync(marker, "Generated standalone tablet page.\n");
+await build({ entryPoints: [path.join(root, "tablet/index.tsx")], outfile: path.join(target, "tablet.js"), bundle: true, platform: "browser", conditions: ["production"], format: "esm", target: "es2022", jsx: "automatic", minify: true, define: { "process.env.NODE_ENV": '"production"' }, loader: { ".woff2": "file", ".woff": "file", ".ttf": "file", ".svg": "dataurl" }, assetNames: "assets/[name]-[hash]", legalComments: "linked", plugins: [{ name: "local-excalidraw-font-fallback", setup(builder) { builder.onLoad({ filter: EXCALIDRAW_FONT_CHUNKS }, async ({ path: filename }) => { const contents = fs.readFileSync(filename, "utf8"); const fallback = '`https://esm.sh/${M.PKG_NAME?`${M.PKG_NAME}@${M.PKG_VERSION}`:"@excalidraw/excalidraw"}/dist/prod/`'; if (contents.includes("ASSETS_FALLBACK_URL") && !contents.includes(fallback)) throw new Error("Review the pinned Excalidraw font fallback before rebuilding"); return { contents: contents.replace(fallback, 'new URL("/vendor/excalidraw/",window.location.origin).toString()'), loader: "js" }; }); } }] });
+fs.copyFileSync(path.join(root, "tablet/index.html"), path.join(target, "index.html"));
+for (const name of fs.readdirSync(path.join(root, "node_modules/@excalidraw/excalidraw/dist/prod"))) if (name.endsWith(".js") && name !== "index.js") fs.copyFileSync(path.join(root, "node_modules/@excalidraw/excalidraw/dist/prod", name), path.join(target, name));
