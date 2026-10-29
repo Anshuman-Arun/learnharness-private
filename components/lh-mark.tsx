@@ -3,7 +3,7 @@
  * as JSX so it rides along with the components (no network fetch, recolorable,
  * crisp at any size). 806×806 viewBox, no padding: sizing/padding is the
  * consumer's job. The existing LearnHarness spiral and its filled terminal are tinted with
- * the saved accent; only the other terminal's outline uses the theme ink.
+ * the saved accent; the other terminal's outline uses the same saved accent.
  * This keeps the mark cohesive in both cream and charcoal palettes. No Interview-App mark is used.
  *
  * Replaces the "LH" wordmark text in the sidebar band (also the traffic-light
@@ -29,7 +29,7 @@ export function LhMark({ className = "" }: { className?: string }) {
 						<g transform="matrix(1.261034,-0,-0,1.261034,1170.373407,-2014.261188)">
 							<path
 								d="M1270.5,3305C893.266,3305 587,3611.266 587,3988.5C587,4365.734 893.266,4672 1270.5,4672C1647.734,4672 1954,4365.734 1954,3988.5C1954,3611.266 1647.734,3305 1270.5,3305ZM1270.5,3471.537C1555.819,3471.537 1787.463,3703.181 1787.463,3988.5C1787.463,4273.819 1555.819,4505.463 1270.5,4505.463C985.181,4505.463 753.537,4273.819 753.537,3988.5C753.537,3703.181 985.181,3471.537 1270.5,3471.537Z"
-								style={{ fill: "var(--foreground, #f3eee5)" }}
+								style={{ fill: "var(--primary, #d47760)" }}
 							/>
 						</g>
 						<g transform="matrix(1.261034,0,-0,1.261034,3139.627182,-45.007413)">
