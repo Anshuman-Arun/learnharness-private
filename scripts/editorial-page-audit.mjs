@@ -184,6 +184,26 @@ try{
     const {page}=ctx;
     await open(ctx,"/");
     await page.waitForSelector('[data-testid="dashboard-home"]',{timeout:25000});
+    // The six numbered navigation chips must match the review prototype
+    // and use actual app actions, not fake shortcuts or extra cards.
+    const sidebarNav=await page.$eval('[data-testid="sidebar-navigation"] [data-nav-id]',els=>
+      els.map(el=>({
+        id:el.getAttribute("data-nav-id"),
+        number:el.querySelector(".lh-sidebar-nav-number")?.textContent,
+        size:getComputedStyle(el.querySelector(".lh-sidebar-nav-number")).fontSize,
+      })));
+    assert.deepEqual(sidebarNav.map(row=>row.id),
+      ["home","sessions","knowledge","learning-map","training","settings"]);
+    assert.deepEqual(sidebarNav.map(row=>row.number),
+      ["01","02","03","04","05","06"]);
+    assert.ok(sidebarNav.every(row=>row.size==="11px"),"sidebar numeral size");
+    await page.click('[data-testid="sidebar-nav-sessions"]');
+    assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute("data-testid")),
+      "session-search","Sessions focuses the existing search input");
+    await page.click('[data-testid="sidebar-nav-knowledge"]');
+    await page.waitForSelector('svg[aria-label="Plan diagram"]',{timeout:25000});
+    await page.click('[data-testid="sidebar-nav-home"]');
+    await page.waitForSelector('[data-testid="dashboard-home"]',{timeout:25000});
     await snap(ctx,"study-desk-"+mode);
     // Graph must be one click away, with the ORIGINAL mini-DAG renderer.
     await page.click('[data-testid="home-surface-toggle"]');
