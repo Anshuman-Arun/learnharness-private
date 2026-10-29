@@ -1,0 +1,1 @@
+import{reviewQueue,changeReview}from'@/src/server';export const dynamic='force-dynamic';export function GET(){return Response.json(reviewQueue());}export async function POST(r:Request){try{return Response.json(changeReview(await r.json()));}catch(e){return Response.json({error:e instanceof Error?e.message:'Invalid review action'},{status:400});}}
