@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
 import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
+import { DashboardHome } from "@/components/dashboard-home";
 import { SetupDialog } from "@/components/setup-dialog";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { useStrongKeyless, useZeroKeys, ZeroKeysPill } from "@/components/setup-cta";
@@ -31,6 +32,7 @@ export function Home({
 	rendering?: boolean;
 }) {
 	const router = useRouter();
+	const [showAtlas, setShowAtlas] = useState(false);
 	const [topic, setTopic] = useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
 	 * mechanics as the chat composer, owner's consistency ruling): a
@@ -177,7 +179,9 @@ export function Home({
 			    chrome's survivors; data, extraction, and the pick flow are
 			    untouched, and the chain table stays behind its button. */}
 			<main className="absolute inset-0">
-				{rendering ? (
+				{!showAtlas ? (
+					<DashboardHome onOpenAtlas={() => setShowAtlas(true)} />
+				) : rendering ? (
 					<GraphView
 						chainSelectOpen={chainSelectOpen}
 						practiceSelection={pickedIds}
@@ -203,7 +207,10 @@ export function Home({
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>
-				<span className="lh-editorial-home-masthead">LEARNHARNESS <span aria-hidden="true">/</span> KNOWLEDGE ATLAS</span>
+				<span className="lh-editorial-home-masthead">LEARNHARNESS <span aria-hidden="true">/</span> {showAtlas ? "KNOWLEDGE ATLAS" : "STUDY DESK"}</span>
+				<button type="button" data-testid="home-surface-toggle" className="lh-study-toggle lh-no-drag pointer-events-auto" onClick={() => setShowAtlas(v => !v)}>
+					{showAtlas ? "Back to study desk" : (rendering ? "Open knowledge atlas" : "Open knowledge summary")} <span aria-hidden="true">↗</span>
+				</button>
 			</header>
 
 			{/* New session — same floating blob as the chat composer, docked
