@@ -10,6 +10,7 @@ import { describe, it } from "node:test";
 const require = createRequire(import.meta.url);
 const mainFile = fileURLToPath(new URL("../electron/main.cjs", import.meta.url));
 const mainSource = readFileSync(mainFile, "utf8");
+const requireFromElectron = createRequire(mainFile);
 
 /** Decline the single-instance lock so normal boot never spawns a server.
  * Then call the REAL createWindow with a stub Electron API and inspect its
@@ -27,7 +28,7 @@ function windowOptions(platform: string) {
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
-		require: (id: string) => id === "electron" ? electron : require(id),
+		require: (id: string) => id === "electron" ? electron : requireFromElectron(id),
 		process: { platform, argv: [], env: {}, on() {} },
 		__dirname: dirname(mainFile),
 	};
@@ -77,7 +78,9 @@ describe("desktop window chrome", () => {
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"expandWindow", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform", "setTitlebarTheme",
+			"chatGPTCancelSignIn", "chatGPTDisconnect", "chatGPTOpenAuthorization",
+			"chatGPTSetBackgroundUse", "chatGPTSignIn", "expandWindow", "getChatGPTStatus",
+			"getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform", "setTitlebarTheme",
 		]);
 	});
 });
@@ -102,7 +105,7 @@ describe("desktop packaging policy", () => {
 			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
 		]);
 		assert.equal(config.linux.syncDesktopName, true);
-		assert.equal(config.publish[0].releaseType, "draft");
+		assert.equal(config.publish, undefined, "private Windows build must never publish upstream or subscribe to an update feed");
 	});
 
 	it("deb has public maintainer metadata and a matching desktop identity", () => {
@@ -216,7 +219,7 @@ describe("desktop release workflow", () => {
 		}
 	});
 
-	it("pairs Icon Composer packaging with macOS 26 and Xcode selection, retaining macOS 15 CI", () => {
+	it("pairs Icon Composer packaging with macOS 26 and Xcode; private CI remains Windows-only", () => {
 		const mac = packaging.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
 		assert.equal(mac?.os, "macos-26", "actool's .icon compiler needs macOS 26 host frameworks, not just newer Xcode");
 		assert.equal(mac?.builder_args, "--mac --arm64");
@@ -230,8 +233,10 @@ describe("desktop release workflow", () => {
 		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
 
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
-		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
-		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
+		const matrix = ci.jobs.standalone?.strategy?.matrix.include ?? [];
+		assert.deepEqual(matrix.map(entry => ({ os: entry.os, platform: entry.platform })), [
+			{ os: "windows-2025", platform: "windows-x64" },
+		], "private CI validates the supported Windows installer; macOS remains a release-only target");
 	});
 
 	it("creates exactly one unpublished draft when none matches", async () => {
