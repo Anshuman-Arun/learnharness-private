@@ -94,6 +94,7 @@ describe("prober graph tools — registration", () => {
 			"ask_user_question",
 			"find",
 			"grep",
+			"list_learning_concepts",
 			"list_propositions",
 			"list_sessions",
 			"ls",
@@ -227,4 +228,28 @@ describe("auditor graph tools", () => {
 		const miss = (await tools.list_propositions!.execute!("tc", { session: "no-such" })).details as string;
 		assert.equal(miss, 'No propositions born in session "no-such". Call list_sessions for the current ids.');
 	});
+});
+
+describe("probe concept ID validation at execution",()=>{
+  for(const free of [false,true])it(`validates IDs before posing ${free?"recall":"probe"}`,async()=>{
+    const {chatStore,graphStore}=fakeStores([]);
+    const record={id:"lesson",title:"Lesson",messages:[],tree:{nodes:[{id:"g",title:"Gradient"}],edges:[]}};
+    chatStore.listChats=()=>[record] as never;
+    chatStore.getChat=()=>record as never;
+    const enabled=free?{quiz:false,explain:true}:undefined;
+    const tools=createProberTools({...baseCtx,chatStore,graphStore},enabled);
+    const tool=tools[free?"recall":"probe"]!;
+    const input=free?{question:"Explain the gradient",hint:"Think of derivatives",correctAnswer:"Gradient"}:
+      {question:"Which is the gradient?",options:[{label:"A"},{label:"B"}],correctAnswer:"A"};
+    const valid=await tool.execute("valid",{...input,conceptId:"concept:gradient"});
+    assert.notEqual(valid.isError,true,JSON.stringify(valid));
+    for(const conceptId of ["","concept:invented"]){
+      const result=await tool.execute("invalid",{...input,conceptId});
+      assert.equal(result.isError,true);
+      assert.match(JSON.stringify(result),/exact ID/);
+    }
+    const closed=createProberTools({...baseCtx,chatStore},enabled)[free?"recall":"probe"]!;
+    assert.equal((await closed.execute("closed",{...input,conceptId:"concept:gradient"})).isError,true);
+    assert.notEqual((await closed.execute("unbound",input)).isError,true);
+  });
 });

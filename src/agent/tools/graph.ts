@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { getGraph, graphSessionIndex, graphSessionPropositions } from "../../core/graph.ts";
+import { buildGlobalLearningGraph } from "../../core/global-learning.ts";
 import type { ChatStore, GraphStore } from "../../core/ports.ts";
 
 /**
@@ -41,6 +42,47 @@ const listPropositionsInput = Type.Object({
 export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentTool<any>> {
 	const deps = { chatStore: ctx.chatStore, graphStore: ctx.graphStore };
 	return {
+		list_learning_concepts: {
+			name: "list_learning_concepts",
+			label: "list_learning_concepts",
+			description:
+				"Search canonical cross-session LESSON concepts and previous answer evidence before probing. " +
+				"Input a specific concept term (e.g. 'divergence') or omit query for an overview. " +
+				"Returns exact concept IDs; if you pose a probe/recall question directly testing one of these concepts, " +
+				"set its optional conceptId to the exact listed ID. Never guess an ID and never attach a broad " +
+				"question to a narrow node. Historical probe results without concept IDs remain unlinked.",
+			parameters: Type.Object({
+				query: Type.Optional(Type.String({description:"Optional search term for a canonical learning objective."})),
+				includeEvidence: Type.Optional(Type.Boolean({description:"Include up to 3 past question results and learner reasoning per concept."})),
+			}),
+			execute: serverExecute("list_learning_concepts", Type.Object({
+				query: Type.Optional(Type.String()),
+				includeEvidence: Type.Optional(Type.Boolean()),
+			}),async ({query,includeEvidence}) => {
+				const records=ctx.chatStore.listChats().map(s=>ctx.chatStore.getChat(s.id)).filter(
+					(r):r is NonNullable<typeof r>=>r!==null,
+				);
+				const graph=buildGlobalLearningGraph(records);
+				const term=(query??"").trim().toLocaleLowerCase("en-US");
+				const matches=graph.concepts.filter(c=>
+					!term||c.title.toLocaleLowerCase("en-US").includes(term)||
+					c.sources.some(s=>(s.summary??"").toLocaleLowerCase("en-US").includes(term)));
+				if(!matches.length)return "No matching canonical lesson concepts. Probe normally, without conceptId.";
+				return matches.slice(0,25).map(c=>{
+					const heading=`${c.id} :: ${c.title} | ${c.correctChecks} correct / ${c.incorrectChecks} incorrect / ${c.ungradedChecks} ungraded check(s) in ${new Set(c.sources.map(s=>s.chatId)).size} lesson(s)`;
+					if(!includeEvidence) return heading;
+					const examples=c.evidence.slice(-3).reverse().map(e=>{
+						const question=e.question.slice(0,200);
+						const answer=(e.answerText??"").slice(0,200);
+						const reasoning=(e.reasoning??"").slice(0,300);
+						return `  - ${e.kind}, ${e.outcome}, ${e.answeredAt??"date unknown"}: ${question}`+
+							(answer?` | learner answer: ${answer}`:"")+
+							(reasoning?` | reasoning: ${reasoning}`:"");
+					});
+					return [heading,...examples].join("\n");
+				}).join("\n")+(matches.length>25?"\nRefine query for more.":"");
+			}),
+		},
 		list_sessions: {
 			name: "list_sessions",
 			label: "list_sessions",
