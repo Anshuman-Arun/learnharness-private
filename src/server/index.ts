@@ -54,3 +54,4 @@ export * from "./stopping";
 export * from "./quant-exam";
 export * from "./mistakes";
 export * from "./retrieval";
+export * from "./quant-sprints";
