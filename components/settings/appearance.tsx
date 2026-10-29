@@ -7,9 +7,8 @@
  * Why variables and not className swaps: every seam the settings touch was
  * built token-first (--font-prose, --lh-prose-size, --lh-ink-strong, …),
  * so application is setProperty and nothing re-renders. The ONE thing the
- * variables can't reach — the mode — is dark-only this wave (the light
- * palette is designed in the later design wave; <html class="dark"> is
- * static in app/layout.tsx).
+ * variables can't reach is the Tailwind dark class: the provider switches
+ * it with the persistent theme choice (dark / light / system).
  *
  * The provider is mounted at the ROOT LAYOUT level (like ActivityProvider):
  * every page picks appearance up on load. The settings page writes a
@@ -27,6 +26,11 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 	const f = FACTORY_SETTINGS.appearance;
 	return {
 		mode: delta?.mode ?? f.mode,
+		accent: delta?.accent ?? f.accent,
+		accentIntensity: delta?.accentIntensity ?? f.accentIntensity,
+		zoomPercent: delta?.zoomPercent ?? f.zoomPercent,
+		corners: delta?.corners ?? f.corners,
+		borders: delta?.borders ?? f.borders,
 		background: delta?.background ?? f.background,
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
@@ -71,12 +75,33 @@ export function derivedPalette(background: string): Record<string, string> {
 	};
 }
 
+/** A custom light background brightens the panels and darkens the dividers;
+ * unlike the legacy dark curve, it must never invert foreground ink. */
+export function derivedLightPalette(background: string): Record<string, string> {
+	const panel = raise(background, 9);
+	const raised = raise(background, 3);
+	const border = '#' + (background.length === 4
+		? background.slice(1).split('').map((c) => parseInt(c+c,16))
+		: [parseInt(background.slice(1,3),16),parseInt(background.slice(3,5),16),parseInt(background.slice(5,7),16)])
+		.map((n) => Math.max(0, n - 35).toString(16).padStart(2,'0')).join('');
+	return {
+		"--background": background,
+		"--card": panel,
+		"--popover": panel,
+		"--secondary": raised,
+		"--muted": raised,
+		"--accent": raised,
+		"--border": border,
+		"--input": border,
+	};
+}
+
 /** THE mapping: resolved appearance → the CSS variables to set on <html>.
  *  Absent entries = leave the factory stylesheet value in place. Pure —
  *  exported for tests. */
-export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<string, string> {
+export function appearanceVars(a: ReturnType<typeof resolveAppearance>, effectiveMode: "light" | "dark" = a.mode === "light" ? "light" : "dark"): Record<string, string> {
 	const vars: Record<string, string> = {};
-	if (a.background !== null) Object.assign(vars, derivedPalette(a.background));
+	if (a.background !== null) Object.assign(vars, effectiveMode === "light" ? derivedLightPalette(a.background) : derivedPalette(a.background));
 	if (a.fontFamily !== null) {
 		vars["--font-prose"] = `"${a.fontFamily}", var(--font-sans3), ui-sans-serif, system-ui, sans-serif`;
 	}
@@ -125,10 +150,54 @@ export function useAppearance() {
 
 export function AppearanceProvider({ children }: { children: React.ReactNode }) {
 	const [delta, setDelta] = useState<AppearanceSettings | undefined>(undefined);
+	const [prefersDark, setPrefersDark] = useState(
+		() => typeof window === "undefined" ? true : window.matchMedia("(prefers-color-scheme: dark)").matches,
+	);
+	const resolved = useMemo(() => resolveAppearance(delta), [delta]);
+	const mode = resolved.mode === "system" ? (prefersDark ? "dark" : "light") : resolved.mode;
 	const appliedRef = useRef<string>("");
+	const lastModeRef = useRef<"dark" | "light" | null>(null);
+
+	// Match the OS only in System mode. Leaving this subscription mounted
+	// allows the choice to take effect immediately without another fetch.
+	useEffect(() => {
+		const media = window.matchMedia("(prefers-color-scheme: dark)");
+		setPrefersDark(media.matches);
+		const changed = (event: MediaQueryListEvent) => setPrefersDark(event.matches);
+		media.addEventListener("change", changed);
+		return () => media.removeEventListener("change", changed);
+	}, []);
+
+	// Mode and visual preferences use the SAME persisted settings record as
+	// the existing reading and graph controls, never a parallel localStorage
+	// state machine. Chromium supports CSS zoom in both web and Electron.
+	useEffect(() => {
+		const root = document.documentElement;
+		const switched = lastModeRef.current !== null && lastModeRef.current !== mode;
+		// Dark/light transitions can pass through a moment where foreground
+		// and background have identical colors, temporarily hiding text.
+		// Suppress only the one-frame mode swap, not ordinary hover effects.
+		if (switched) root.classList.add("lh-theme-changing");
+		lastModeRef.current = mode;
+		root.classList.toggle("dark", mode === "dark");
+		root.dataset.theme = mode;
+		window.lh?.setTitlebarTheme?.(mode);
+		root.dataset.themeMode = resolved.mode;
+		root.dataset.accent = resolved.accent;
+		root.dataset.corners = resolved.corners;
+		root.dataset.borders = resolved.borders;
+		root.style.setProperty("--lh-accent-intensity", `${resolved.accentIntensity}%`);
+		root.style.zoom = resolved.zoomPercent === 100 ? "" : `${resolved.zoomPercent}%`;
+		let frame: number | null = null;
+		if (switched) frame = requestAnimationFrame(() => root.classList.remove("lh-theme-changing"));
+		return () => {
+			if (frame !== null) cancelAnimationFrame(frame);
+			root.classList.remove("lh-theme-changing");
+		};
+	}, [mode, resolved.mode, resolved.accent, resolved.corners, resolved.borders, resolved.accentIntensity, resolved.zoomPercent]);
 
 	// The vars apply on every change — stringified as the change signal.
-	const vars = useMemo(() => appearanceVars(resolveAppearance(delta)), [delta]);
+	const vars = useMemo(() => appearanceVars(resolved, mode), [resolved, mode]);
 	const key = useMemo(() => JSON.stringify(vars), [vars]);
 	// REMOVAL is half the job (owner repro, fix wave): a later write that
 	// OMITS a var (empty field = factory, serif toggle back on) must clear
@@ -178,8 +247,8 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
 	}, []);
 
 	const value = useMemo(
-		() => ({ appearance: resolveAppearance(delta), onAppearanceChange }),
-		[delta, onAppearanceChange],
+		() => ({ appearance: resolved, onAppearanceChange }),
+		[resolved, onAppearanceChange],
 	);
 	return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }

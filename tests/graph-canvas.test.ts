@@ -13,7 +13,10 @@ import assert from "node:assert/strict";
 import { describe, it, it as test } from "node:test";
 import {
 	applyClusterLabels,
+	canvasPointerPosition,
+	effectiveCanvasDpr,
 	arrowGeometry,
+	curvedArrowGeometry,
 	isImpNodeId,
 	boxBlurRound,
 	fitTransform,
@@ -23,6 +26,7 @@ import {
 	zoomRatioOf,
 	LABELS_FADE_RATIO,
 } from "../components/graph-canvas.ts";
+import { placeGraphLabels } from "../components/graph-label-layout.ts";
 import {
 	sanitizePhysicsTuning,
 	sanitizeRegionTuning,
@@ -413,4 +417,72 @@ describe("applyClusterLabels (the label-only rename channel)", () => {
 		);
 		assert.equal(changed, false);
 	});
+});
+
+describe("editorial zoom and graph input accuracy", () => {
+	for (const scale of [0.75, 1, 1.25, 1.5, 2]) {
+		it(`pointer hits the same node and backing store stays sharp at ${Math.round(scale * 100)}%`, () => {
+			const localWidth = 800;
+			const localHeight = 500;
+			const x = 300, y = 180;
+			const pos = canvasPointerPosition(
+				100 + x * scale, 70 + y * scale,
+				100, 70, localWidth * scale, localHeight * scale,
+				localWidth, localHeight,
+			);
+			assert.ok(Math.abs(pos.x - x) < 1e-8);
+			assert.ok(Math.abs(pos.y - y) < 1e-8);
+			assert.ok(Math.abs(effectiveCanvasDpr(2, localWidth * scale, localWidth) - 2 * scale) < 1e-8);
+		});
+	}
+});
+
+describe("organic graph connectors", () => {
+  it("curves nondegenerate edges without changing the target rim", () => {
+    const p=curvedArrowGeometry({x:0,y:0},{x:100,y:20},5,5,6,"n_a","n_b")!;
+    assert.ok(p);
+    const g=arrowGeometry({x:0,y:0},{x:100,y:20},5,5,6)!;
+    assert.deepEqual(p.tip,g.tip);
+    assert.ok(Number.isFinite(p.control.x)&&Number.isFinite(p.control.y));
+    assert.notEqual(p.control.y,(p.shaftFrom.y+p.tip.y)/2);
+  });
+  it("is deterministic and reverses direction without dropping arrowheads", () => {
+    const a={x:4,y:19},b={x:66,y:54};
+    const x=curvedArrowGeometry(a,b,5,5,7,"n_a","n_b")!;
+    assert.deepEqual(x,curvedArrowGeometry(a,b,5,5,7,"n_a","n_b"));
+    const back=curvedArrowGeometry(b,a,5,5,7,"n_b","n_a")!;
+    assert.ok(Math.hypot(back.tip.x-a.x,back.tip.y-a.y)>0);
+    assert.equal(curvedArrowGeometry(a,a,5,5,7,"n_a","n_a"),null);
+  });
+  it("implication convergence is anchored to the same hidden node", () => {
+    const p=curvedArrowGeometry({x:0,y:0},{x:60,y:0},5,0,5,"n_a","arg_x")!;
+    assert.deepEqual(p.tip,{x:60,y:0});
+  });
+});
+describe("collision-aware graph labels", () => {
+  it("does not collide with adjacent nodes or labels", () => {
+    const nodes=[
+      {id:"a",x:0,y:0,lines:["A long label"],width:56},
+      {id:"b",x:0,y:28,lines:["Another label"],width:66},
+      {id:"c",x:48,y:5,lines:["Third"],width:36},
+      {id:"d",x:-40,y:-8,lines:["Fourth"],width:42},
+    ];
+    const actual=placeGraphLabels(nodes,6,12,4,1.2);
+    const rects=[...actual].map(([id,v])=>({id,l:v.x-v.width/2,r:v.x+v.width/2,t:v.top,b:v.top+v.height}));
+    for(let i=0;i<rects.length;i++)for(let j=i+1;j<rects.length;j++){
+      const a=rects[i]!,b=rects[j]!;
+      assert.ok(a.l>=b.r||a.r<=b.l||a.t>=b.b||a.b<=b.t,"label rectangles must not intersect");
+    }
+    for(const rect of rects)for(const node of nodes){
+      assert.ok(rect.l>=node.x+6||rect.r<=node.x-6||rect.t>=node.y+6||rect.b<=node.y-6,"labels cannot cover node discs");
+    }
+  });
+  it("deterministic, hides an impossible label rather than overprinting", () => {
+    const nodes=[{id:"a",x:0,y:0,lines:["extremely long label"],width:120},
+      ...Array.from({length:200},(_,i)=>({id:"b"+i,x:((i%20)-10)*8,y:(Math.floor(i/20)-5)*8,lines:[],width:0}))];
+    const a=placeGraphLabels(nodes,6,12,4,1.2);
+    const b=placeGraphLabels(nodes,6,12,4,1.2);
+    assert.deepEqual([...a],[...b]);
+    assert.equal(a.has("a"),false);
+  });
 });

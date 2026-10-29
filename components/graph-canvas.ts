@@ -55,6 +55,7 @@ import { select } from "d3-selection";
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
 import type { Simulation, SimulationLinkDatum } from "d3-force";
 import { clusterHue, type Pt } from "./cluster-geometry.ts";
+import { placeGraphLabels, type LabelPlacement } from "./graph-label-layout.ts";
 import {
 	CHARGE_STRENGTH,
 	CLUSTER_PULL_STRENGTH,
@@ -117,6 +118,8 @@ export interface CanvasColors {
 	edge: string;
 	label: string;
 	hoverText: string;
+	/** Cluster label color is dark on paper, pale on charcoal. */
+	regionLabelLightness?: number;
 }
 
 export interface CanvasData {
@@ -472,6 +475,40 @@ export function arrowGeometry(
 }
 
 
+/** Gently curved connectors preserve the original graph's topology and
+ * arrow hit-points. The deterministic bend is stable across repaint, zoom,
+ * theme and iteration order. A reverse edge bends to the opposite side. */
+export function curvedArrowGeometry(
+  a: Pt, b: Pt, fromRadius: number, toRadius: number,
+  headLength: number, fromId: string, toId: string,
+): (ArrowGeom & { control: Pt }) | null {
+  const g=arrowGeometry(a,b,fromRadius,toRadius,headLength);
+  if(!g) return null;
+  const dx=b.x-a.x,dy=b.y-a.y;
+  const length=Math.hypot(dx,dy);
+  // Endpoints get too close at tight zoom and while dragging. Never let
+  // a control point push a small edge into a loop.
+  const bend=Math.min(20,length*.13);
+  // Same unordered pair => same curvature side in world coordinates.
+  // Direction reversal automatically mirrors the local perpendicular.
+  const key=fromId<toId ? fromId+"|"+toId : toId+"|"+fromId;
+  let hash=2166136261;
+  for(let i=0;i<key.length;i++) hash=Math.imul(hash ^ key.charCodeAt(i),16777619);
+  const side=(hash>>>0)%2===0 ? 1 : -1;
+  const nx=-dy/length,ny=dx/length;
+  const control={x:(g.shaftFrom.x+g.tip.x)/2+nx*bend*side,
+    y:(g.shaftFrom.y+g.tip.y)/2+ny*bend*side};
+  const tangentX=g.tip.x-control.x,tangentY=g.tip.y-control.y;
+  const tangentLen=Math.hypot(tangentX,tangentY);
+  if(tangentLen<1e-6) return null;
+  const ux=tangentX/tangentLen,uy=tangentY/tangentLen;
+  const base={x:g.tip.x-ux*headLength,y:g.tip.y-uy*headLength};
+  const half=headLength*.4;
+  return {...g,control,shaftTo:base,
+    left:{x:base.x-uy*half,y:base.y+ux*half},
+    right:{x:base.x+uy*half,y:base.y-ux*half}};
+}
+
 /** Nearest node within maxDist of a screen point (linear scan — µs at
  *  our scale; a spatial grid only earns its keep past ~10k nodes). */
 export function pickNearest<T extends { id: string; x: number; y: number }>(
@@ -548,17 +585,38 @@ function drawNameLines(
 	lines: string[],
 	world: WorldSizes,
 	color: string,
+	placement?: LabelPlacement,
 ): void {
 	context.fillStyle = color;
 	context.textAlign = "center";
 	context.textBaseline = "top";
-	const firstTop = y + world.nodeR + world.labelGap;
+	const firstTop = placement?.top ?? y + world.nodeR + world.labelGap;
+	const drawX = placement?.x ?? x;
 	for (let i = 0; i < lines.length; i++) {
-		context.fillText(lines[i]!, x, firstTop + i * world.labelSize * LABEL_LINE_HEIGHT);
+		context.fillText(lines[i]!, drawX, firstTop + i * world.labelSize * LABEL_LINE_HEIGHT);
 	}
 }
 
 // ─── The renderer ───────────────────────────────────────────────────────────
+
+/** Convert physical DOM pointer positions to the canvas's local camera
+ * coordinates when the document is CSS-zoomed (or Electron-scaled).
+ * This is pure so all zoom levels can be regression-tested without a DOM. */
+export function canvasPointerPosition(
+	clientX: number, clientY: number,
+	left: number, top: number,
+	physicalWidth: number, physicalHeight: number,
+	localWidth: number, localHeight: number,
+): Pt {
+	return {
+		x: (clientX - left) * (physicalWidth > 0 ? localWidth / physicalWidth : 1),
+		y: (clientY - top) * (physicalHeight > 0 ? localHeight / physicalHeight : 1),
+	};
+}
+
+export function effectiveCanvasDpr(deviceDpr: number, physicalWidth: number, localWidth: number): number {
+	return deviceDpr * (localWidth > 0 ? physicalWidth / localWidth : 1);
+}
 
 export class GraphCanvasRenderer {
 	private canvas: HTMLCanvasElement;
@@ -651,6 +709,7 @@ export class GraphCanvasRenderer {
 	private regionBuiltVersion = -1;
 	private frameCount = 0; // draw counter for the live-sim splat throttle
 	private labelLines = new Map<string, string[]>();
+	private labelPlacements = new Map<string, LabelPlacement>();
 	private worldLabelFont = "";
 	private world: WorldSizes = { nodeR: 0, glowOuter: 0, labelSize: 0, labelGap: 0 };
 
@@ -780,6 +839,26 @@ export class GraphCanvasRenderer {
 		this.simCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
 		this.buildSim();
 		this.geoVersion++; // new data → rebuild world geometry
+		this.markDirty();
+	}
+
+	/** Palette/font channel: changing light/dark or accent must repaint the
+	 * canvas immediately, WITHOUT calling setData (which resets the force
+	 * simulation, pending drag commits and camera-related geometry). */
+	setAppearance(colors: CanvasColors, fontFamily: string): void {
+		if (!this.data) return;
+		const fontChanged = this.data.fontFamily !== fontFamily;
+		this.data.colors = colors;
+		this.data.fontFamily = fontFamily;
+		if (fontChanged) this.geoVersion++; // cached text measurements need refresh
+		this.markDirty();
+	}
+
+	/** Next/font can finish loading after the first frame. Recalculate cached
+	 * canvas text wrap/metrics without touching positions, force or camera. */
+	refreshTypography(): void {
+		if (!this.data) return;
+		this.geoVersion++;
 		this.markDirty();
 	}
 
@@ -1049,7 +1128,11 @@ export class GraphCanvasRenderer {
 
 	private eventPos(e: { clientX: number; clientY: number }): Pt {
 		const rect = this.canvas.getBoundingClientRect();
-		return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+		// CSS interface zoom changes the physical DOMRect, but the canvas
+		// camera uses unzoomed clientWidth/clientHeight. Convert pointer
+		// coordinates back into local canvas pixels, so hit-test and drag
+		// anchors remain exact at 75%, 125%, 150% and ultrawide zoom.
+		return canvasPointerPosition(e.clientX, e.clientY, rect.left, rect.top, rect.width, rect.height, this.canvas.clientWidth, this.canvas.clientHeight);
 	}
 
 	private pickAt(px: number, py: number): CanvasNode | null {
@@ -1202,7 +1285,7 @@ export class GraphCanvasRenderer {
 	private syncSize(): void {
 		const w = this.canvas.clientWidth;
 		const h = this.canvas.clientHeight;
-		const dpr = window.devicePixelRatio || 1;
+		const dpr = effectiveCanvasDpr(window.devicePixelRatio || 1, this.canvas.getBoundingClientRect().width, this.canvas.clientWidth);
 		const bw = Math.max(1, Math.round(w * dpr));
 		const bh = Math.max(1, Math.round(h * dpr));
 		if (this.canvas.width !== bw || this.canvas.height !== bh) {
@@ -1264,15 +1347,15 @@ export class GraphCanvasRenderer {
 			if (!a || !b) continue;
 			const intoImp = isImpNodeId(e.to);
 			const outOfImp = isImpNodeId(e.from);
-			const g = arrowGeometry(a, b, outOfImp ? 0 : nodeR, intoImp ? 0 : nodeR, arrowLen);
+			const g = curvedArrowGeometry(a, b, outOfImp ? 0 : nodeR, intoImp ? 0 : nodeR, arrowLen, e.from, e.to);
 			if (!g) continue;
 			shafts.moveTo(g.shaftFrom.x, g.shaftFrom.y);
 			if (intoImp) {
 				// toRadius 0 put the tip AT the imp node's center: the
 				// headless shaft terminates there (no head triangle).
-				shafts.lineTo(g.tip.x, g.tip.y);
+				shafts.quadraticCurveTo(g.control.x, g.control.y, g.tip.x, g.tip.y);
 			} else {
-				shafts.lineTo(g.shaftTo.x, g.shaftTo.y);
+				shafts.quadraticCurveTo(g.control.x, g.control.y, g.shaftTo.x, g.shaftTo.y);
 				heads.moveTo(g.tip.x, g.tip.y);
 				heads.lineTo(g.left.x, g.left.y);
 				heads.lineTo(g.right.x, g.right.y);
@@ -1297,6 +1380,16 @@ export class GraphCanvasRenderer {
 		for (const n of data.nodes) {
 			if (isVisible(n.id) && !isImpNodeId(n.id)) this.labelLines.set(n.id, wrapLabel(ctx, n.label, maxW));
 		}
+		// Text is the only object re-positioned here; never perturb the
+		// saved layout, spring simulation or camera to solve collisions.
+		const realNodes = data.nodes.filter((n) => isVisible(n.id) && !isImpNodeId(n.id));
+		this.labelPlacements = placeGraphLabels(
+			realNodes.map((n) => ({
+				id:n.id,x:n.x,y:n.y,lines:this.labelLines.get(n.id) ?? [],
+				width:Math.max(1,...(this.labelLines.get(n.id) ?? []).map((line) => ctx.measureText(line).width)),
+			})),
+			nodeR,settings.labelSize,LABEL_GAP,LABEL_LINE_HEIGHT,
+		);
 		ctx.font = prevFont;
 	}
 
@@ -1608,7 +1701,7 @@ export class GraphCanvasRenderer {
 		if (!data || !settings) return;
 		const w = this.canvas.clientWidth;
 		const h = this.canvas.clientHeight;
-		const dpr = window.devicePixelRatio || 1;
+		const dpr = effectiveCanvasDpr(window.devicePixelRatio || 1, this.canvas.getBoundingClientRect().width, this.canvas.clientWidth);
 		const ctx = this.ctx;
 
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1674,7 +1767,8 @@ export class GraphCanvasRenderer {
 			for (const [id, lines] of this.labelLines) {
 				const n = this.nodeById.get(id);
 				if (!n) continue;
-				drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label);
+				const placed = this.labelPlacements.get(id);
+				if (placed) drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label, placed);
 			}
 			ctx.restore();
 		}
@@ -1699,7 +1793,7 @@ export class GraphCanvasRenderer {
 				ctx.save();
 				ctx.globalAlpha = this.hoverFade;
 				ctx.font = this.worldLabelFont;
-				drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], this.world, data.colors.hoverText);
+				drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], this.world, data.colors.hoverText, this.labelPlacements.get(n.id));
 				ctx.restore();
 			}
 		}
@@ -1723,9 +1817,19 @@ export class GraphCanvasRenderer {
 			// Screen px ÷ k = world units — the lines stay evenly spaced
 			// at a constant on-screen pitch at any zoom.
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
+			// Cluster captions live in screen space; a centroid can overlap
+			// another region at fit. Suppress duplicates rather than stacking
+			// illegible session names (zoom/pan refreshes this cheaply).
+			const occupied: Array<{ l:number;r:number;t:number;b:number }> = [];
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
-				ctx.fillStyle = `hsla(${rm.hue}, 55%, 78%, 0.85)`;
+				const captionWidth = Math.max(0,...rm.lines.map(line=>ctx.measureText(line).width));
+				const sx=rm.cx*k+tx,sy=rm.cy*k+ty;
+				const height=rm.lines.length*settings.clusterLabelSize*REGION_LABEL_LINE_HEIGHT;
+				const bounds={l:sx-captionWidth/2-7,r:sx+captionWidth/2+7,t:sy-height/2-7,b:sy+height/2+7};
+				if (occupied.some(box=>bounds.l<box.r&&bounds.r>box.l&&bounds.t<box.b&&bounds.b>box.t)) continue;
+				occupied.push(bounds);
+				ctx.fillStyle = `hsla(${rm.hue}, 55%, ${data.colors.regionLabelLightness ?? 78}%, 0.94)`;
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {
 					ctx.fillText(rm.lines[i]!, rm.cx, rm.cy + firstOffset + i * lineH);

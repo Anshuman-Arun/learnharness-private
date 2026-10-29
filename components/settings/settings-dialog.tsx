@@ -210,6 +210,11 @@ export function SettingsDialogBody({
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
+				// A child menu lives at the same document keydown level and must
+				// dismiss FIRST. stopPropagation on document cannot protect it
+				// from this already-registered settings listener, so the outer
+				// layer checks the active inner menu before claiming Escape.
+				if (document.querySelector("[data-lh-menu]")) return;
 				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim
 				// at the document level — the window chain (dictation →
 				// abort) must not also act. One Esc, one action.

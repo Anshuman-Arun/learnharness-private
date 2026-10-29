@@ -1,0 +1,142 @@
+/**
+ * Browser-level visual QA for the REAL Next.js UI (not the static concept mock).
+ * Run after npm run build, on a Linux Actions runner with Chrome installed.
+ * Uses only synthetic/ephemeral graph/settings responses, never user data.
+ */
+import assert from "node:assert/strict";
+import { spawn, execFileSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import puppeteer from "puppeteer-core";
+
+const outDir = join(process.cwd(), "artifacts", "editorial-ui");
+mkdirSync(outDir, { recursive: true });
+const candidates = [process.env.CHROME_BIN, "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/opt/google/chrome/chrome"].filter(Boolean);
+let chromePath = candidates.find((p) => existsSync(p));
+if (!chromePath) {
+  try { chromePath = execFileSync("which", ["google-chrome"], { encoding: "utf8" }).trim(); }
+  catch { throw new Error("No Chrome binary found for visual QA"); }
+}
+const port = 4317;
+const server = spawn(process.execPath, [".next/standalone/server.js"], { stdio: "inherit", env: { ...process.env, PORT: String(port), HOSTNAME: "127.0.0.1" } });
+let browser;
+const base = `http://127.0.0.1:${port}`;
+const createdAt = "2026-10-01T12:00:00.000Z";
+const labels = ["Expectation by indicators", "Linearity of expectation", "Conditional probability", "Bayes' rule", "Variance decomposition", "Martingale increments"];
+const nodes = labels.map((name,i)=>({
+  id: `n_visual_${i}`, name, statement: `${name}: a synthetic visual test proposition.`,
+  aliases: [], createdAt, provenance: [{ chatId: "visual-session", messageId: "visual" }]
+}));
+const graph = {
+  nodes, propositions: nodes,
+  edges: [{ from: nodes[0].id, to: nodes[1].id }, { from: nodes[1].id, to: nodes[2].id }, { from: nodes[3].id, to: nodes[4].id }, { from: nodes[4].id, to: nodes[5].id }],
+  logicalEdges: [{ from: nodes[0].id, to: nodes[1].id }, { from: nodes[1].id, to: nodes[2].id }, { from: nodes[3].id, to: nodes[4].id }, { from: nodes[4].id, to: nodes[5].id }],
+  impLinks: [], chains: [], sessions: { "visual-session": "Quant mathematics" }, fileSources: {},
+  nodeSessions: Object.fromEntries(nodes.map(n=>[n.id,["visual-session"]])),
+  clusters: [{ id:"c_expectation", label:"Expectation", members:nodes.slice(0,3).map(n=>n.id) },{ id:"c_probability", label:"Probability", members:nodes.slice(3).map(n=>n.id) }],
+  positions: Object.fromEntries(nodes.map((n,i)=>[n.id,{x:(i%3)*150+(i<3?0:110),y:Math.floor(i/3)*200}]))
+};
+let appearance = { mode: "dark", accent:"coral", accentIntensity:16, zoomPercent:100, corners:"soft", borders:"regular" };
+function settingsResponse() {
+  return JSON.stringify({ settings:{ version:1, general:{autoUpdate:true,microphoneId:"default",microphoneLabel:""}, appearance } });
+}
+async function waitForServer() {
+  for (let i=0;i<100;i++) {
+    if (server.exitCode !== null) throw new Error("Next server exited before becoming ready");
+    try { const r = await fetch(base); if(r.status < 500) return; } catch {}
+    await new Promise(r=>setTimeout(r,250));
+  }
+  throw new Error("Next server never became ready");
+}
+try {
+  await waitForServer();
+  browser = await puppeteer.launch({ executablePath:chromePath, headless:true, args:["--no-sandbox","--disable-dev-shm-usage","--use-gl=swiftshader"] });
+  for (const size of [{width:1366,height:768},{width:1920,height:1080}]) {
+    const page = await browser.newPage();
+    await page.setViewport({ ...size, deviceScaleFactor:1 });
+    // Each viewport test is a fresh-user initial fit, not the camera left
+    // behind by the previous viewport in this same Chromium profile.
+    await page.evaluateOnNewDocument(() => { try { localStorage.removeItem("lh.graph.camera.v1"); } catch {} });
+    const errors=[];
+    page.on("pageerror",e=>errors.push(e.message));
+    await page.setRequestInterception(true);
+    page.on("request", request=>{
+      const url = new URL(request.url());
+      if(url.pathname==="/api/graph") return void request.respond({status:200,contentType:"application/json",body:JSON.stringify(graph)});
+      if(url.pathname==="/api/settings" && request.method()==="GET") return void request.respond({status:200,contentType:"application/json",body:settingsResponse()});
+      if(url.pathname==="/api/settings/appearance" && request.method()==="PUT") {
+        appearance=JSON.parse(request.postData()??"{}");
+        return void request.respond({status:200,contentType:"application/json",body:settingsResponse()});
+      }
+      return void request.continue();
+    });
+    await page.goto(base,{waitUntil:"networkidle2",timeout:60000});
+    await page.waitForSelector('[data-testid="dashboard-home"]',{timeout:30000});
+    await page.screenshot({path:join(outDir,`study-desk-dark-${size.width}x${size.height}.png`),fullPage:false});
+    await page.click('[data-testid="home-surface-toggle"]');
+    // The original PlanDiagram SVG remains the graph's default renderer;
+    // the physics Atlas is still selectable from within that graph.
+    await page.waitForSelector("canvas",{timeout:30000});
+    await page.waitForSelector('svg[aria-label="Plan diagram"]',{timeout:30000});
+    await new Promise(r=>setTimeout(r,1200)); // allow graph bitmap and fonts to settle
+    await page.evaluate(()=>document.fonts.ready);
+    for(const theme of ["dark","light"]) {
+      const result=await page.evaluate(async t=>{
+        const root=document.documentElement;
+        // This is the SAME root token change the persisted provider makes;
+        // settings persistence is separately tested in the unit suite.
+        root.classList.toggle("dark",t==="dark");
+        root.dataset.theme=t;
+        // Check the SETTLED appearance rather than a mid-transition frame;
+        // active-tab ink and fill cross near the same gray during color fades.
+        await new Promise(r=>setTimeout(r, 350));
+        const canvas=document.querySelector("canvas");
+        const rect=canvas?.getBoundingClientRect();
+        const styles=getComputedStyle(root);
+        return { background:styles.getPropertyValue("--background").trim(), foreground:styles.getPropertyValue("--foreground").trim(), canvasSize:canvas?[canvas.width,canvas.height]:null, rect:rect?[rect.width,rect.height]:null };
+      },theme);
+      assert.ok(result.canvasSize?.[0] > 200 && result.canvasSize?.[1]>150, `graph canvas size in ${theme}`);
+      assert.ok(result.rect?.[0] > 200, "canvas CSS box");
+      assert.ok(result.background && result.foreground && result.background!==result.foreground, `theme foreground contrast ${theme}`);
+      const diagram=await page.evaluate(()=>{
+        const svg=document.querySelector('svg[aria-label="Plan diagram"]');
+        const rects=[...document.querySelectorAll('svg[aria-label="Plan diagram"] [data-testid^="plan-node-"] > rect')]
+          .map(el=>el.getBoundingClientRect());
+        const overlaps=[];
+        for(let i=0;i<rects.length;i++)for(let j=i+1;j<rects.length;j++){
+          const a=rects[i],b=rects[j];
+          if(Math.min(a.right,b.right)-Math.max(a.left,b.left)>1 &&
+            Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1) overlaps.push([i,j]);
+        }
+        return {svg:!!svg,nodes:rects.length,overlaps,
+          curves:[...(svg?.querySelectorAll("path[d]")??[])].filter(p=>/[Cc]/.test(p.getAttribute("d")??"")).length};
+      });
+      assert.equal(diagram.svg,true,"home graph uses original mini DAG renderer");
+      assert.equal(diagram.nodes,6,"all six synthetic propositions rendered");
+      assert.deepEqual(diagram.overlaps,[],"original DAG box placement is collision free");
+      assert.ok(diagram.curves>0,"original DAG curved connectors visible");
+      await page.screenshot({path:join(outDir,`home-${theme}-${size.width}x${size.height}.png`),fullPage:false});
+      const controls = await page.evaluate(() => {
+        const selectors = {
+          newSession: '[data-testid="new-session"]',
+          filterAll: '[data-testid="session-kind-filter"] button:last-child',
+          dictation: '[data-testid="dictation-toggle"]',
+          homeMode: '[data-testid="home-mode-switch"] button:first-child',
+        };
+        return Object.fromEntries(Object.entries(selectors).map(([name, selector]) => {
+          const el = document.querySelector(selector);
+          if (!el) return [name, null];
+          const style = getComputedStyle(el);
+          return [name, { color: style.color, background: style.backgroundColor, opacity: style.opacity, text: el.textContent?.trim().slice(0,100) }];
+        }));
+      });
+      console.log("VISUAL",size,theme,result);
+      console.log("CONTROLS",size,theme,JSON.stringify(controls));
+    }
+    assert.deepEqual(errors,[],"no browser page errors");
+    await page.close();
+  }
+} finally {
+  await browser?.close();
+  server.kill("SIGTERM");
+}

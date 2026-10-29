@@ -98,14 +98,14 @@ export function MicrophonePicker({
 					type="button"
 					data-testid="microphone-refresh"
 					onClick={() => void refresh()}
-					className="text-xs text-muted-foreground hover:text-foreground"
+					className="text-xs font-medium text-muted-foreground hover:text-primary"
 				>Refresh</button>
 				<button
 					type="button"
 					data-testid="microphone-permission"
 					disabled={busy}
 					onClick={() => void grantAccess()}
-					className="rounded-sm border border-border bg-background px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+					className="rounded-sm border border-border bg-card px-2 py-1 text-xs font-medium text-foreground hover:border-primary/50 disabled:opacity-50"
 				>{busy ? "Checking…" : "Detect microphones"}</button>
 			</div>
 			{namedDevices.length === 0 && !error && (

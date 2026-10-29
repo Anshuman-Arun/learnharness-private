@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
 import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
+import { DashboardHome } from "@/components/dashboard-home";
 import { SetupDialog } from "@/components/setup-dialog";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { useStrongKeyless, useZeroKeys, ZeroKeysPill } from "@/components/setup-cta";
@@ -31,6 +32,26 @@ export function Home({
 	rendering?: boolean;
 }) {
 	const router = useRouter();
+	const [showAtlas, setShowAtlas] = useState(false);
+	// The numbered sidebar and the Home graph toggle share the same view
+	// state. Deep-linking from Learning map/Training to Knowledge opens the
+	// original atlas without a new route or a duplicate graph renderer.
+	useEffect(() => {
+		const showRequestedAtlas = new URLSearchParams(window.location.search).get("view") === "atlas";
+		if (showRequestedAtlas) setShowAtlas(true);
+		const onHomeView = (event: Event) => {
+			const view = (event as CustomEvent<"home" | "knowledge">).detail;
+			if (view === "home" || view === "knowledge") setShowAtlas(view === "knowledge");
+		};
+		window.addEventListener("lh:home-view", onHomeView);
+		return () => window.removeEventListener("lh:home-view", onHomeView);
+	}, []);
+	useEffect(() => {
+		window.dispatchEvent(new CustomEvent("lh:home-surface", {
+			detail: showAtlas ? "knowledge" : "home",
+		}));
+	}, [showAtlas]);
+
 	const [topic, setTopic] = useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
 	 * mechanics as the chat composer, owner's consistency ruling): a
@@ -157,7 +178,7 @@ export function Home({
 	};
 
 	return (
-		<div className="relative h-dvh">
+		<div className="lh-editorial-home relative h-dvh">
 			{/* Window-drag strip (merged chrome, owner 2026-09-17): a dedicated
 			    mask element, deliberately FIRST in the DOM. Electron's app-region
 			    mask resolves by DOM order — a no-drag element subtracts only drag
@@ -177,7 +198,9 @@ export function Home({
 			    chrome's survivors; data, extraction, and the pick flow are
 			    untouched, and the chain table stays behind its button. */}
 			<main className="absolute inset-0">
-				{rendering ? (
+				{!showAtlas ? (
+					<DashboardHome onOpenAtlas={() => setShowAtlas(true)} />
+				) : rendering ? (
 					<GraphView
 						chainSelectOpen={chainSelectOpen}
 						practiceSelection={pickedIds}
@@ -203,6 +226,10 @@ export function Home({
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>
+				<span className="lh-editorial-home-masthead">LEARNHARNESS <span aria-hidden="true">/</span> {showAtlas ? "KNOWLEDGE ATLAS" : "STUDY DESK"}</span>
+				<button type="button" data-testid="home-surface-toggle" className="lh-study-toggle lh-no-drag pointer-events-auto" onClick={() => setShowAtlas(v => !v)}>
+					{showAtlas ? "Back to study desk" : (rendering ? "Open knowledge atlas" : "Open knowledge summary")} <span aria-hidden="true">↗</span>
+				</button>
 			</header>
 
 			{/* New session — same floating blob as the chat composer, docked
@@ -242,7 +269,7 @@ export function Home({
 						)}
 					/>
 					<form
-						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
+						className="lh-editorial-home-composer flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
 					onSubmit={(e) => {
 						e.preventDefault();
 						void start();
@@ -300,6 +327,7 @@ export function Home({
 										key={m}
 										type="button"
 										data-testid={`home-mode-${m}`}
+									aria-pressed={mode === m}
 										onClick={() => setMode(m)}
 										className={
 											"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +

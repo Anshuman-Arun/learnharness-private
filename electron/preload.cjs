@@ -30,6 +30,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("lh", {
 	platform: process.platform,
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
+	setTitlebarTheme: (mode) => ipcRenderer.send("lh:appearance-theme", mode),
 	onZoom: (cb) => {
 		const listener = (_event, factor) => cb(factor);
 		ipcRenderer.on("lh:zoom", listener);

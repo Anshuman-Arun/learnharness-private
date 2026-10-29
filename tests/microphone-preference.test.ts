@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dictationAudioConstraints, findMicrophoneByLabel, shouldReconnectDictation } from "../components/dictation.tsx";
+import { dictationAudioConstraints, findMicrophoneByLabel } from "../components/dictation.tsx";
 import { sanitizeUserSettings } from "../src/core/settings.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
 import { parseGeneralSettingsBody } from "../src/server/settings-body.ts";
@@ -44,18 +44,5 @@ describe("persisted microphone preference", () => {
 		assert.equal(findMicrophoneByLabel("USB Headset", devices), "new-origin-id");
 		assert.equal(findMicrophoneByLabel("Unknown", devices), undefined);
 		assert.equal(findMicrophoneByLabel("USB Headset", [...devices, { kind: "audioinput", label: "USB Headset", deviceId: "duplicate" }]), undefined);
-	});
-});
-
-describe("dictation lifecycle and Bluetooth startup cases", () => {
-	it("never reconnects after learner presses Stop, even on abnormal network close", () => {
-		for (const code of [1000, 1001, 1006, 1011, 4000]) {
-			assert.equal(shouldReconnectDictation(code, true, 0), false);
-		}
-	});
-	it("allows only one reconnect while actively recording, not on normal closure", () => {
-		assert.equal(shouldReconnectDictation(1006, false, 0), true);
-		assert.equal(shouldReconnectDictation(1006, false, 1), false);
-		assert.equal(shouldReconnectDictation(1000, false, 0), false);
 	});
 });

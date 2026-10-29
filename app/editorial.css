@@ -1,0 +1,642 @@
+/*
+ * Editorial v10 design language adapted from Interview-App PR #125.
+ * All behavior stays with existing LearnHarness React components.
+ * Source: Interview-App/apps/web/src/styles/theme.css, editorial-v10.css,
+ * ProductFrame.css (bf7ef65ae44f13b34063b5c409eb658c04cd1447).
+ */
+/* Interview-App's paper-and-ink light palette; root tokens override the
+ * legacy dark-only palette without changing the learning/runtime components. */
+[data-lh-editorial="v10"]:not(.dark) {
+  color-scheme: light;
+  --lh-font-ui: var(--font-plex), "IBM Plex Sans", var(--font-sans3), "Segoe UI", sans-serif;
+  --lh-font-display: var(--font-newsreader), "Newsreader", "Iowan Old Style", Georgia, serif;
+  --background: #f2eddf;
+  --foreground: #1a1815;
+  --card: #fbf8ef;
+  --card-foreground: #1a1815;
+  --popover: #fbf8ef;
+  --popover-foreground: #1a1815;
+  --primary: #a74733;
+  --primary-foreground: #fffaf1;
+  --secondary: #f5f0e4;
+  --secondary-foreground: #48433c;
+  --muted: #f5f0e4;
+  --muted-foreground: #6b645a;
+  --accent: #eee7d8;
+  --accent-foreground: #1a1815;
+  --destructive: #a24b49;
+  --border: #cec5b3;
+  --input: #cec5b3;
+  --ring: #a74733;
+  --lh-editorial-border-subtle: rgba(26,24,21,.12);
+  --lh-editorial-surface-hover: #eee7d8;
+  --lh-editorial-primary-hover: #913b2b;
+  --lh-ink-strong: var(--foreground);
+  --lh-ink-italic: var(--foreground);
+}
+[data-lh-editorial="v10"] {
+  --lh-control-radius: 2px;
+  --lh-panel-radius: 4px;
+  --lh-dialog-radius: 5px;
+  --lh-accent-intensity: 16%;
+  --lh-editorial-primary-hover: #e28a73;
+}
+[data-lh-editorial="v10"][data-corners="square"] {--lh-control-radius:1px;--lh-panel-radius:2px;--lh-dialog-radius:3px;}
+[data-lh-editorial="v10"][data-corners="round"] {--lh-control-radius:6px;--lh-panel-radius:8px;--lh-dialog-radius:10px;}
+[data-lh-editorial="v10"][data-corners="generous"] {--lh-control-radius:10px;--lh-panel-radius:14px;--lh-dialog-radius:16px;}
+html[data-lh-editorial="v10"][data-borders="quiet"] {--border:color-mix(in srgb,var(--foreground) 11%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 7%,transparent);}
+html[data-lh-editorial="v10"][data-borders="strong"] {--border:color-mix(in srgb,var(--foreground) 29%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 17%,transparent);}
+html[data-lh-editorial="v10"][data-borders="contrast"] {--border:color-mix(in srgb,var(--foreground) 37%,var(--background));--input:var(--border);--lh-editorial-border-subtle:color-mix(in srgb,var(--foreground) 22%,transparent);}
+/* Accent selection is independent of the neutral hover surface (--accent).
+ * Keep foreground contrasting in both modes; intensity drives accent washes. */
+[data-lh-editorial="v10"][data-accent="ink"] {--primary:#30312f;--ring:var(--primary);--lh-editorial-primary-hover:#20211f;}
+[data-lh-editorial="v10"][data-accent="cobalt"] {--primary:#4a5d78;--ring:var(--primary);--lh-editorial-primary-hover:#394b65;}
+[data-lh-editorial="v10"][data-accent="teal"] {--primary:#477169;--ring:var(--primary);--lh-editorial-primary-hover:#385f58;}
+[data-lh-editorial="v10"][data-accent="amber"] {--primary:#946321;--ring:var(--primary);--lh-editorial-primary-hover:#815419;}
+[data-lh-editorial="v10"][data-accent="violet"] {--primary:#74617f;--ring:var(--primary);--lh-editorial-primary-hover:#5f4c69;}
+[data-lh-editorial="v10"][data-accent="rose"] {--primary:#a65a65;--ring:var(--primary);--lh-editorial-primary-hover:#8d4651;}
+[data-lh-editorial="v10"]:not(.dark)[data-accent="coral"] {--lh-editorial-primary-hover:#913b2b;}
+.dark[data-lh-editorial="v10"][data-accent="ink"] {--primary:#e3ddd4;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#fffaf1;}
+.dark[data-lh-editorial="v10"][data-accent="cobalt"] {--primary:#8799b7;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#9bacc8;}
+.dark[data-lh-editorial="v10"][data-accent="teal"] {--primary:#78a29a;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#8eb4ad;}
+.dark[data-lh-editorial="v10"][data-accent="amber"] {--primary:#c69452;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#d7a868;}
+.dark[data-lh-editorial="v10"][data-accent="violet"] {--primary:#a894b4;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#baa5c5;}
+.dark[data-lh-editorial="v10"][data-accent="rose"] {--primary:#ce7d87;--ring:var(--primary);--primary-foreground:#211b18;--lh-editorial-primary-hover:#dc9099;}
+[data-lh-editorial="v10"] .lh-editorial-home-composer:focus-within {
+  border-color:color-mix(in srgb,var(--primary) var(--lh-accent-intensity),var(--border));
+}
+[data-lh-editorial="v10"] [data-active="true"][data-testid^="session-row"] {
+  box-shadow:inset 2px 0 0 var(--primary);
+}
+
+.dark[data-lh-editorial="v10"] {
+  color-scheme: dark;
+  --lh-font-ui: var(--font-plex), "IBM Plex Sans", var(--font-sans3), "Segoe UI", sans-serif;
+  --lh-font-display: var(--font-newsreader), "Newsreader", "Iowan Old Style", Georgia, serif;
+  --background: #2a2825;
+  --foreground: #f3eee5;
+  --card: #34312d;
+  --card-foreground: #f3eee5;
+  --popover: #34312d;
+  --popover-foreground: #f3eee5;
+  --primary: #d47760;
+  --primary-foreground: #211b18;
+  --secondary: #3a3732;
+  --secondary-foreground: #cbc3b8;
+  --muted: #3a3732;
+  --muted-foreground: #a9a095;
+  --accent: #403c37;
+  --accent-foreground: #f3eee5;
+  --destructive: #d37875;
+  --border: #585148;
+  --input: #585148;
+  --ring: #d47760;
+  --lh-editorial-border-subtle: rgba(243, 238, 229, .12);
+  --lh-editorial-surface-hover: #403c37;
+  --lh-ink-strong: var(--foreground);
+  --lh-ink-italic: var(--foreground);
+  --lh-heading-weight: 650;
+}
+[data-lh-editorial="v10"] body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--lh-font-ui);
+  letter-spacing: -.006em;
+}
+[data-lh-editorial="v10"] .font-title {
+  font-family: var(--font-title);
+  font-weight: 600;
+  letter-spacing: -.027em;
+}
+[data-lh-editorial="v10"] .lh-prose {letter-spacing: 0;}
+/* The old no-outline reset is retained for pointers, but keyboard users
+   get a visible warm-rust focus affordance in the new skin. */
+[data-lh-editorial="v10"] :is(button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+[data-lh-editorial="v10"] :is(button, input, textarea, select):disabled {cursor: not-allowed;}
+[data-lh-editorial="v10"] button[data-slot="button"] {border-radius: var(--lh-control-radius);}
+[data-lh-editorial="v10"] :is([role="dialog"], [role="menu"], [data-lh-menu]) {
+  border-color: var(--border);
+  border-radius: var(--lh-dialog-radius);
+  background-color: var(--card);
+  box-shadow: 0 20px 48px rgb(0 0 0 / .28);
+}
+[data-lh-editorial="v10"] .lh-editorial-rail {
+  background: color-mix(in srgb, var(--card) 74%, var(--background));
+  border-color: var(--lh-editorial-border-subtle);
+}
+[data-lh-editorial="v10"] .lh-editorial-rail > .lh-drag {
+  min-height: 65px;
+  border-bottom: 1px solid var(--lh-editorial-border-subtle);
+  margin-bottom: 13px;
+}
+[data-lh-editorial="v10"] .lh-editorial-brand {
+  min-width: 0;
+  color: var(--foreground);
+  border: 1px solid transparent;
+  border-radius: var(--lh-control-radius);
+}
+[data-lh-editorial="v10"] .lh-editorial-brand:hover {
+  border-color: var(--lh-editorial-border-subtle);
+}
+[data-lh-editorial="v10"] .lh-editorial-brand-label {
+  font-family: var(--lh-font-display);
+  font-weight: 500;
+  font-size: 19px;
+  letter-spacing: -.035em;
+  white-space: nowrap;
+}
+[data-lh-editorial="v10"] [data-testid="new-session"] {
+  min-height: 41px;
+  padding: 0 13px;
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: var(--lh-control-radius);
+  font-family: var(--lh-font-ui);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: .012em;
+  text-transform: none;
+  box-shadow: 3px 3px 0 rgb(0 0 0 / .14);
+}
+[data-lh-editorial="v10"] [data-testid="new-session"]:hover {
+  background: var(--lh-editorial-primary-hover);
+  color: var(--primary-foreground);
+  transform: translate(-1px, -1px);
+}
+[data-lh-editorial="v10"] [data-testid="new-session-practice"] {
+  min-height: 39px;
+  padding: 0 13px;
+  border: 1px solid var(--lh-editorial-border-subtle);
+  border-radius: var(--lh-control-radius);
+  color: var(--foreground);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  text-transform: none;
+}
+[data-lh-editorial="v10"] [data-testid="new-session-practice"]:hover {
+  background: var(--accent);
+  border-color: var(--border);
+}
+[data-lh-editorial="v10"] [data-testid="session-search"] {
+  height: 29px;
+  padding-left: 25px;
+  border: 1px solid var(--border);
+  border-radius: var(--lh-control-radius);
+  background: var(--background);
+}
+[data-lh-editorial="v10"] [data-testid="session-kind-filter"],
+[data-lh-editorial="v10"] [data-testid="home-mode-switch"] {
+  border: 1px solid var(--lh-editorial-border-subtle);
+  border-radius: var(--lh-control-radius);
+  background: var(--background);
+}
+[data-lh-editorial="v10"] [data-testid="session-kind-filter"] button,
+[data-lh-editorial="v10"] [data-testid="home-mode-switch"] button {border-radius: var(--lh-control-radius);}
+[data-lh-editorial="v10"] [data-testid="session-row"],
+[data-lh-editorial="v10"] [data-testid="session-row-kbd"] {
+  min-height: 51px;
+  border: 1px solid transparent;
+  border-radius: var(--lh-control-radius);
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+[data-lh-editorial="v10"] [data-testid="session-row"]:hover,
+[data-lh-editorial="v10"] [data-testid="session-row-kbd"]:hover {
+  border-color: var(--lh-editorial-border-subtle);
+  background: var(--lh-editorial-surface-hover);
+}
+[data-lh-editorial="v10"] [data-active="true"][data-testid^="session-row"] {
+  border-color: var(--border);
+  background: var(--card);
+  box-shadow: 3px 3px 0 rgb(0 0 0 / .10);
+}
+[data-lh-editorial="v10"] [data-testid="settings-entry"] {
+  width: 100%;
+  min-height: 36px;
+  border-top: 1px solid var(--lh-editorial-border-subtle);
+  border-radius: var(--lh-control-radius);
+  text-transform: none;
+  font-size: 13px;
+  letter-spacing: .02em;
+}
+[data-lh-editorial="v10"] .lh-editorial-topbar {
+  background: color-mix(in srgb, var(--background) 90%, var(--card));
+  border-bottom: 1px solid var(--lh-editorial-border-subtle);
+}
+[data-lh-editorial="v10"] .lh-editorial-topbar .font-title {
+  font-size: clamp(22px, 2vw, 31px);
+}
+[data-lh-editorial="v10"] .lh-editorial-home-masthead {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .11em;
+  color: var(--muted-foreground);
+  user-select: none;
+}
+[data-lh-editorial="v10"] .lh-editorial-home-masthead span {
+  color: var(--primary);
+  margin: 0 8px;
+}
+[data-lh-editorial="v10"] .lh-editorial-home-composer {
+  border-radius: var(--lh-dialog-radius);
+  background: var(--card);
+  border-color: var(--border);
+  box-shadow: 0 9px 28px rgb(0 0 0 / .18);
+}
+[data-lh-editorial="v10"] .lh-editorial-session-composer {background: transparent;}
+[data-lh-editorial="v10"] :is(.lh-editorial-home-composer, .lh-editorial-session-composer) textarea {
+  color: var(--foreground);
+  caret-color: var(--primary);
+}
+[data-lh-editorial="v10"] :is(.lh-editorial-home-composer, .lh-editorial-session-composer) button[type="submit"]:not([data-testid="next-problem-button"]) {
+  border-radius: var(--lh-control-radius);
+}
+[data-lh-editorial="v10"] .lh-editorial-knowledge-summary {
+  width: min(85vw, 440px);
+  padding: 28px 36px 34px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--lh-editorial-border-subtle);
+  background: color-mix(in srgb, var(--card) 42%, transparent);
+}
+[data-lh-editorial="v10"] .lh-editorial-eyebrow {
+  margin-bottom: 12px;
+  color: var(--primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+}
+[data-lh-editorial="v10"] .lh-editorial-summary-heading {
+  margin-bottom: 22px;
+  font-family: var(--lh-font-display);
+  font-size: clamp(25px, 3vw, 35px);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -.04em;
+  text-wrap: balance;
+}
+[data-lh-editorial="v10"] .lh-editorial-knowledge-summary p {line-height: 1.55;}
+[data-lh-editorial="v10"] .lh-prose blockquote {border-left-color: var(--primary);}
+[data-lh-editorial="v10"] .lh-prose a {
+  text-decoration-color: var(--primary);
+  text-underline-offset: 3px;
+}
+@media (max-width: 640px) {
+  [data-lh-editorial="v10"] .lh-editorial-brand-label {font-size: 17px;}
+  [data-lh-editorial="v10"] .lh-editorial-home-masthead {font-size: 11px; letter-spacing: .06em;}
+  [data-lh-editorial="v10"] .lh-editorial-knowledge-summary {padding: 24px;}
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-lh-editorial="v10"] [data-testid="new-session"]:hover {transform: none;}
+}
+
+/* Shared highlight wash: the slider now affects all selection surfaces, not
+ * only the home composer. Primary is the saved accent; neutral --accent
+ * remains safe for hover, and text keeps the correct per-theme contrast. */
+[data-lh-editorial="v10"] {
+  --lh-highlight-wash: color-mix(in srgb, var(--primary) var(--lh-accent-intensity), var(--card));
+  --lh-highlight-border: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+[data-lh-editorial="v10"] [data-active="true"][data-testid^="session-row"] {
+  background: var(--lh-highlight-wash);
+  border-color: var(--lh-highlight-border);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+[data-lh-editorial="v10"] [data-testid="session-row-kbd"]:not([data-active="true"]) {
+  background: var(--lh-highlight-wash);
+  border-color: var(--lh-highlight-border);
+}
+[data-lh-editorial="v10"] [data-testid="session-row"]:focus-visible,
+[data-lh-editorial="v10"] [data-testid="session-row-kbd"]:focus-visible {
+  outline: 2px solid var(--primary);
+}
+[data-lh-editorial="v10"] [data-testid="new-session-practice"]:focus-visible,
+[data-lh-editorial="v10"] [data-testid="new-session"]:focus-visible {
+  outline: 2px solid var(--primary);
+}
+[data-lh-editorial="v10"] [data-testid^="accent-"][aria-pressed="true"] {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+}
+[data-lh-editorial="v10"] [data-testid="settings-dialog"] [aria-current="true"],
+[data-lh-editorial="v10"] [data-testid="settings-dialog"] [aria-selected="true"] {
+  background: var(--lh-highlight-wash);
+  border-color: var(--lh-highlight-border);
+}
+/* Composers are already designed at 16px reading scale. Keep visual
+ * labels at 11–13px or above; support readable responsive scaling. */
+[data-lh-editorial="v10"] .lh-editorial-home-masthead {
+  font-size: 11px;
+  line-height: 1.55;
+}
+[data-lh-editorial="v10"] .lh-editorial-eyebrow {
+  font-size: 11px;
+  line-height: 1.5;
+}
+[data-lh-editorial="v10"] .lh-editorial-brand-label {font-size: clamp(17px, 1.4vw, 20px);}
+[data-lh-editorial="v10"] [data-testid="dictation-bar"] {
+  border: 1px solid var(--lh-editorial-border-subtle);
+  border-radius: var(--lh-panel-radius);
+  padding: 2px 6px;
+  background: var(--lh-highlight-wash);
+}
+[data-lh-editorial="v10"] [data-testid="dictation-bar"][data-dictation-phase="connecting"] {
+  background: var(--card);
+}
+[data-lh-editorial="v10"] [data-testid="dictation-bar"][data-dictation-phase="stopping"] {
+  background: var(--secondary);
+}
+[data-lh-editorial="v10"] [data-testid="dictation-connection-state"] {
+  white-space: nowrap;
+  font-size: 12px;
+}
+@media (max-width: 700px) {
+  [data-lh-editorial="v10"] [data-testid="dictation-connection-state"] {
+    font-size: 11px;
+  }
+}
+
+/* A theme change must be atomic. The dark and light pairs cross in the
+ * middle of transition-colors, briefly making active tabs unreadable.
+ * The appearance provider adds this class for one frame on mode flips. */
+[data-lh-editorial="v10"].lh-theme-changing,
+[data-lh-editorial="v10"].lh-theme-changing *,
+[data-lh-editorial="v10"].lh-theme-changing *::before,
+[data-lh-editorial="v10"].lh-theme-changing *::after {
+  transition-property: none !important;
+  transition-duration: 0s !important;
+}
+
+/* The teach/practice and history filter tabs share the selected accent wash.
+ * aria-pressed makes the state accessible; the saved 8–28% intensity slider
+ * now affects these actual controls rather than only session cards. */
+[data-lh-editorial="v10"] [data-testid="session-kind-filter"] button[aria-pressed="true"],
+[data-lh-editorial="v10"] [data-testid="home-mode-switch"] button[aria-pressed="true"] {
+  background: var(--lh-highlight-wash);
+  box-shadow: inset 0 -2px 0 var(--primary);
+  color: var(--foreground);
+}
+[data-lh-editorial="v10"] [data-testid="session-kind-filter"] button,
+[data-lh-editorial="v10"] [data-testid="home-mode-switch"] button {
+  font-size: 12px;
+  line-height: 1.4;
+  min-height: 25px;
+}
+
+/* Light lesson-plan legibility: PlanDiagram's original white/gray SVG
+ * stroke classes assume a black backing. On the cream lesson popup they
+ * become faint enough to disappear. Scope this ONLY to the actual popup:
+ * the home diagram's intentionally charcoal canvas and the original
+ * mini-DAG geometry/arrow shapes remain untouched. */
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status] rect:first-child {
+  stroke: #7a6b5c;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status="upcoming"] rect:first-child {
+  stroke: #86796a;
+  fill: #f6f1e6;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status] text {
+  fill: #29251f;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status="upcoming"] text {
+  fill: #574c40;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] > path {
+  stroke: #7a6b5c;
+}
+html[data-lh-editorial="v10"]:not(.dark) [data-testid="plan-popup"] svg[aria-label="Plan diagram"] marker path {
+  fill: #7a6b5c;
+}
+
+/* The initial plan often has zero visited concepts, so EVERY node starts
+ * "upcoming". Keep that subdued hierarchy, but not at a contrast level
+ * where the only diagram on the screen becomes effectively unreadable. */
+html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status="upcoming"] text {
+  fill: #c8c0b4;
+}
+html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Plan diagram"] g[data-status="upcoming"] rect:first-child {
+  stroke: #8e857a;
+}
+html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Plan diagram"] > path.stroke-border {
+  stroke: #8e857a;
+}
+html.dark[data-lh-editorial="v10"] [data-testid="plan-popup"] svg[aria-label="Plan diagram"] marker path.fill-border {
+  fill: #8e857a;
+}
+
+/* Study desk: an editorial homepage, not an analytics/SaaS dashboard.
+   The live knowledge graph, session composer and overlays are separate.
+   The reserved lower scroll padding prevents the dock from hiding content. */
+[data-lh-editorial="v10"] .lh-study-desk {
+  height: 100%; overflow-y: auto; overflow-x: hidden;
+  padding: 91px clamp(22px,4vw,60px) 210px;
+  background: var(--background); color: var(--foreground);
+}
+[data-lh-editorial="v10"] .lh-study-inner { max-width: 1120px; margin: 0 auto; }
+[data-lh-editorial="v10"] .lh-study-hero { display:flex; justify-content:space-between; align-items:flex-start; gap: 42px; min-height: 304px; }
+[data-lh-editorial="v10"] .lh-study-hero-copy { flex:1; min-width:0; }
+[data-lh-editorial="v10"] .lh-study-kicker {
+  color: var(--primary); font-family: var(--font-mono); font-size: 10px;
+  font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+}
+[data-lh-editorial="v10"] .lh-study-hero h1 {
+  font-family: var(--lh-font-display); font-weight: 400; font-size: clamp(42px,5vw,76px);
+  letter-spacing: -.055em; line-height:1.03; margin: 17px 0 19px;
+}
+[data-lh-editorial="v10"] .lh-study-hero h1 em { font-weight: 400; }
+[data-lh-editorial="v10"] .lh-study-hero-copy > p {
+  max-width: 480px; color: var(--muted-foreground);
+  font-family: var(--lh-font-ui); font-size: 15px; line-height: 1.65;
+}
+[data-lh-editorial="v10"] .lh-study-prints {
+  display:flex; align-items:flex-start; gap:38px; padding:3px 8px 0 0;
+  flex-shrink:0; user-select:none; pointer-events:none;
+}
+[data-lh-editorial="v10"] .lh-study-print {
+  width: 160px; padding: 9px 9px 13px; margin: 0;
+  background: #d7d0c4; color:#39332e; border: 1px solid #bcb3a5;
+  box-shadow: 4px 8px 22px rgb(0 0 0 / .24);
+  transform: rotate(-2.5deg);
+}
+[data-lh-editorial="v10"] .lh-study-print-second { transform: rotate(2.5deg); margin-top: 25px; }
+
+[data-lh-editorial="v10"] .lh-study-print svg { display:block; width:100%; height:auto; background: #cbc3b6; }
+[data-lh-editorial="v10"] .lh-study-print-lines { stroke:#80776e; }
+[data-lh-editorial="v10"] .lh-study-print-accent-path { stroke:var(--primary); }
+[data-lh-editorial="v10"] .lh-study-print-accent-fill { fill:var(--primary); }
+[data-lh-editorial="v10"] .lh-study-print-dots { fill:#48423c; stroke:#cbc3b6; }
+[data-lh-editorial="v10"] .lh-study-print figcaption {
+  font-family: var(--lh-font-display); font-size: 17px;
+  letter-spacing: -.025em; margin-top: 9px; line-height: 1.1;
+}
+[data-lh-editorial="v10"] .lh-study-print figcaption span {
+  display:block; margin-top: 7px; color: #645c52; font-family:var(--font-mono);
+  font-size:8px; font-weight:600; letter-spacing:.07em;
+}
+[data-lh-editorial="v10"] .lh-study-section-head {
+  border-top: 1px solid var(--border); padding-top: 23px; margin-top: 32px;
+  display:flex; justify-content:space-between; gap:12px; align-items:baseline;
+}
+[data-lh-editorial="v10"] .lh-study-section-head h2 {
+  font-family: var(--lh-font-display); font-size:21px; font-weight:400;
+}
+[data-lh-editorial="v10"] .lh-study-section-head > span {
+  font: 10px var(--font-mono); color:var(--muted-foreground);
+  letter-spacing:.1em;
+}
+[data-lh-editorial="v10"] .lh-study-metrics {
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:22px; margin-top:23px;
+}
+[data-lh-editorial="v10"] .lh-study-metric {
+  border-top:1px solid var(--border); padding-top:14px; min-width:0;
+}
+[data-lh-editorial="v10"] .lh-study-metric strong {
+  display:block; font-family:var(--lh-font-display);
+  font-size:clamp(30px,3.2vw,42px); font-weight:400; line-height:1.1;
+  font-variant-numeric:tabular-nums;
+}
+[data-lh-editorial="v10"] .lh-study-metric > span {
+  display:block; margin-top:11px; font-size:12px; color:var(--muted-foreground);
+}
+[data-lh-editorial="v10"] .lh-study-bottom {
+  display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);
+  gap:22px; margin-top:43px;
+}
+[data-lh-editorial="v10"] .lh-study-panel {
+  border:1px solid var(--border); background:color-mix(in srgb,var(--card) 48%,var(--background));
+  padding:24px 24px 20px; min-width:0;
+}
+[data-lh-editorial="v10"] .lh-study-panel h2 {
+  font-family:var(--lh-font-display); font-size:28px; font-weight:400;
+  letter-spacing:-.035em; line-height:1.2; margin:11px 0 8px;
+}
+[data-lh-editorial="v10"] .lh-study-panel p {
+  color:var(--muted-foreground); font-size:13px; line-height:1.6; margin-bottom:18px;
+}
+[data-lh-editorial="v10"] .lh-study-session {
+  display:flex; justify-content:space-between; align-items:center; gap:10px;
+  border-top:1px solid var(--lh-editorial-border-subtle); min-height:46px;
+  font-size:13px; color:var(--foreground); transition:color 120ms ease;
+}
+[data-lh-editorial="v10"] .lh-study-session > span:first-child {
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+[data-lh-editorial="v10"] .lh-study-session > span:last-child { color:var(--primary); }
+[data-lh-editorial="v10"] .lh-study-session:hover { color:var(--primary); }
+[data-lh-editorial="v10"] .lh-study-empty {
+  display:block; border-top:1px solid var(--border); padding-top:14px;
+  font-size:12px; color:var(--muted-foreground);
+}
+[data-lh-editorial="v10"] .lh-study-link {
+  color:var(--primary); font-size:13px; font-weight:600;
+  text-align:left; margin:1px 0 17px; text-decoration:underline;
+  text-underline-offset: 4px;
+}
+[data-lh-editorial="v10"] .lh-study-notes {
+  display:flex; justify-content:space-between; gap:10px; align-items:center;
+  border-top:1px solid var(--lh-editorial-border-subtle); padding-top:14px;
+  color:var(--muted-foreground); font-size:12px;
+}
+[data-lh-editorial="v10"] .lh-study-notes strong { color:var(--foreground); font-variant-numeric:tabular-nums; }
+[data-lh-editorial="v10"] .lh-study-toggle {
+  border:1px solid var(--border); color:var(--muted-foreground);
+  background:color-mix(in srgb,var(--card) 85%,transparent);
+  font-family:var(--lh-font-ui); font-size:12px; padding:8px 12px;
+  margin-left:14px; cursor:pointer; border-radius:var(--lh-control-radius);
+  white-space:nowrap;
+}
+[data-lh-editorial="v10"] .lh-study-toggle:hover { color:var(--foreground); border-color:var(--primary); }
+[data-lh-editorial="v10"] .lh-study-toggle > span { color:var(--primary); padding-left:6px; }
+@media (max-width:1300px) {
+  [data-lh-editorial="v10"] .lh-study-print-second { display:none; }
+}
+@media (max-width:930px) {
+  [data-lh-editorial="v10"] .lh-study-prints { display:none; }
+  [data-lh-editorial="v10"] .lh-study-hero { min-height:0; }
+}
+@media (max-width:700px) {
+  [data-lh-editorial="v10"] .lh-study-desk { padding:81px 20px 200px; }
+  [data-lh-editorial="v10"] .lh-study-section-head > span { display:none; }
+  [data-lh-editorial="v10"] .lh-study-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); row-gap:23px; }
+  [data-lh-editorial="v10"] .lh-study-bottom { grid-template-columns:1fr; gap:14px; margin-top:30px; }
+  [data-lh-editorial="v10"] .lh-study-hero h1 { font-size:clamp(40px,9vw,54px); }
+  [data-lh-editorial="v10"] .lh-study-toggle { margin-left:auto; font-size:11px; }
+}
+@media (max-width:540px) {
+  [data-lh-editorial="v10"] .lh-editorial-home-masthead { display:none; }
+}
+
+
+/* Compact, numbered editorial navigation (design review). The numeric
+   glyphs are deliberately 11px inside 29 × 28px chips; the original
+   13px+ appearance was too tight in the screenshot's boxes. */
+[data-lh-editorial="v10"] .lh-sidebar-numbered-nav {
+  display:grid; gap:6px;
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-heading {
+  padding:2px 3px 7px;
+  color:var(--muted-foreground);
+  font:600 10px/1.2 var(--font-mono);
+  letter-spacing:.14em; text-transform:uppercase;
+}
+[data-lh-editorial="v10"] .lh-sidebar-numbered-nav .lh-sidebar-nav-item {
+  display:grid;
+  width:100%;
+  min-height:43px;
+  grid-template-columns:29px minmax(0,1fr) 12px;
+  gap:10px;
+  align-items:center;
+  padding:6px 10px;
+  color:var(--muted-foreground);
+  border:1px solid var(--lh-editorial-border-subtle);
+  border-radius:var(--lh-control-radius);
+  background:color-mix(in srgb,var(--card) 50%,transparent);
+  text-align:left;
+  font:500 13px/1.25 var(--lh-font-ui);
+  letter-spacing:0;
+  text-transform:none;
+  transition:background-color .12s ease,border-color .12s ease,color .12s ease;
+}
+[data-lh-editorial="v10"] .lh-sidebar-numbered-nav .lh-sidebar-nav-item:hover {
+  color:var(--foreground);
+  background:var(--lh-editorial-surface-hover);
+  border-color:var(--border);
+}
+[data-lh-editorial="v10"] .lh-sidebar-numbered-nav .lh-sidebar-nav-item[aria-current="page"] {
+  color:var(--foreground);
+  background:var(--card);
+  border-color:var(--border);
+  box-shadow:3px 3px 0 rgb(0 0 0 / .09);
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-number {
+  display:grid; place-items:center;
+  width:29px; height:28px;
+  border:1px solid var(--border);
+  border-radius:var(--lh-control-radius);
+  color:var(--muted-foreground);
+  font:600 11px/1 var(--font-mono);
+  letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-item[aria-current="page"] .lh-sidebar-nav-number {
+  color:var(--primary);
+  border-color:var(--primary);
+  background:var(--lh-highlight-wash);
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-copy {
+  min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap;
+}
+[data-lh-editorial="v10"] .lh-sidebar-nav-arrow {
+  color:var(--primary); font-size:13px; text-align:right;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-lh-editorial="v10"] .lh-sidebar-nav-item { transition:none; }
+}

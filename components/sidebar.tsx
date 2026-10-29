@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -68,6 +68,7 @@ declare global {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
 			expandWindow: () => void;
+			setTitlebarTheme?: (mode: "light" | "dark") => void;
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
 			getZoom?: () => Promise<number>;
@@ -299,6 +300,8 @@ export function SessionRow({
 			onClick={onOpen}
 			onContextMenu={onContextMenu}
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
+			aria-current={active ? "page" : undefined}
+			data-active={active}
 			className={cn(
 				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
 				active && "bg-accent",
@@ -381,6 +384,19 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
+/** The six numbered entries reflect existing features, not new routes.
+ * Sessions focuses the existing search; Knowledge opens the original atlas;
+ * Settings opens the existing modal. */
+export const SIDEBAR_NAV_ITEMS = [
+	{ number: "01", id: "home", label: "Home" },
+	{ number: "02", id: "sessions", label: "Sessions" },
+	{ number: "03", id: "knowledge", label: "Knowledge" },
+	{ number: "04", id: "learning-map", label: "Learning map" },
+	{ number: "05", id: "training", label: "Training" },
+	{ number: "06", id: "settings", label: "Settings" },
+] as const;
+type SidebarNavId = (typeof SIDEBAR_NAV_ITEMS)[number]["id"];
+
 function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
@@ -397,6 +413,26 @@ function SessionsSidebar() {
 	const pathname = usePathname();
 	const router = useRouter();
 	const { open: openSettings } = useSettingsDialog();
+	const [homeSurface, setHomeSurface] = useState<"home" | "knowledge">("home");
+	const [navFocus, setNavFocus] = useState<"sessions" | "settings" | null>(null);
+	useEffect(() => {
+		const onSurface = (event: Event) => {
+			const surface = (event as CustomEvent<"home" | "knowledge">).detail;
+			if (surface === "home" || surface === "knowledge") {
+				setHomeSurface(surface);
+				setNavFocus(null);
+			}
+		};
+		window.addEventListener("lh:home-surface", onSurface);
+		return () => window.removeEventListener("lh:home-surface", onSurface);
+	}, []);
+	useEffect(() => setNavFocus(null), [pathname]);
+	const activeNav: SidebarNavId =
+		pathname.startsWith("/training") ? "training"
+		: pathname === "/learning-map" ? "learning-map"
+		: pathname.startsWith("/chat") ? "sessions"
+		: pathname === "/" ? homeSurface : "home";
+
 
 	/* New session (owner, 2026-09-13): NO POST — the button opens the
 	   sessionless draft view; the session is created only when the first
@@ -639,10 +675,11 @@ function SessionsSidebar() {
 
 	return (
 		<aside
+			data-lh-editorial-sidebar
 			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
 			aria-hidden={!open}
 		>
-			<div className="flex h-full w-72 flex-col border-r bg-background">
+			<div className="lh-editorial-rail flex h-full w-72 flex-col border-r bg-background">
 				{/* LH wordmark — the owner's header; close toggle sits at the edge.
 				    Merged chrome (2026-09-17): in Electron this band is the
 				    window's drag surface and starts after the traffic lights
@@ -666,9 +703,10 @@ function SessionsSidebar() {
 						<Link
 							href="/"
 							aria-label="Home"
-							className="lh-no-drag flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
+							className="lh-no-drag lh-editorial-brand flex h-9 min-w-0 shrink-0 items-center gap-2 rounded-md px-2 transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
 						>
 							<LhMark className="size-6" />
+							<span className="lh-editorial-brand-label">LearnHarness</span>
 						</Link>
 					</Hint>
 					<Hint label="Close sidebar" action="toggle-sidebar">
@@ -684,12 +722,60 @@ function SessionsSidebar() {
 					</Hint>
 				</div>
 
-				{/* Two doors, STACKED (owner round 8, 2026-10-05 — was a
-				    half/half row): full-width rows read cleaner and give the
-				    labels room; teaching keeps the original draft route,
-				    practice carries its mode. */}
-				<div className="mx-3 mb-2 flex flex-col gap-1.5">
-					<Link href="/training" className="rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent">Quant training</Link>
+				<nav className="lh-sidebar-numbered-nav mx-3 mb-3 shrink-0" aria-label="Navigation" data-testid="sidebar-navigation">
+					<div className="lh-sidebar-nav-heading">Navigation</div>
+					{SIDEBAR_NAV_ITEMS.map((item) => {
+						const selected = (navFocus ?? activeNav) === item.id;
+						return (
+							<button
+								key={item.id}
+								type="button"
+								data-testid={item.id === "settings" ? "settings-entry" : `sidebar-nav-${item.id}`}
+								data-nav-id={item.id}
+								aria-current={selected ? "page" : undefined}
+								className="lh-sidebar-nav-item"
+								onClick={() => {
+									switch (item.id) {
+										case "home":
+											setNavFocus(null);
+											setHomeSurface("home");
+											if (pathname === "/") window.dispatchEvent(new CustomEvent("lh:home-view", { detail: "home" }));
+											else router.push("/");
+											break;
+										case "sessions":
+											setNavFocus("sessions");
+											searchRef.current?.focus();
+											searchRef.current?.scrollIntoView({ block: "nearest" });
+											break;
+										case "knowledge":
+											setNavFocus(null);
+											setHomeSurface("knowledge");
+											if (pathname === "/") window.dispatchEvent(new CustomEvent("lh:home-view", { detail: "knowledge" }));
+											else router.push("/?view=atlas");
+											break;
+										case "learning-map":
+											router.push("/learning-map");
+											break;
+										case "training":
+											router.push("/training");
+											break;
+										case "settings":
+											setNavFocus("settings");
+											openSettings();
+											break;
+									}
+								}}
+							>
+								<span className="lh-sidebar-nav-number" aria-hidden="true">{item.number}</span>
+								<span className="lh-sidebar-nav-copy">{item.label}</span>
+								{selected && <span className="lh-sidebar-nav-arrow" aria-hidden="true">→</span>}
+							</button>
+						);
+					})}
+				</nav>
+				{/* Existing session creation actions remain accessible; no redundant
+				    Lessons / Practice / Knowledge shortcut box is added. */}
+				<div className="mx-3 mb-3 flex shrink-0 flex-col gap-1.5">
 					<button
 						type="button"
 						data-testid="new-session"
@@ -711,7 +797,6 @@ function SessionsSidebar() {
 						<span className="sr-only">create a new practice session</span>
 					</button>
 				</div>
-
 				<div className="mx-3 mb-2 flex items-center gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
 					<Hint label="Search sessions" action="sessions-search" side="bottom">
@@ -786,6 +871,7 @@ function SessionsSidebar() {
 							key={f}
 							type="button"
 							data-testid={`kind-filter-${f}`}
+							aria-pressed={kindFilter === f}
 							onClick={() => setFilter(f)}
 							className={cn(
 								"flex-1 rounded-sm px-2 py-1 text-[11px] uppercase tracking-wider transition-colors",
@@ -839,22 +925,6 @@ function SessionsSidebar() {
 					    learner opted out (no ambient signal, user decision). */}
 					<ActivitySection />
 
-					{/* Settings entry (settings-app wave): same row language as
-					    New session — quiet, bottom-pinned, opens the centered
-					    dialog (also mod+, in the keyboard registry). */}
-					<div className="px-3 pb-3 pt-1">
-						<Hint label="Settings" action="open-settings" side="right">
-							<button
-								type="button"
-								onClick={() => openSettings()}
-								data-testid="settings-entry"
-								className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-							>
-								<SettingsIcon className="size-3" />
-								Settings
-							</button>
-						</Hint>
-					</div>
 				</div>
 
 				{/* The context menu (wave 6 + the extraction-UX redesign): the

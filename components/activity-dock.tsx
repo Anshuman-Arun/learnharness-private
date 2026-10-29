@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIcon, BotIcon, FileTextIcon, PenToolIcon, PlayIcon, SearchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
+import { BotIcon, FileTextIcon, PenToolIcon, PlayIcon, SearchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CallUsage, JobKind, JobRecord } from "@/src/core";
 import { isModelsRefusal, isProviderKeyRefusal, jobCost } from "@/src/core";
@@ -336,37 +336,28 @@ export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
 		}
 	}, []);
 
-	// Sidebar-native skin (owner, sidebar round): part of the sidebar's
-	// surface, not a floating card — the border-t separator matches the
-	// sidebar's own edge line, the header matches the "Sessions" label, the
-	// rows match the session rows' hover. Empty means empty: the header sits
-	// alone (the cost span is population, not decoration).
+	// No decorative "Background agents" label or icon: idle leaves no
+	// placeholder or separator. Live jobs still show their costs, details,
+	// session links and explicit abort controls.
+	if (blobs.length === 0) return null;
 	return (
-		<section data-testid="activity-section" className="border-t border-border px-3 pb-3 pt-2">
-			<div className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted-foreground/70">
-				<ActivityIcon className="size-3" />
-				Background agents
-				{blobs.length > 0 && (
-					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title="Total running cost (inferred)">
-						{totalCost === null ? "—" : formatUsd(totalCost)}
-				</span>
-				)}
+		<section data-testid="activity-section" className="border-t border-border px-3 pb-3 pt-2" aria-label="Running tasks">
+			<div className="mb-1 flex justify-end text-xs tabular-nums text-muted-foreground" data-testid="activity-total-cost" title="Total running cost (inferred)">
+				{totalCost === null ? "—" : formatUsd(totalCost)}
 			</div>
-			{blobs.length > 0 && (
-				<div className="flex max-h-[40dvh] flex-col gap-1 overflow-y-auto">
-					{blobs.map((blob) => (
-						<ActivityBlobRow
-							key={blob.id}
-							blob={blob}
-							now={now}
-							detailOpen={openBlob === blob.id}
-							onToggleDetail={() => setOpenBlob((id) => (id === blob.id ? null : blob.id))}
-							abortState={abortStates[blob.id]}
-							onAbort={() => void abort(blob)}
-						/>
-					))}
+			<div className="flex max-h-[40dvh] flex-col gap-1 overflow-y-auto">
+				{blobs.map((blob) => (
+					<ActivityBlobRow
+						key={blob.id}
+						blob={blob}
+						now={now}
+						detailOpen={openBlob === blob.id}
+						onToggleDetail={() => setOpenBlob((id) => (id === blob.id ? null : blob.id))}
+						abortState={abortStates[blob.id]}
+						onAbort={() => void abort(blob)}
+					/>
+				))}
 			</div>
-			)}
 		</section>
 	);
 }
