@@ -6,7 +6,7 @@ import { formatTokens, formatUsd } from "../components/usage-format.ts";
 
 // The section's pure layer: folds, formatting, and blob order — then the SSR
 // render (blobs, "—" doctrine, the abort affordance, the always-present
-// header — the sidebar's background-agents strip).
+// blank label area — the sidebar's unobtrusive activity strip).
 
 const NOW = Date.parse("2026-09-09T12:00:00Z");
 
@@ -186,10 +186,10 @@ describe("activity dock pure layer", () => {
 });
 
 describe("activity section render", () => {
-	it("renders the ALWAYS-PRESENT header when idle — empty means empty, nothing hides", () => {
+	it("keeps the activity region available without a visible label when idle", () => {
 		const html = renderToStaticMarkup(<ActivitySection feed={{ jobs: [], extractions: [] }} />);
 		assert.match(html, /data-testid="activity-section"/);
-		assert.match(html, /Background agents/);
+		assert.doesNotMatch(html, /Background agents/);
 		assert.doesNotMatch(html, /activity-blob-(job|extraction)/, "no rows while idle");
 		assert.doesNotMatch(html, /activity-total-cost/, "the cost span is population, not decoration");
 	});
@@ -213,7 +213,7 @@ describe("activity section render", () => {
 		assert.match(html, /activity-blob-cost[^>]*>—</);
 		assert.match(html, /data-testid="activity-abort"/, "END on the blob face, popover-independent");
 		assert.match(html, /\bEnd\b/, "the explicit END button");
-		assert.match(html, /Background agents/);
+		assert.doesNotMatch(html, /Background agents/);
 		// Total cost: nothing priced → "—" in the header.
 		assert.match(html, /activity-total-cost[^>]*>—</);
 		// Truncation-reveals KEEP native title (tooltip wave mechanism rule):
