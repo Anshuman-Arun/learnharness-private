@@ -186,12 +186,9 @@ describe("activity dock pure layer", () => {
 });
 
 describe("activity section render", () => {
-	it("keeps the activity region available without a visible label when idle", () => {
+	it("renders nothing while idle, without a placeholder, label or icon", () => {
 		const html = renderToStaticMarkup(<ActivitySection feed={{ jobs: [], extractions: [] }} />);
-		assert.match(html, /data-testid="activity-section"/);
-		assert.doesNotMatch(html, /Background agents/);
-		assert.doesNotMatch(html, /activity-blob-(job|extraction)/, "no rows while idle");
-		assert.doesNotMatch(html, /activity-total-cost/, "the cost span is population, not decoration");
+		assert.equal(html, "");
 	});
 
 	it("renders one blob per running process with cost, elapsed, and the abort affordance", () => {
