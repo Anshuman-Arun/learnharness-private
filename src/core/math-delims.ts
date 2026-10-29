@@ -4,7 +4,8 @@
  * Current authoring uses `$...$` inline and `$$...$$` on separate lines for
  * display (owner, 2026-10-12). This pure transform keeps correctly formed
  * old backslash-delimited content readable; dollar math passes through to
- * Streamdown's native parser. Escape restoration below recognizes both
+ * Streamdown's native parser; bare numeric currency openers are escaped.
+ * Escape restoration below recognizes both
  * syntaxes while retaining the existing recovery rules.
  *
  * Rules:
@@ -127,7 +128,7 @@ function closeEndsLine(text: string, afterClose: number): boolean {
 
 /**
  * Rewrite balanced `\(...\)` → `$$...$$` and `\[...\]` → `$$\n...\n$$`.
- * Everything else passes through byte-for-byte.
+ * Numeric currency openers are escaped; other text passes through unchanged.
  */
 /** The escaped-dollar-aware inline closer (owner, 2026-10-12): micromark's
  *  mathText closer is code-span logic — ANY size-matched `$` run closes,
@@ -138,6 +139,7 @@ function closeEndsLine(text: string, afterClose: number): boolean {
  *  inline rules otherwise (exact size match, whole-run skip). */
 function findInlineDollarCloseEscapeAware(text: string, from: number): number {
 	for (let j = from; j < text.length;) {
+		if (text[j] === "\n" && /^[ \t]*\r?\n/.test(text.slice(j + 1))) return -1;
 		if (text[j] !== "$") {
 			j += 1;
 			continue;
@@ -151,6 +153,15 @@ function findInlineDollarCloseEscapeAware(text: string, from: number): number {
 		j += count;
 	}
 	return -1;
+}
+
+/** Numeric dollar openers are currency when the next dollar cannot close
+ *  math: whitespace before it, a digit after it, or no closer in this paragraph.
+ *  Real numeric formulas such as `$100$` and `$4\%$` retain their delimiters. */
+function isCurrencyDollar(text: string, i: number): boolean {
+	if (!/\d/.test(text[i + 1] ?? "")) return false;
+	const closeAt = findInlineDollarCloseEscapeAware(text, i + 1);
+	return closeAt === -1 || /\s/.test(text[closeAt - 1]!) || /\d/.test(text[closeAt + 1] ?? "");
 }
 
 /** Replace `\$` (odd-backslash dollars) inside a math span with the
@@ -260,15 +271,18 @@ export function transformMathDelimiters(markdown: string): string {
 		if (ch === "$" && !isEscaped(markdown, i)) {
 			const run = dollarRun(markdown, i);
 			if (run === 1) {
+				if (isCurrencyDollar(markdown, i)) {
+					out.push("\\$");
+					i += 1;
+					continue;
+				}
 				const closeAt = findInlineDollarCloseEscapeAware(markdown, i + 1);
 				if (closeAt !== -1) {
 					const content = markdown.slice(i + 1, closeAt);
 					const replaced = replaceEscapedDollars(content);
-					if (replaced !== content) {
-						out.push(`$${replaced}$`);
-						i = closeAt + 1;
-						continue;
-					}
+					out.push(`$${replaced}$`);
+					i = closeAt + 1;
+					continue;
 				}
 			} else {
 				out.push(markdown.slice(i, i + run));
@@ -402,6 +416,7 @@ function findDollarClose(
 		return undefined;
 	}
 	for (let j = from; j < text.length;) {
+		if (text[j] === "\n" && /^[ \t]*\r?\n/.test(text.slice(j + 1))) return undefined;
 		if (text[j] !== "$") {
 			j += 1;
 			continue;
@@ -450,7 +465,7 @@ function restoreDollarMathEscapes(text: string): string {
 				}
 			}
 		}
-		if (text[i] === "$" && !isEscaped(text, i)) {
+		if (text[i] === "$" && !isEscaped(text, i) && !isCurrencyDollar(text, i)) {
 			const size = dollarRun(text, i);
 			const isDisplay = dollarIsDisplay(text, i, size);
 			const close = findDollarClose(text, i + size, size, isDisplay);
@@ -488,29 +503,44 @@ function restoreDollarMathEscapes(text: string): string {
  * transport), and deepseek-v4.1-flash once; quadrupling appeared when the
  * in-session agent "compensated" for its own doubled first attempt.
  *
- * THE RULE. Inside a balanced math span ONLY (legacy `\(…\)`/`\[…\]` and
- * dollar `$…$`/`$$…$$`, code spans and fences excluded), an EVEN-length
- * backslash run (2, 4, …) immediately followed by a command start — a letter
- * (any command name; bare letters after a row break are never authored
- * content) or a punctuation command (`,` `;` `:` `!` `|` — thin spaces,
- * norm bars) — collapses to a single backslash. Even runs before anything
- * else (space, newline, `&`, `[`, `$`, digits) are legitimate row breaks and
- * stay; ODD runs (3, 5, …) are row break(s) plus a real command with its own
- * backslash — e.g. matrix cells written `a \\\nabla` — and stay untouched,
- * so matrix content cannot be corrupted. Outside spans nothing is touched:
- * doubled backslashes in prose or code are not ours to judge. Unbalanced
- * spans pass through, exactly like the debris passes.
+ * THE RULE: conservatively heal even backslash runs only before KNOWN TeX
+ * commands. A valid matrix row break may be immediately followed by a
+ * variable (e.g. pmatrix with y_1 followed by \\y_2); treating every
+ * following letter as a command corrupts the matrix. Unknown macros and
+ * arbitrary words therefore retain their original backslashes. Odd runs
+ * and legitimate row breaks stay intact; code/prose are untouched.
  */
 const COMMAND_START_CLASS = "[A-Za-z,;:!|]";
+const KNOWN_TEX_WORDS = new Set([
+  "begin", "end", "times", "cdot", "ast", "star", "pm", "mp", "div",
+  "in", "notin", "ni", "subset", "subseteq", "supset", "supseteq", "cup", "cap", "emptyset",
+  "le", "leq", "ge", "geq", "neq", "ne", "approx", "equiv", "sim", "propto",
+  "forall", "exists", "neg", "land", "lor", "implies", "iff",
+  "to", "mapsto", "leftarrow", "rightarrow", "Rightarrow", "Leftarrow", "Leftrightarrow",
+  "longrightarrow", "Longrightarrow", "uparrow", "downarrow",
+  "frac", "dfrac", "tfrac", "sqrt", "binom", "sum", "prod", "int", "iint", "oint", "lim",
+  "sin", "cos", "tan", "log", "ln", "exp", "min", "max", "sup", "inf",
+  "mathbb", "mathcal", "mathfrak", "mathbf", "mathit", "mathrm", "operatorname", "text", "textbf",
+  "left", "right", "middle", "Big", "big", "Bigg", "bigg",
+  "top", "bot", "perp", "parallel", "nabla", "partial", "infty", "dot", "ddot", "hat", "bar", "vec", "overline", "underline",
+  "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "theta", "vartheta", "lambda", "mu", "nu", "xi",
+  "pi", "rho", "sigma", "tau", "phi", "varphi", "chi", "psi", "omega", "ell", "Delta", "Gamma", "Lambda", "Sigma", "Omega",
+  "ldots", "cdots", "vdots", "ddots", "quad", "qquad", "hspace", "kern", "textdollar",
+]);
 
-/** Collapse even backslash runs before a command start; keep odd runs. */
+/** A double-backslash before a plain variable is a row break, not broken TeX. */
 function halveOverescapedCommandRuns(inner: string): string {
-	return inner.replace(
-		new RegExp("(\\\\+)(?=" + COMMAND_START_CLASS + ")", "g"),
-		(run: string) => (run.length % 2 === 0 ? "\\" : run),
-	);
+  return inner.replace(
+    new RegExp("(\\\\+)(?=" + COMMAND_START_CLASS + ")", "g"),
+    (run: string, _captured: string, offset: number, whole: string) => {
+      if (run.length % 2 !== 0) return run;
+      const after = whole.slice(offset + run.length);
+      if (/^[,;:!|]/.test(after)) return "\\";
+      const command = /^[A-Za-z]+/.exec(after)?.[0];
+      return command && KNOWN_TEX_WORDS.has(command) ? "\\" : run;
+    },
+  );
 }
-
 export function healOverescapedCommands(text: string): string {
 	if (!text.includes("\\\\")) return text;
 	const out: string[] = [];
@@ -548,7 +578,7 @@ export function healOverescapedCommands(text: string): string {
 				}
 			}
 		}
-		if (text[i] === "$" && !isEscaped(text, i)) {
+		if (text[i] === "$" && !isEscaped(text, i) && !isCurrencyDollar(text, i)) {
 			const size = dollarRun(text, i);
 			const isDisplay = dollarIsDisplay(text, i, size);
 			const close = findDollarClose(text, i + size, size, isDisplay);

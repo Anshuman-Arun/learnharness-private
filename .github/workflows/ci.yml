@@ -36,6 +36,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Isolate hanging or failing regression test files
+        run: node scripts/diagnose-test-files.mjs
       - run: npm test
       - run: npm run lint
 

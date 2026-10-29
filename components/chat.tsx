@@ -34,7 +34,6 @@ import { JobsContext } from "@/components/jobs-context";
 import { StatsBar } from "@/components/stats-bar";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import {
-	isProviderKeyRefusal,
 	firstSourceTextParts,
 	messageAnchorId,
 	textPartMessageId,
@@ -160,7 +159,10 @@ export function parseProviderKeyRefusal(message: string | undefined): boolean {
 	if (!message) return false;
 	try {
 		const body = JSON.parse(message) as { code?: unknown; error?: unknown };
-		return body.code === "provider_key_missing" && typeof body.error === "string" && isProviderKeyRefusal(body.error);
+		// Machine-readable refusals must never depend on the wording of a
+		// provider-specific human message (ChatGPT has no API key to add).
+		return (body.code === "provider_key_missing" || body.code === "chatgpt_model_unavailable")
+			&& typeof body.error === "string" && body.error.trim().length > 0;
 	} catch {
 		return false;
 	}

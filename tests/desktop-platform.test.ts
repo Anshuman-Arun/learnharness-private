@@ -27,7 +27,7 @@ function windowOptions(platform: string) {
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
-		require: (id: string) => id === "electron" ? electron : require(id),
+		require: (id: string) => id === "electron" ? electron : id === "./chatgpt-oauth.cjs" ? { createChatGPTOAuthRuntime() {} } : require(id),
 		process: { platform, argv: [], env: {}, on() {} },
 		__dirname: dirname(mainFile),
 	};
@@ -77,7 +77,8 @@ describe("desktop window chrome", () => {
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"expandWindow", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform",
+			"chatGPTCancelSignIn", "chatGPTDisconnect", "chatGPTOpenAuthorization", "chatGPTSetBackgroundUse", "chatGPTSignIn",
+			"expandWindow", "getChatGPTStatus", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform",
 		]);
 	});
 });
@@ -102,7 +103,9 @@ describe("desktop packaging policy", () => {
 			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
 		]);
 		assert.equal(config.linux.syncDesktopName, true);
-		assert.equal(config.publish[0].releaseType, "draft");
+		assert.equal(config.publish, undefined, "private derivative must have no upstream publication feed");
+		assert.equal(config.appId, "org.learnharness.private.windows");
+		assert.equal(config.productName, "LearnHarness Private");
 	});
 
 	it("deb has public maintainer metadata and a matching desktop identity", () => {
@@ -265,4 +268,15 @@ describe("desktop release workflow", () => {
 			{ id: 11, tag_name: "v0.3.0", draft: true },
 		]), /Multiple releases match/);
 	});
+});
+
+describe("native URL and permission fail-closed handling",()=>{
+  it("rejects malformed navigation rather than throwing before preventDefault",async()=>{
+    const source=await (await import("node:fs/promises")).readFile(
+      new URL("../electron/main.cjs",import.meta.url),"utf8");
+    assert.match(source,/let sameOrigin = false;/);
+    assert.match(source,/if \(!sameOrigin\) \{\s*event\.preventDefault\(\)/);
+    assert.match(source,/let requestOrigin = null;/);
+    assert.match(source,/callback\(fromOwnOrigin\(requestOrigin, permission\)\)/);
+  });
 });
