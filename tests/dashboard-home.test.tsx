@@ -18,6 +18,9 @@ test("study desk renders real-data placeholders and accessible atlas action", ()
   assert.match(html,/—/); // unknown counts must never look like zero
   assert.match(html,/Connected ideas/);
   assert.match(html,/A wandering path/);
+  assert.doesNotMatch(html,/A SPACE FOR DEEPER THINKING|FIELD NOTE|GRAPH THEORY/);
+  const css = read("app/editorial.css");
+  assert.match(css,/lh-study-prints[\\s\\S]*?gap:38px/);
 });
 
 test("home retains existing graph renderer and composer; new dashboard is default", () => {
