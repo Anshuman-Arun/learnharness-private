@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { buildGlobalLearningGraph } from "../core/global-learning.ts";
 import { LEDGER_FILES, POSITIONS_FILE } from "../../config.ts";
 import type { GraphSnapshot } from "../core/contracts.ts";
 import type { GraphCostSummary } from "../core/cost-summary.ts";
@@ -118,3 +119,11 @@ export function deleteGraphNode(nodeId: string): NodeDeleteOutcome {
 	return { ok: true, stats, graphRevision: graphRevision() };
 }
 
+
+/** Compose the cumulative lesson-objective DAG from persisted sessions. */
+export function globalLearningView() {
+	const records = stores.chatStore.listChats().map(s => stores.chatStore.getChat(s.id)).filter(
+		(r): r is NonNullable<typeof r> => r !== null,
+	);
+	return buildGlobalLearningGraph(records);
+}

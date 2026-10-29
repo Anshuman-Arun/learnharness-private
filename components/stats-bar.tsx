@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { contextWindow, sessionCost, turnCost, type ChatSettings, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
@@ -189,6 +190,7 @@ export function StatsBar({
 			{/* The model + thinking control — one controller for the conversation
 			    agents (prober/teacher); the record's `turns` above still folds
 			    the ACTUAL models billed, regardless of what the picker says. */}
+			<Link href="/learning-map" title="Your cumulative knowledge DAG" className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground transition-colors hover:text-foreground" data-testid="global-learning-link">Knowledge map</Link>
 			<ModelControl chatId={chatId} />
 		</div>
 	);
