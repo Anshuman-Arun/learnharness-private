@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { emptyCppWorkspace, parseCppWorkspace, workspaceEvidence, cppRunEvidence, type CppWorkspace, type CppRunReport } from "@/src/core";
+import { CppChallengeJudge } from "@/components/cpp-challenge-judge";
 import { CppRunPanel } from "@/components/cpp-run-panel";
 
 const Editor = dynamic(() => import("@/components/cpp-editor"), { ssr: false, loading: () => <p>Loading code editor…</p> });
@@ -102,6 +103,7 @@ export function CppWorkspaceView() {
 		{plain ? <textarea aria-label="C++ source" spellCheck={false} disabled={saving} value={file.source} onChange={(event) => edit({ ...workspace, files: workspace.files.map((item) => item.name === file.name ? { ...item, source: event.target.value } : item) })} rows={18} className="w-full rounded border bg-background p-3 font-mono text-sm" /> : <Editor name={`${workspace.id}/${file.name}`} source={file.source} readOnly={saving} onChange={(source) => edit({ ...workspace, files: workspace.files.map((item) => item.name === file.name ? { ...item, source } : item) })} />}
 		<label className="block text-sm">Standard input<textarea aria-label="Program input" disabled={saving} value={workspace.stdin} onChange={(event) => edit({ ...workspace, stdin: event.target.value })} rows={3} className="mt-1 w-full rounded border bg-background p-2 font-mono" /></label>
 		<CppRunPanel key={workspace.id} workspace={workspace} onChange={edit} onReport={setLastRun} />
+		<CppChallengeJudge key={"judge:"+workspace.id} workspace={workspace} />
 		<section className="space-y-3 rounded-xl border p-4"><h2 className="font-semibold">Bring your attempt to a session</h2><p className="text-xs text-muted-foreground">Only the checked source files are attached. Add your explanation or dictate it in the session, then submit when ready.</p>
 			{lastRun && <label className="block text-sm"><input type="checkbox" checked={includeRun} onChange={(event) => setIncludeRun(event.target.checked)} /> Attach the last run, including all source files used in that run (later edits stay in this workspace)</label>}
 			<div className="flex flex-wrap gap-3">{workspace.files.map((item) => <label key={item.name} className="text-sm"><input type="checkbox" checked={selected.includes(item.name)} onChange={(event) => setSelected(event.target.checked ? [...selected, item.name] : selected.filter((name) => name !== item.name))} /> {item.name}</label>)}</div>

@@ -10,11 +10,12 @@ Typed or dictated reasoning, selected images and code snapshots are submitted to
 
 Images and code persist with the local session. Dictation supplies text, not a retained audio recording. Context compaction still summarizes old turns; this does not promise that every old image stays in every future request. Reopen the session's evidence or resubmit the relevant work when exact old details are needed.
 
-## Reviewed candidates for the remaining feature PRs
+## Implemented reuse
 
-- [Upstream PR #241](https://github.com/amosblomqvist/learnharness/pull/241), head `0255467010ccc53bcec0c13d8504a52a32ac13c1`, provides runnable/editable code cards, predictions, attempts and source/output reports (AGPL-3.0). Its root/systemd runner needs adaptation to this environment; it is not a working C++ service merely because the card renders.
-- [Monaco](https://github.com/microsoft/monaco-editor), revision `dbf1945df2ff7e46512d2f548cc5c0977a3eadd8`, has an MIT license in `LICENSE.txt`. Candidate for the persistent editor.
-- [Excalidraw](https://github.com/excalidraw/excalidraw) has an MIT license. Candidate for the drawing surface; pair the saved scene with a rendered image snapshot for the tutor. Collaboration hosting and iPad input still need integration and device validation.
+- [Upstream PR #241](https://github.com/amosblomqvist/learnharness/pull/241), head `0255467010ccc53bcec0c13d8504a52a32ac13c1`, informed the source/output evidence and execution-report vocabulary (AGPL-3.0). This implementation uses a separate digest-pinned, non-root Docker compiler service; it does not import the upstream root/systemd deployment.
+- The persistent editor uses locked `monaco-editor@0.57.0` and `@monaco-editor/react@4.7.0` packages (MIT), after inspecting Monaco revision `dbf1945df2ff7e46512d2f548cc5c0977a3eadd8`. Monaco code, workers, LICENSE and ThirdPartyNotices are self-hosted by the asset-preparation script. The React wrapper notice is in `third-party/monaco-react-LICENSE`.
+- Scratch work and the HTTPS companion use locked `@excalidraw/excalidraw@0.18.1` (MIT), with its editable vector scenes, pen/eraser/history/viewport and PNG export. Assets are local; the companion build points the package font fallback at local assets too. Software and actual bundled-font notices are in `third-party/` and served by the companion. The scoped pairing/sync protocol is original integration; physical iPad input remains unverified.
+- Arithmetic question generation adapts [YYZ-CR/zetamac-trainer](https://github.com/YYZ-CR/zetamac-trainer) `e81041507c69a8b3154be3cb3f85c0ac3fd7ae34` (MIT), with its notice in `third-party/zetamac-trainer-LICENSE`. Timing, server state, persistence and analysis were implemented here.
 - Several public Zetamac clones inspected had no explicit license. Do not copy those sources. GitHub's license-filtered search can identify candidates, but verify each actual license and whether it implements training rather than only score tracking before adopting it.
 
-Sources are candidates unless a section explicitly says their code is adapted here. No complete upstream PR has been merged blindly.
+The quant curricula, mathematical experiments, stopping/exam/retrieval logic and challenge integration are original code. No complete upstream PR was merged blindly and no unlicensed Zetamac clone was copied.
