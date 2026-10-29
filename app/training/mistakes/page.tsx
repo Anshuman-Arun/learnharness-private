@@ -1,0 +1,1 @@
+import{TrainingShell}from'@/components/training-shell';import{MistakeNotebook}from'@/components/mistake-notebook';export default function Page(){return <TrainingShell title="Mistake notebook" description="Preserve the source attempt, classify the error, write a correction and test it on a fresh attempt."><MistakeNotebook/></TrainingShell>;}
