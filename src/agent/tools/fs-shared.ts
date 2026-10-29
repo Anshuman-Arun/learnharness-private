@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -57,7 +58,16 @@ function pathWithin(candidate: string, root: string): boolean {
 	return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
-/** Pure lexical check. Call on the real path, not just a symlink alias. */
+/** Match both configured and canonical storage paths. Windows short names
+ * and junctions can spell the same directory differently; comparing a real
+ * candidate against only the configured spelling leaves secrets readable. */
+function privateRootContains(candidate: string, root: string): boolean {
+	if (pathWithin(candidate, root)) return true;
+	try { return pathWithin(candidate, realpathSync.native(root)); }
+	catch { return false; } // An absent root cannot contain an existing file.
+}
+
+/** Call on the real candidate path as well as the requested spelling. */
 export function isPrivateSourcePath(p: string): boolean {
 	const resolved = path.resolve(p);
 	// Reject Linux pseudo-filesystems: /proc/self/environ exposes the
@@ -69,7 +79,7 @@ export function isPrivateSourcePath(p: string): boolean {
 	// A slash-containing directory name cannot match path segments.
 	// Check the actual Linux secret-store ancestry instead.
 	const keyring = path.join(os.homedir(), ".local", "share", "keyrings");
-	if (pathWithin(resolved, keyring)) return true;
+	if (privateRootContains(resolved, keyring)) return true;
 	if (PRIVATE_DIR_PARTS.has(base) || parts.some((part) => PRIVATE_DIR_PARTS.has(part))) return true;
 	if (PRIVATE_FILENAMES.has(base) || base === ".env" || base.startsWith(".env.")) return true;
 	const roots = [
@@ -87,7 +97,7 @@ export function isPrivateSourcePath(p: string): boolean {
 		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness PR20 Test"),
 		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness"),
 	].filter((item): item is string => Boolean(item));
-	return roots.some((root) => pathWithin(resolved, root));
+	return roots.some((root) => privateRootContains(resolved, root));
 }
 
 /** Fail closed if a symlink reaches a secret. Return the checked real path,

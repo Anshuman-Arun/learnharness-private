@@ -77,3 +77,22 @@ describe("adversarial local learner-file security policy", () => {
     }
   });
 });
+
+it("protects canonical roots when configured storage uses a filesystem alias",async()=>{
+  const tmp=await fs.mkdtemp(path.join(os.tmpdir(),"lh-private-alias-"));
+  const oldAuth=process.env.LH_AUTH_FILE,oldData=process.env.LH_DATA_DIR;
+  try{
+    const actual=path.join(tmp,"actual-private"),alias=path.join(tmp,"configured-alias");
+    await fs.mkdir(actual);
+    await fs.writeFile(path.join(actual,"session.json"),"private learner session");
+    await fs.symlink(actual,alias,process.platform==="win32"?"junction":"dir");
+    process.env.LH_AUTH_FILE=path.join(alias,"auth.json");
+    process.env.LH_DATA_DIR=path.join(alias,"data");
+    await assert.rejects(guardSourcePath(path.join(actual,"session.json")),/Access denied/);
+    await assert.rejects(guardSourcePath(alias),/Access denied/);
+  }finally{
+    if(oldAuth===undefined)delete process.env.LH_AUTH_FILE;else process.env.LH_AUTH_FILE=oldAuth;
+    if(oldData===undefined)delete process.env.LH_DATA_DIR;else process.env.LH_DATA_DIR=oldData;
+    await fs.rm(tmp,{recursive:true,force:true,maxRetries:5});
+  }
+});
