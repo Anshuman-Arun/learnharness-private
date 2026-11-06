@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { contextWindow, sessionCost, turnCost, type ChatSettings, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
@@ -83,12 +84,18 @@ export function StatsBar({
 	const { catalog } = useModelCatalog();
 	const limits = useMemo(() => (catalog ? catalogLimits(catalog) : undefined), [catalog]);
 	const ctx = contextWindow({ turns }, limits);
-	const { cost, unpriced } = sessionCost({ turns });
+	const planTurn = (turn: TurnUsage) => turn.model.startsWith("openai-chatgpt:");
+	const planCount = turns.filter(planTurn).length;
+	const apiTurns = turns.filter((turn) => !planTurn(turn));
+	const { cost, unpriced } = sessionCost({ turns: apiTurns });
 	// Honest cost: show dollars only when at least one turn priced;
 	// otherwise "—" (never a fake $0.0000).
-	const pricedCount = turns.length - unpriced;
+	const pricedCount = apiTurns.length - unpriced;
 	const costLabel = pricedCount > 0 ? formatUsd(cost) : "—";
 	const lastModel = turns.at(-1)?.model;
+	const chatGPTConnected = catalog?.providers.some((provider) =>
+		provider.id === "openai-chatgpt" && provider.keyPresent,
+	) ?? false;
 
 	return (
 		<div
@@ -143,9 +150,12 @@ export function StatsBar({
 								</span>
 							</div>
 							<div className="flex justify-between gap-2">
-								<span>Total cost</span>
+								<span>API cost estimate</span>
 								<span className="tabular-nums text-card-foreground">{costLabel}</span>
 							</div>
+							{planCount > 0 && (
+								<div className="flex justify-between gap-2"><span>ChatGPT plan turns</span><span>{planCount}</span></div>
+							)}
 							{unpriced > 0 && (
 								<div className="flex justify-between gap-2">
 									<span>Unpriced turns</span>
@@ -168,7 +178,7 @@ export function StatsBar({
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>
-													<span>{c === null ? "—" : formatUsd(c)}</span>
+													<span>{planTurn(turn) ? "Plan" : c === null ? "—" : formatUsd(c)}</span>
 												</span>
 											</li>
 										);
@@ -189,6 +199,20 @@ export function StatsBar({
 			{/* The model + thinking control — one controller for the conversation
 			    agents (prober/teacher); the record's `turns` above still folds
 			    the ACTUAL models billed, regardless of what the picker says. */}
+			{chatGPTConnected && (
+				<a
+					href="https://chatgpt.com/#settings/Usage"
+					target="_blank"
+					rel="noopener noreferrer"
+					title="Review actual ChatGPT plan usage and app limits in ChatGPT Settings → Usage"
+					aria-label="Manage ChatGPT plan usage"
+					data-testid="chatgpt-plan-usage"
+					className="shrink-0 whitespace-nowrap text-muted-foreground/80 transition-colors hover:text-foreground"
+				>
+					Plan usage ↗
+				</a>
+			)}
+			<Link href="/learning-map" title="Your cumulative knowledge DAG" className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground transition-colors hover:text-foreground" data-testid="global-learning-link">Knowledge map</Link>
 			<ModelControl chatId={chatId} />
 		</div>
 	);

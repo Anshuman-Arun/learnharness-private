@@ -14,6 +14,13 @@ export interface CodeEvidence {
 	stdout?: string;
 	stderr?: string;
 	prediction?: string;
+	/** Reported execution metadata, not a trusted judge verdict. */
+	execution?: {
+		ok: boolean;
+		exitCode: number | null;
+		errorKind: "none" | "compile" | "runtime" | "timeout" | "resource" | "output-limit" | "checks";
+		timedOut: boolean;
+	};
 }
 export interface LearningEvidence {
 	images?: EvidenceImage[];
@@ -88,6 +95,13 @@ export function parseLearningEvidence(value: unknown): LearningEvidence | undefi
 					if (typeof code[key] !== "string" || code[key].length > 16384) throw new Error(`${key} must be text of at most 16384 characters`);
 					snapshot[key] = code[key];
 				}
+			}
+			if (code.execution !== undefined) {
+				const execution = record(code.execution);
+				if (typeof execution.ok !== "boolean" || typeof execution.timedOut !== "boolean" ||
+					(execution.exitCode !== null && (typeof execution.exitCode !== "number" || !Number.isSafeInteger(execution.exitCode))) ||
+					!["none", "compile", "runtime", "timeout", "resource", "output-limit", "checks"].includes(execution.errorKind as string)) throw new Error("Invalid reported execution status");
+				snapshot.execution = { ok: execution.ok, exitCode: execution.exitCode as number | null, errorKind: execution.errorKind as NonNullable<CodeEvidence["execution"]>["errorKind"], timedOut: execution.timedOut };
 			}
 			return snapshot;
 		});

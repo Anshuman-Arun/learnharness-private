@@ -10,6 +10,7 @@ export function changeReview(raw:unknown,now=Date.now()){
  if(a.revision!==card.revision)throw Error('Review changed in another tab; reload first');
  if(a.action==='snooze'){if(typeof a.days!=='number'||!Number.isInteger(a.days)||a.days<1||a.days>7)throw Error('Snooze for 1–7 days');const next={...card,dueAt:Math.max(now,card.dueAt)+a.days*REVIEW_DAY,revision:card.revision+1,activeRetryId:undefined};stores.trainingStore.write('review',next);return{card:next};}
  if(a.action==='start'){
+  if(a.mode!==undefined&&a.mode!=='original'&&a.mode!=='variant')throw Error('Choose an original or variant review mode');
   if(card.activeRetryId){const retry=stores.trainingStore.read<MistakeRetry>('mistake-retry',card.activeRetryId);if(retry)return{card,retry:mistakeRetryView(retry)};}
   if(card.dueAt>now)throw Error('This card is not due yet');const result=changeMistake({action:'retry',id:card.entryId,mode:a.mode==='variant'?'variant':'original'},now);if(!('retry'in result)||!result.retry)throw Error('Could not start review');const next={...card,activeRetryId:result.retry.id,revision:card.revision+1};stores.trainingStore.write('review',next);return{card:next,retry:result.retry};
  }

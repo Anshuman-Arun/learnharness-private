@@ -56,7 +56,7 @@ export async function executeCpp(raw, signal) {
 		for (const test of request.cases ?? [{ name: "Run", stdin: request.stdin }]) {
 			const executed = await run(["exec", "-i", "-e", "ASAN_OPTIONS=detect_leaks=0", name, "timeout", "--kill-after=1s", "2s", "/work/program"], test.stdin);
 			if (controller.signal.aborted) throw new Error("Execution cancelled or exceeded its total time limit");
-			if (executed.exceeded) return result({ errorKind: "output-limit", stdout: executed.stdout, stderr: executed.stderr, exitCode: executed.code });
+			if (executed.exceeded) { outputs.push({ name: test.name, passed: false, stdout: executed.stdout, stderr: executed.stderr, exitCode: executed.code }); return result({ errorKind: "output-limit", stdout: executed.stdout, stderr: executed.stderr, exitCode: executed.code, ...(request.cases ? { cases: outputs } : {}) }); }
 			const timedOut = executed.code === 124;
 			const passed = executed.code === 0 && (test.expected === undefined || executed.stdout.replace(/\r\n/g, "\n").trimEnd() === test.expected.replace(/\r\n/g, "\n").trimEnd());
 			outputs.push({ name: test.name, passed, stdout: executed.stdout, stderr: executed.stderr, exitCode: executed.code });

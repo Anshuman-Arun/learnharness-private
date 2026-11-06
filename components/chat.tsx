@@ -34,7 +34,6 @@ import { JobsContext } from "@/components/jobs-context";
 import { StatsBar } from "@/components/stats-bar";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import {
-	isProviderKeyRefusal,
 	firstSourceTextParts,
 	messageAnchorId,
 	textPartMessageId,
@@ -160,7 +159,10 @@ export function parseProviderKeyRefusal(message: string | undefined): boolean {
 	if (!message) return false;
 	try {
 		const body = JSON.parse(message) as { code?: unknown; error?: unknown };
-		return body.code === "provider_key_missing" && typeof body.error === "string" && isProviderKeyRefusal(body.error);
+		// Machine-readable refusals must never depend on the wording of a
+		// provider-specific human message (ChatGPT has no API key to add).
+		return (body.code === "provider_key_missing" || body.code === "chatgpt_model_unavailable")
+			&& typeof body.error === "string" && body.error.trim().length > 0;
 	} catch {
 		return false;
 	}
@@ -495,10 +497,10 @@ export function Chat({
 	// the dock stays mounted (the problem is still active until the agent
 	// concludes).
 	const submitThinking = useCallback(
-		(text: string, evidence?: LearningEvidence) => {
+		async (text: string, evidence?: LearningEvidence) => {
 			const problem = activeProblemRef.current;
-			if (!problem) return;
-			void send({ type: "thinking", problemCallId: problem.toolCallId, text, evidence });
+			if (!problem) return false;
+			return send({ type: "thinking", problemCallId: problem.toolCallId, text, evidence });
 		},
 		[send],
 	);
@@ -1872,7 +1874,7 @@ function DockOverlay({
 	 *  question (the composer is replaced); null in teaching sessions. */
 	practice: { toolCallId: string; input: unknown } | null;
 	/** (commit, text) — the practice dock's two submit lanes. */
-	onSubmitThinking: (text: string, evidence?: LearningEvidence) => void;
+	onSubmitThinking: (text: string, evidence?: LearningEvidence) => Promise<boolean>;
 	/** Teach-phase pending question: arrives collapsed behind the reveal button (W5). */
 	requiresReveal: boolean;
 	/** The reading-thinking draft (owner 2026-10-03) — owned by ChatView so

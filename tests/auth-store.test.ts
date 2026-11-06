@@ -6,7 +6,7 @@
  * hand-edited dev/desktop auth.json is ever touched.
  *
  * Pinning: absent/corrupt = {} ("no keys yet"); set/delete round-trip with
- * unknown vars preserved verbatim; the file is ALWAYS mode 0600 (secrets);
+ * unknown vars preserved verbatim; POSIX files use mode 0600 (secrets);
  * writes are atomic (tmp+rename — no partial JSON state).
  */
 
@@ -37,12 +37,15 @@ describe("AuthStore adapter", () => {
 		assert.equal(authStore.authVars().OPENROUTER_API_KEY, "sk-or-v1-abc");
 	});
 
-	it("the file is mode 0600 (secrets), also after rewrites", () => {
+	it("keeps owner read/write and restrictive POSIX modes, also after rewrites", () => {
+		// Windows mode bits emulate writability, not NTFS access control;
+		// group/other POSIX bits do not represent its inherited DACL.
+		const mask = process.platform === "win32" ? 0o600 : 0o777;
 		authStore.setAuthVar("DEEPGRAM_API_KEY", "d".repeat(40));
-		const first = fs.statSync(AUTH_FILE).mode & 0o777;
+		const first = fs.statSync(AUTH_FILE).mode & mask;
 		assert.equal(first, 0o600);
 		authStore.setAuthVar("DEEPGRAM_API_KEY", "e".repeat(40));
-		assert.equal(fs.statSync(AUTH_FILE).mode & 0o777, 0o600, "rewrite keeps 0600");
+		assert.equal(fs.statSync(AUTH_FILE).mode & mask, 0o600, "rewrite preserves the platform's file access bits");
 	});
 
 	it("set preserves unknown vars verbatim (forward-compat)", () => {

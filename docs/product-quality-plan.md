@@ -1,6 +1,6 @@
 # Product quality rebuild
 
-Approved direction: retain LearnHarness's current dark, restrained visual language; minimal labels and appropriate motion; consolidate/remove weak features; build a comprehensive PDF source DAG independently from mastery. This replaces the earlier feature-count target. Existing source/session/training data must remain readable. Nothing merges to main automatically.
+Approved direction: retain LearnHarness's current dark, restrained visual language; minimal labels and appropriate motion; consolidate/remove weak features; build a comprehensive PDF source DAG independently from mastery. This replaces the earlier feature-count target. Existing source/session/training data must remain readable. Nothing merges to main automatically. Integration baseline refreshed to current main after discovering that the previous feature stack, Windows hardening, ChatGPT sign-in and global learning map had landed.
 
 ## Quality baseline and acceptance
 

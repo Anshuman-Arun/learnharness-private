@@ -751,3 +751,20 @@ body {
 .distribution-observed { background: #555; }
 @media(prefers-reduced-motion:no-preference) { .distribution-columns span { transition: height 150ms ease; } }
 .lh-training .compiler-location { display: block; text-align: left; padding: 0; border: 0; font: inherit; text-decoration: underline; text-decoration-color: #555; background: transparent; }
+/* Only the global learning-map route uses an overlay sidebar on phones.
+ * Leave the original Electron/narrow-window shell and mini lesson DAG
+ * layouts untouched. The menu button on /learning-map controls visibility. */
+@media (max-width: 639px) {
+  .lh-global-map-page aside.sidebar-motion {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 80;
+    width: 288px !important;
+    transform: translateX(-100%);
+    transition: transform 180ms ease-out;
+    box-shadow: 0 20px 40px rgba(0,0,0,.25);
+  }
+  .lh-global-map-page.lh-global-map-menu-open aside.sidebar-motion {
+    transform: translateX(0);
+  }
+}

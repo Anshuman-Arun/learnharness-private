@@ -51,3 +51,11 @@ describe("real isolated C++ execution", () => {
 		} finally { await new Promise((resolve) => server.close(resolve)); }
 	});
 });
+
+it('keeps earlier case outcomes when a later case exceeds its output limit', async () => {
+ const result = await executeCpp({files:[{name:'main.cpp',source:'#include <iostream>\nint main(){int n;std::cin>>n;if(n==0){std::cout<<"ok\\n";return 0;}for(;;)std::cout<<"overflow-output-";}'}],stdin:'',cases:[{name:'Example 1',stdin:'0',expected:'ok\n'},{name:'Hidden 1',stdin:'1',expected:'never'}]});
+ assert.equal(result.errorKind,'output-limit');
+ assert.equal(result.cases?.length,2);
+ assert.equal(result.cases?.[0].passed,true);
+ assert.equal(result.cases?.[1].passed,false);
+});

@@ -1,0 +1,89 @@
+name: PR20 isolated Windows acceptance
+on:
+  push:
+    branches:
+      - experiment/upstream-pr20-chatgpt
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pr20-evaluation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      npm_config_script_shell: 'C:\Program Files\Git\bin\bash.exe'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: PR20 OAuth focused tests
+        run: node --import tsx --test tests/chatgpt-oauth.test.ts
+        env:
+          NODE_ENV: test
+      - name: Focused PR20 Windows security and desktop tests
+        run: node --import tsx --test tests/chatgpt-oauth.test.ts tests/chatgpt-pr20-broker.test.ts tests/chatgpt-oauth-adversarial.test.ts tests/private-release-policy.test.ts tests/pr20-billing-isolation.test.ts tests/desktop-platform.test.ts tests/auth-provider-keys.test.ts
+        env:
+          NODE_ENV: test
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - run: node scripts/build-server.mjs
+      - run: node scripts/smoke-server.mjs --electron
+      - name: Refuse non-private desktop identity or updater before packaging
+        run: node scripts/pr20-isolate-package.mjs
+      - name: Build portable Windows application (without NSIS installer)
+        shell: pwsh
+        run: |
+          npx --no-install electron-builder --win --x64 --dir --publish never
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify isolated identity and required OAuth code inside app
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'dist/win-unpacked/LearnHarness Private.exe')) { throw 'Expected portable app absent' }
+          if (!(Test-Path 'dist/win-unpacked/resources/app.asar')) { throw 'App archive absent' }
+          if (!(Test-Path 'dist/win-unpacked/resources/server/standalone/server.js')) { throw 'Next server absent' }
+          if (!(Test-Path 'dist/win-unpacked/resources/server/standalone/.next/BUILD_ID')) { throw 'Compiled Next runtime absent before upload' }
+          $files = @(npx --no-install asar list 'dist/win-unpacked/resources/app.asar') | ForEach-Object { $_ -replace '\\', '/' }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host 'OAuth and jose candidates in app.asar:'
+          $files | Where-Object { $_ -match 'chatgpt|jose|electron/main' } | Select-Object -First 25 | ForEach-Object { Write-Host $_ }
+          if (!($files | Where-Object { $_.EndsWith('/electron/chatgpt-oauth.cjs') })) { throw 'OAuth runtime missing from app.asar' }
+          if (!($files | Where-Object { $_.EndsWith('/node_modules/jose/package.json') })) { throw 'jose missing from app.asar' }
+      # The Next standalone runtime is under resources/server/standalone/.next.
+      # upload-artifact@v4.4+ excludes dot-directories unless enabled; otherwise
+      # CI packaging passes but the user's downloaded portable app cannot boot.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: learnharness-private-windows-staging
+          path: dist/win-unpacked/
+          include-hidden-files: true
+          retention-days: 5
+          if-no-files-found: error
+      # Test what users ACTUALLY download, not only dist/ before upload.
+      - uses: actions/download-artifact@v4
+        with:
+          name: learnharness-private-windows-staging
+          path: pr20-artifact-roundtrip
+      - name: Verify uploaded portable payload survived artifact ZIP round trip
+        shell: pwsh
+        run: |
+          $root = 'pr20-artifact-roundtrip'
+          if (!(Test-Path "$root/LearnHarness Private.exe")) { throw 'Uploaded portable executable absent' }
+          if (!(Test-Path "$root/resources/app.asar")) { throw 'Uploaded app archive absent' }
+          if (!(Test-Path "$root/resources/server/standalone/server.js")) { throw 'Uploaded Next server absent' }
+          if (!(Test-Path "$root/resources/server/standalone/.next/BUILD_ID")) { throw 'Upload stripped .next hidden directory (app cannot boot)' }
+          if (!(Test-Path "$root/resources/server/standalone/.next/static")) { throw 'Uploaded Next static assets absent' }
+          if (Test-Path "$root/resources/server/standalone/auth.json") { throw 'Refusing payload containing auth.json' }
+          if (Test-Path "$root/resources/server/standalone/.env") { throw 'Refusing payload containing .env' }
+          if (Test-Path "$root/resources/server/standalone/.env.local") { throw 'Refusing payload containing .env.local' }
+          Write-Host 'Downloaded portable app has its executable, OAuth archive, Next server and hidden .next runtime.'

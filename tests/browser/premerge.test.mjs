@@ -9,6 +9,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import puppeteer from 'puppeteer-core';
 import { createCppRunnerServer, loadRunnerToken } from '../../runner/cpp-service.mjs';
 import { createTabletServer, loadTabletControlToken } from '../../runner/tablet-service.mjs';
+import { cppRunEvidence } from '../../src/core/cpp-run.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const until = async (fn, timeout = 30000) => { const end = Date.now() + timeout; while (Date.now() < end) { if (await fn()) return; await new Promise(r => setTimeout(r, 100)); } throw Error('Condition did not settle'); };
@@ -51,6 +52,32 @@ test('pre-merge production browser workflows', { timeout: 600000 }, async t => {
    await p.reload({ waitUntil: 'networkidle2' }); assert.equal(await p.$eval('[aria-label="Teaching style"]', e => e.value), 'guided');
    await p.select('[aria-label="Teaching style"]', 'explain');
    await until(async () => (await api(`/api/chats/${chat.id}`)).settings.teachingMode === 'explain');
+   await p.close();
+  });
+  await check('image reads preserve code attached while FileReader is pending', async () => {
+   const chat = await api('/api/chats', { title: 'Concurrent attachment regression' });
+   const p = await page('/chat/' + chat.id);
+   await click(p, 'Attach code'); await fill(p, '[aria-label="Code snapshot"]', 'int main(){return 0;}');
+   await p.evaluate(() => { const original = FileReader.prototype.readAsDataURL; FileReader.prototype.readAsDataURL = function(blob) { window.finishEvidenceRead = () => original.call(this, blob); }; });
+   const image = path.join(temporary, 'attachment.png');
+   fs.writeFileSync(image, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jzFoAAAAASUVORK5CYII=', 'base64'));
+   await (await p.$('[aria-label="Attach sketch or image"]')).uploadFile(image);
+   await p.waitForFunction(() => document.body.textContent.includes('Reading images'), { polling: 100 });
+   await click(p, 'Add code snapshot'); await p.waitForSelector('[aria-label="Remove main.cpp"]');
+   await p.evaluate(() => window.finishEvidenceRead()); await p.waitForSelector('[aria-label="Remove attachment.png"]');
+   assert.ok(await p.$('[aria-label="Remove main.cpp"]'), 'image completion must retain the new code');
+   await p.close();
+  });
+  await check('silent C++ failures retain execution status in the tutor handoff', async () => {
+   const { report } = await api('/api/training/cpp/run', { files: [{ name: 'main.cpp', source: 'int main(){return 1;}' }], stdin: '' });
+   assert.equal(report.result.exitCode, 1); assert.equal(report.result.errorKind, 'runtime');
+   const evidence = cppRunEvidence(report);
+   assert.deepEqual(evidence.code[0].execution, { ok: false, exitCode: 1, errorKind: 'runtime', timedOut: false });
+   const chat = await api('/api/chats', { title: 'Run status regression' }); const p = await page('/training');
+   await p.evaluate(incoming => sessionStorage.setItem('lh:incoming-evidence', JSON.stringify(incoming)), { chatId: chat.id, evidence });
+   await p.goto(origin + '/chat/' + chat.id, { waitUntil: 'networkidle2' });
+   await p.waitForFunction(() => document.querySelector('[data-testid="evidence-input"]')?.textContent.includes('Reported execution: runtime'), { polling: 100 });
+   assert.ok(await p.$eval('[data-testid="evidence-input"]', e => e.textContent.includes('exit 1')));
    await p.close();
   });
   await check('arithmetic wrong/correct submissions and stopped-round reload', async () => {
@@ -152,6 +179,49 @@ test('pre-merge production browser workflows', { timeout: 600000 }, async t => {
    await close(tablet); await pc.click('[data-testid=disconnect-tablet]'); await pc.waitForSelector('[data-testid=pair-tablet]'); assert.equal(await pc.$eval('[aria-label="Scratchpad title"]', e => e.disabled), false, 'PC reclaims drawing even when helper is down'); await fill(pc, '[aria-label="Scratchpad title"]', 'PC resumed'); await click(pc, 'Save now'); await until(async () => (await api('/api/training/scratchpad?id=tablet-c')).pad.title === 'PC resumed'); assert.equal((await api('/api/training/tablet?padId=tablet-c')).links.length, 0);
    await pc.click('[data-testid=attach-scratchpad]'); await pc.waitForFunction(() => location.pathname.startsWith('/chat/'), { polling: 100 }); await pc.waitForFunction(() => document.querySelector('[data-testid=evidence-input]')?.textContent.includes('Page-1.png'), { polling: 100 });
    assert.notEqual(first.link.id, second.link.id); await p.close(); await pc.close();
+  });
+  await check('pending notebook corrections never silently discard visible text', async () => {
+   await api('/api/training/mistakes', { action: 'manual', prompt: 'Pending correction regression', expected: 42, answer: '43', reasoning: 'Original attempt' });
+   const p = await page('/training/mistakes'); await p.waitForSelector('[name=correction]');
+   let held; await p.setRequestInterception(true); p.on('request', r => { if (r.method() === 'POST' && r.url().endsWith('/api/training/mistakes') && JSON.parse(r.postData()).action === 'edit') held = r; else r.continue(); });
+   await fill(p, '[name=correction]', 'Use distribution.'); await click(p, 'Save correction'); await until(() => !!held);
+   await p.type('[name=correction]', ' Additional reasoning.'); const visible = await p.$eval('[name=correction]', n => n.value);
+   held.continue(); await p.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Save correction' && !b.disabled));
+   assert.equal(await p.$eval('[name=correction]', n => n.value), visible); await p.close();
+  });
+  await check('acknowledged sprint notes do not revive as stale local drafts', async () => {
+   await api('/api/training/sprints', { action: 'start', id: 'beta-binomial' });
+   const p = await page('/training/sprints'); await p.select('[aria-label="Sprint topic"]', 'beta-binomial'); await p.waitForSelector('[name=notes]');
+   await fill(p, '[name=notes]', 'Saved once'); await click(p, 'Save milestone notes');
+   await until(async () => (await api('/api/training/sprints')).sprints.find(v => v.sprint.id === 'beta-binomial').progress.notes.diagnostic === 'Saved once');
+   await p.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Save milestone notes' && !b.disabled));
+   let progress = (await api('/api/training/sprints')).sprints.find(v => v.sprint.id === 'beta-binomial').progress;
+   await api('/api/training/sprints', { action: 'notes', id: 'beta-binomial', revision: progress.revision, phase: 'diagnostic', notes: 'Newer saved notes from another tab' });
+   await p.reload({ waitUntil: 'networkidle2' }); await p.select('[aria-label="Sprint topic"]', 'beta-binomial');
+   assert.equal(await p.$eval('[name=notes]', n => n.value), 'Newer saved notes from another tab');
+   let held; await p.setRequestInterception(true); p.on('request', r => { if (r.method() === 'POST' && r.url().endsWith('/api/training/sprints') && JSON.parse(r.postData()).action === 'notes') held = r; else r.continue(); });
+   await fill(p, '[name=notes]', 'Sent snapshot'); await click(p, 'Save milestone notes'); await until(() => !!held);
+   await p.type('[name=notes]', ' with newer unsaved text'); const newer = await p.$eval('[name=notes]', n => n.value); held.continue();
+   await p.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Save milestone notes' && !b.disabled));
+   await p.reload({ waitUntil: 'networkidle2' }); await p.select('[aria-label="Sprint topic"]', 'beta-binomial'); assert.equal(await p.$eval('[name=notes]', n => n.value), newer); await p.close();
+  });
+  await check('sprint handoffs select Guided teaching and the practice agent', async () => {
+   await api('/api/training/sprints', { action: 'start', id: 'indicators' });
+   const p = await page('/training/sprints'); await click(p, 'Open guided teaching session'); await p.waitForFunction(() => location.pathname.startsWith('/chat/'));
+   const chat = await api(await p.evaluate(() => '/api/chats/' + encodeURIComponent(location.pathname.split('/').pop()))); assert.equal(chat.settings.teachingMode, 'guided'); assert.notEqual(chat.kind, 'practice');
+   await p.waitForSelector('[data-testid=evidence-input] pre'); const payload = JSON.parse(await p.$eval('[data-testid=evidence-input] pre', n => n.textContent));
+   assert.ok(payload.instruction.includes('one targeted hint')); assert.equal(JSON.stringify(payload).includes('"expected":'), false); await p.close();
+   const practice = await page('/training/sprints'); await click(practice, 'Open practice session'); await practice.waitForFunction(() => location.pathname.startsWith('/chat/'));
+   assert.equal((await api(await practice.evaluate(() => '/api/chats/' + encodeURIComponent(location.pathname.split('/').pop())))).kind, 'practice');
+   await practice.waitForSelector('[data-testid=evidence-input] pre'); assert.ok((await practice.$eval('[data-testid=evidence-input] pre', n => n.textContent)).includes('without naming the technique upfront')); await practice.close();
+  });
+  await check('sprint progress clocks use server time despite browser clock skew', async () => {
+   const started = (await api('/api/training/sprints', { action: 'start', id: 'calibration-ev' })).sprint;
+   await api('/api/training/sprints', { action: 'timer', id: 'calibration-ev', revision: started.progress.revision, phase: 'diagnostic', running: true });
+   const p = await browser.newPage(); p.setDefaultTimeout(20000); p.on('pageerror', e => errors.push(e.message));
+   await p.evaluateOnNewDocument(() => { const nativeNow = Date.now.bind(Date); Date.now = () => nativeNow() + 10 * 60 * 60 * 1000; });
+   await p.goto(origin + '/training/sprints', { waitUntil: 'networkidle2' }); await p.select('[aria-label="Sprint topic"]', 'calibration-ev');
+   const text = await p.evaluate(() => document.body.textContent.match(/Tracked: \d+m \d+s/)?.[0] ?? 'no timer'); assert.match(text, /Tracked: 0m \d+s/); await p.close();
   });
   assert.deepEqual(errors, [], 'production pages have no uncaught browser errors'); completed = true;
  } finally {

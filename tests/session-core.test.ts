@@ -123,6 +123,29 @@ function model(opts: Partial<ConstructorParameters<typeof SessionModel>[0]> = {}
 	return new SessionModel({ chatId: "chat_x", initialMessages: [], ...opts });
 }
 
+
+describe("SSE transport adversarial framing", () => {
+	it("accepts CRLF frames even when every CRLF is split into individual bytes", async () => {
+		for (const chunkSize of [1, 2, 5, 17]) {
+			const m = model();
+			const wire = 'data: {"type":"agent_start"}\r\n\r\ndata: [DONE]\r\n\r\n';
+			await m.consumeStream(dripped(wire, chunkSize), false);
+			assert.equal(m.getState().status, "ready");
+		}
+	});
+	it("accepts standard multi-line data blocks and ignores SSE comments", async () => {
+		const m = model();
+		const wire = ':heartbeat\ndata: {"type":\ndata: "agent_start"}\n\ndata:[DONE]\n\n';
+		await m.consumeStream(dripped(wire, 2), false);
+		assert.equal(m.getState().status, "ready");
+	});
+	it("cannot settle a stream which ended before the [DONE] terminal", async () => {
+		const m = model();
+		await m.consumeStream(dripped('data: {"type":"agent_start"}\n\n', 1), false);
+		assert.equal(m.getState().status, "error");
+	});
+});
+
 // ─── the 409 identity-retry ────────────────────────────────────────────────
 
 interface Call {
@@ -464,6 +487,19 @@ it("Wave C: markers injected mid-run (custom role, follow-up delivery) append to
 	const again = m.getState();
 	assert.equal(again.messages.length, state.messages.length, "same id upserts, never appends a second copy");
 });
+
+	it("surfaces a saved provider error on load and settled-record sync, but not after a newer message", () => {
+		const errorMessage = "Google 500: Internal error encountered.";
+		const failed = { ...assistantMsg("failed", ""), stopReason: "error", errorMessage } as LhMessage;
+		const m = new SessionModel({ chatId: "chat_x", initialMessages: [failed] });
+		assert.equal(m.getState().error?.message, errorMessage);
+		m.setMessages([newUserMessage("retry")]);
+		assert.equal(m.getState().error, null);
+		m.setMessages([newUserMessage("retry"), failed]);
+		assert.equal(m.getState().error?.message, errorMessage);
+		m.setMessages([failed, assistantMsg("success", "Hello")]);
+		assert.equal(m.getState().error, null);
+	});
 
 	it("a provider error rides VERBATIM (owner ruling) — no masking anywhere", async () => {
 		globalThis.fetch = dietFetch({
@@ -1111,5 +1147,90 @@ describe("absorbed — the custom role (the doubled thinking card)", () => {
 		const customs = m.getState().nativeMessages.filter((x) => (x as { role?: string }).role === "custom");
 		assert.equal(customs.length, 1, "the server copy replaced the optimistic one — no doubling");
 		assert.equal((customs[0] as { id?: string }).id, "srv_1");
+	});
+});
+
+// ── the silent-turn bug: a body that closes without [DONE] is a truncation ──
+//
+// Issue #23: a prompt is accepted, then nothing happens and nothing is said.
+// The transport cannot tell "the turn finished" from "the connection died" —
+// only the [DONE] terminal can — and the view used to treat both as success,
+// so a dead turn settled to "ready" exactly like a completed one.
+
+describe("consumeStream — truncation is never a finished turn", () => {
+	/** A body that carries a partial assistant message and then CLOSES with no
+	 *  [DONE]: the dropped-connection shape. */
+	function truncatedStream(): Response {
+		return sseResponse(partial([{ type: "text", text: "The planet clo" }]));
+	}
+
+	/** The healthy terminal: a message, its end, agent_end, [DONE]. */
+	function healthyStream(): Response {
+		return sseResponse(
+			{ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "Mercury." }] } },
+			{
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: "Mercury." }], stopReason: "stop" },
+			},
+			{ type: "agent_end", messages: [] },
+			"[DONE]",
+		);
+	}
+
+	it("reattaches ONCE and keeps the turn when the reattach succeeds", async () => {
+		let streams = 0;
+		globalThis.fetch = dietFetch({
+			stream: () => {
+				streams += 1;
+				return streams === 1 ? truncatedStream() : healthyStream();
+			},
+		});
+		const m = model();
+		await m.send({ type: "text", text: "which planet?" });
+		assert.equal(streams, 2, "exactly one recovery attempt");
+		assert.equal(m.getState().status, "ready", "the recovered turn finished normally");
+		assert.equal(m.getState().error, null, "a recovered turn is not an error");
+	});
+
+	it("surfaces the failure when the recovery truncates too — never a silent ready", async () => {
+		let streams = 0;
+		globalThis.fetch = dietFetch({
+			stream: () => {
+				streams += 1;
+				return truncatedStream();
+			},
+		});
+		const m = model();
+		await m.send({ type: "text", text: "which planet?" });
+		assert.equal(streams, 2, "the budget is ONE attempt — no retry loop");
+		assert.equal(m.getState().status, "error", "a dead turn must not report ready");
+		assert.match(
+			String(m.getState().error?.message),
+			/connection dropped/,
+			"the learner is told what happened",
+		);
+	});
+
+	it("takes the turn-settled terminal as success (the turn finished while we were away)", async () => {
+		let streams = 0;
+		let settled = 0;
+		globalThis.fetch = dietFetch({
+			stream: () => {
+				streams += 1;
+				return streams === 1 ? truncatedStream() : sseResponse({ type: "turn-settled" }, "[DONE]");
+			},
+		});
+		const m = model({ onReattachSettled: () => void (settled += 1) });
+		await m.send({ type: "text", text: "which planet?" });
+		assert.equal(settled, 1, "the settle hook ran — the record refetch lands the reply");
+		assert.equal(m.getState().error, null, "a turn that really did finish is not an error");
+	});
+
+	it("a normal turn still settles to ready with no error (the regression)", async () => {
+		globalThis.fetch = dietFetch({ stream: healthyStream });
+		const m = model();
+		await m.send({ type: "text", text: "which planet?" });
+		assert.equal(m.getState().status, "ready");
+		assert.equal(m.getState().error, null);
 	});
 });

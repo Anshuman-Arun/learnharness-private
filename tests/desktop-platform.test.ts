@@ -27,7 +27,7 @@ function windowOptions(platform: string) {
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
-		require: (id: string) => id === "electron" ? electron : require(id),
+		require: (id: string) => id === "electron" ? electron : id === "./chatgpt-oauth.cjs" ? { createChatGPTOAuthRuntime() {} } : require(id),
 		process: { platform, argv: [], env: {}, on() {} },
 		__dirname: dirname(mainFile),
 	};
@@ -77,7 +77,8 @@ describe("desktop window chrome", () => {
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"expandWindow", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform",
+			"chatGPTCancelSignIn", "chatGPTDisconnect", "chatGPTOpenAuthorization", "chatGPTSetBackgroundUse", "chatGPTSignIn",
+			"expandWindow", "getChatGPTStatus", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform",
 		]);
 	});
 });
@@ -102,7 +103,9 @@ describe("desktop packaging policy", () => {
 			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
 		]);
 		assert.equal(config.linux.syncDesktopName, true);
-		assert.equal(config.publish[0].releaseType, "draft");
+		assert.equal(config.publish, undefined, "private derivative must have no upstream publication feed");
+		assert.equal(config.appId, "org.learnharness.private.windows");
+		assert.equal(config.productName, "LearnHarness Private");
 	});
 
 	it("deb has public maintainer metadata and a matching desktop identity", () => {
@@ -123,6 +126,7 @@ describe("workflow action versions", () => {
 		it(`${filename} uses supported Action runtimes without changing the app's Node 26`, () => {
 			const workflow = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
 			const expected = ["actions/checkout@v7", "actions/setup-node@v7"];
+			if (filename === "ci.yml") expected.push("actions/upload-artifact@v7");
 			if (filename === "release.yml") {
 				expected.push("actions/github-script@v9", "actions/upload-artifact@v7", "maxim-lobanov/setup-xcode@v1");
 			}
@@ -155,6 +159,7 @@ describe("desktop release workflow", () => {
 		concurrency: { group: string; "cancel-in-progress": boolean };
 		jobs: Record<string, {
 			needs?: string | string[]; steps: Step[]; "runs-on"?: string;
+			defaults?: { run: { shell: string } }; env?: Record<string, string>;
 			strategy?: { matrix: { include: { os: string; platform: string; builder_args?: string }[] } };
 		}>;
 	};
@@ -215,7 +220,7 @@ describe("desktop release workflow", () => {
 		}
 	});
 
-	it("pairs Icon Composer packaging with macOS 26 and Xcode selection, retaining macOS 15 CI", () => {
+	it("pairs Icon Composer release packaging with macOS 26 and Xcode selection", () => {
 		const mac = packaging.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
 		assert.equal(mac?.os, "macos-26", "actool's .icon compiler needs macOS 26 host frameworks, not just newer Xcode");
 		assert.equal(mac?.builder_args, "--mac --arm64");
@@ -227,10 +232,18 @@ describe("desktop release workflow", () => {
 		assert.equal(xcode?.with?.["xcode-version"], "latest-stable");
 		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
 		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
-
+	});
+	it("keeps Windows-only PR CI with full quality gates and standalone checks", () => {
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
-		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
-		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
+		assert.deepEqual(ci.jobs.standalone?.strategy?.matrix.include, [{ os: "windows-2025", platform: "windows-x64" }]);
+		const quality = ci.jobs.quality;
+		assert.ok(quality);
+		assert.equal(quality["runs-on"], "windows-2025");
+		assert.equal(quality.defaults?.run.shell, "bash");
+		assert.equal(quality.env?.npm_config_script_shell, String.raw`C:\Program Files\Git\bin\bash.exe`);
+		for (const command of ["npm run typecheck", "npm test", "npm run lint"]) {
+			assert.ok(quality.steps.some(step => step.run === command), `${command} remains a required quality gate`);
+		}
 	});
 
 	it("creates exactly one unpublished draft when none matches", async () => {
@@ -255,4 +268,15 @@ describe("desktop release workflow", () => {
 			{ id: 11, tag_name: "v0.3.0", draft: true },
 		]), /Multiple releases match/);
 	});
+});
+
+describe("native URL and permission fail-closed handling",()=>{
+  it("rejects malformed navigation rather than throwing before preventDefault",async()=>{
+    const source=await (await import("node:fs/promises")).readFile(
+      new URL("../electron/main.cjs",import.meta.url),"utf8");
+    assert.match(source,/let sameOrigin = false;/);
+    assert.match(source,/if \(!sameOrigin\) \{\s*event\.preventDefault\(\)/);
+    assert.match(source,/let requestOrigin = null;/);
+    assert.match(source,/callback\(fromOwnOrigin\(requestOrigin, permission\)\)/);
+  });
 });

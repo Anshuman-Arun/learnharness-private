@@ -38,8 +38,9 @@ import {
 	effectiveSettings,
 	promptOverrides,
 	readSettingsRecord,
-	validateChatSettings,
-	validateModelsSettings,
+	validateAccountAwareChatSettings,
+	validateAccountAwareModelsSettings,
+	validateAccountAwareAgentModels,
 	writeSettingsRecord,
 	type SettingsBodyResult,
 } from "@/src/server";
@@ -68,7 +69,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// Section-specific cross-validation (against the catalog / the prompt
 	// store) — the parsers only see shapes.
 	if (section === "chat") {
-		const verdict = validateChatSettings(parsed.settings as ChatSettings);
+		const verdict = await validateAccountAwareChatSettings(parsed.settings as ChatSettings);
 		if (!verdict.ok) {
 			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
 		}
@@ -77,12 +78,14 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// catalog gate the chat section gets — a slot must name a real
 	// provider+model and a thinking level it supports.
 	if (section === "models") {
-		const verdict = validateModelsSettings(parsed.settings as ModelsSettings);
+		const verdict = await validateAccountAwareModelsSettings(parsed.settings as ModelsSettings);
 		if (!verdict.ok) {
 			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
 		}
 	}
 	if (section === "agent") {
+		const modelVerdict = await validateAccountAwareAgentModels(parsed.settings as AgentSettings);
+		if (!modelVerdict.ok) return Response.json({ error: modelVerdict.error }, { status: 400 });
 		// Orphan-heal (contract fix, interlude 2026-09-26): an ON switch
 		// whose override file is gone (or whose segment left the source
 		// tree) is healed to OFF (key dropped) inside this write — never a

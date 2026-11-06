@@ -9,6 +9,7 @@ import {
 	GREP_MAX_LINE_LENGTH,
 	isBinaryFile,
 	matchGlob,
+	guardSourcePath,
 	MAX_OUTPUT_BYTES,
 	resolveSourcePath,
 	truncateGrepLine,
@@ -53,7 +54,7 @@ export const grepTool: AgentTool<typeof grepInput> = {
 	parameters: grepInput,
 	execute: serverExecute("grep", grepInput, async (input, ctx) => {
 		if (ctx?.signal?.aborted) return "Operation aborted";
-		const searchPath = resolveSourcePath(input.path);
+		const searchPath = await guardSourcePath(resolveSourcePath(input.path));
 
 		let stat;
 		try {

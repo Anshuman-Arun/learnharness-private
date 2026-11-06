@@ -155,10 +155,14 @@ export interface ProviderKeyMissing {
 /** The refusal wording's invariant tail — the matcher below keys on it
  * (the label prefix varies by provider). */
 const PROVIDER_KEY_MISSING_TAIL = "key is set — add one in Settings → Keys";
+export const CHATGPT_PLAN_NOT_CONNECTED = "ChatGPT plan not connected — sign in under Settings → Keys → ChatGPT plan";
+export const CHATGPT_BACKGROUND_DISABLED = "ChatGPT background use is disabled — enable it in Settings → Keys → ChatGPT plan";
 export function providerKeyMissing(provider: string, slots: ModelSlotName[]): ProviderKeyMissing {
 	const label = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider;
 	return {
-		error: `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
+		error: provider === "openai-chatgpt"
+			? CHATGPT_PLAN_NOT_CONNECTED
+			: `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
 		code: PROVIDER_KEY_MISSING_CODE,
 		provider,
 		slots,
@@ -169,7 +173,7 @@ export function providerKeyMissing(provider: string, slots: ModelSlotName[]): Pr
  * scary-error) — the envelope's home module owns the string so the
  * writer and the matcher can never drift. */
 export function isProviderKeyRefusal(error: string | undefined): boolean {
-	return !!error && error.endsWith(PROVIDER_KEY_MISSING_TAIL);
+	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CHATGPT_PLAN_NOT_CONNECTED || error === CHATGPT_BACKGROUND_DISABLED);
 }
 /** The typed throw for in-process seams (extraction pipeline) — the
  * ProviderKeyMissing sibling of ModelsNotConfiguredError: callers catch
@@ -233,6 +237,10 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 export interface GeneralSettings {
 	/** Auto-update the app (default ON). Mechanism ships in a later wave. */
 	autoUpdate?: boolean;
+	/** Dictation microphone deviceId; "default" follows the OS default. */
+	microphoneId?: string;
+	/** Name used to re-identify a device when localhost's port (origin) changes. */
+	microphoneLabel?: string;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -396,7 +404,7 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
-	general: { autoUpdate: true },
+	general: { autoUpdate: true, microphoneId: "default", microphoneLabel: "" },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -441,6 +449,17 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	if (
+		typeof raw.microphoneId === "string" &&
+		raw.microphoneId.length > 0 &&
+		raw.microphoneId.length <= 512 &&
+		!/[\x00-\x1f\x7f]/.test(raw.microphoneId)
+	) out.microphoneId = raw.microphoneId;
+	if (
+		typeof raw.microphoneLabel === "string" &&
+		raw.microphoneLabel.length <= 256 &&
+		!/[\x00-\x1f\x7f]/.test(raw.microphoneLabel)
+	) out.microphoneLabel = raw.microphoneLabel;
 	return out;
 }
 

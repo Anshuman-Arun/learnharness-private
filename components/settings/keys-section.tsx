@@ -29,6 +29,7 @@ import { SettingsGroup } from "./controls.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { ChatGPTConnectDialog, type ChatGPTStatus } from "./chatgpt-connect-dialog.tsx";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -41,6 +42,191 @@ export interface ProviderKeyInfo {
 interface KeysResponse {
 	keys: AuthKeyStatus[];
 	providers?: ProviderKeyInfo[];
+}
+
+function ChatGPTPlanRow() {
+	const [status, setStatus] = useState<ChatGPTStatus | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [dialogOpen, setDialogOpen] = useState(false);
+	const [copied, setCopied] = useState(false);
+	const wasConnected = useRef(false);
+	const requestEpoch = useRef(0);
+	const busyRef = useRef(false);
+
+	async function reload() {
+		const epoch = ++requestEpoch.current;
+		if (!window.lh?.getChatGPTStatus) {
+			setStatus({ available: false, connected: false });
+			return;
+		}
+		try {
+			const next = await window.lh.getChatGPTStatus();
+			if (epoch === requestEpoch.current) setStatus(next);
+		} catch (cause) {
+			if (epoch !== requestEpoch.current) return;
+			setStatus({ available: true, connected: false });
+			setError(cause instanceof Error ? cause.message : "Could not read ChatGPT connection status.");
+		}
+	}
+
+	useEffect(() => {
+		void reload();
+	}, []);
+
+	useEffect(() => {
+		const connected = status?.connected === true;
+		if (connected && !wasConnected.current) notifySettingsSaved("keys");
+		wasConnected.current = connected;
+	}, [status?.connected]);
+
+	useEffect(() => {
+		if (!dialogOpen || status?.connected || status?.phase === "error") return;
+		const interval = window.setInterval(() => void reload(), 700);
+		return () => window.clearInterval(interval);
+	}, [dialogOpen, status?.connected, status?.phase]);
+
+	async function connect() {
+		if (!window.lh?.chatGPTSignIn) return;
+		const epoch = ++requestEpoch.current;
+		setDialogOpen(true);
+		setCopied(false);
+		setError(null);
+		setStatus({ available: true, connected: false, connecting: true, phase: "preparing" });
+		try {
+			const next = await window.lh.chatGPTSignIn();
+			if (epoch === requestEpoch.current) setStatus(next);
+		} catch (cause) {
+			if (epoch !== requestEpoch.current) return;
+			setStatus({
+				available: true,
+				connected: false,
+				connecting: false,
+				phase: "error",
+				error: cause instanceof Error ? cause.message : "ChatGPT connection failed.",
+			});
+		}
+	}
+
+	function closeDialog() {
+		const epoch = ++requestEpoch.current;
+		setDialogOpen(false);
+		setCopied(false);
+		if (status?.connecting) {
+			void window.lh?.chatGPTCancelSignIn?.()
+				.then((next) => {
+					if (epoch === requestEpoch.current) setStatus(next);
+				})
+				.catch(() => {
+					if (epoch === requestEpoch.current) void reload();
+				});
+		}
+	}
+
+	async function copyLink() {
+		if (!status?.authorizationUrl) return;
+		try {
+			await navigator.clipboard.writeText(status.authorizationUrl);
+			setCopied(true);
+		} catch {
+			setError("Could not copy the authorization link.");
+		}
+	}
+
+	async function openBrowser() {
+		const epoch = ++requestEpoch.current;
+		try {
+			if (window.lh?.chatGPTOpenAuthorization) {
+				const next = await window.lh.chatGPTOpenAuthorization();
+				if (epoch === requestEpoch.current) setStatus(next);
+			}
+		} catch (cause) {
+			if (epoch === requestEpoch.current) setError(cause instanceof Error ? cause.message : "Could not open the authorization link.");
+		}
+	}
+
+	async function change(action: (() => Promise<ChatGPTStatus>) | undefined) {
+		if (!action || busyRef.current) return;
+		busyRef.current = true;
+		const epoch = ++requestEpoch.current;
+		setBusy(true);
+		setError(null);
+		try {
+			const next = await action();
+			if (epoch === requestEpoch.current) {
+				setStatus(next);
+				notifySettingsSaved("keys");
+			}
+		} catch (cause) {
+			if (epoch === requestEpoch.current) {
+				setError(cause instanceof Error ? cause.message : "ChatGPT connection failed.");
+				await reload();
+			}
+		} finally {
+			busyRef.current = false;
+			setBusy(false);
+		}
+	}
+
+	const connected = status?.connected === true;
+	return (
+		<div className="px-1 py-1.5" data-testid="chatgpt-plan-row">
+			<div className="flex items-center justify-between gap-3">
+				<span className="font-ui text-xs text-foreground">ChatGPT plan</span>
+				<span className="flex items-center gap-2">
+					<span data-testid="chatgpt-plan-status" className="font-mono text-[11px] text-muted-foreground">
+						{status === null
+							? "checking…"
+							: connected
+								? "connected"
+								: status.connecting
+									? "connecting…"
+								: status.available
+									? "not connected"
+									: "desktop app only"}
+					</span>
+					{status?.available && (
+						<button
+							type="button"
+							disabled={busy}
+							data-testid={connected ? "chatgpt-disconnect" : "chatgpt-connect"}
+							onClick={() => connected ? void change(window.lh?.chatGPTDisconnect) : status?.connecting ? setDialogOpen(true) : void connect()}
+							className="text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40"
+						>
+							{busy ? "Working…" : connected ? "Disconnect" : status?.connecting ? "View progress" : "Connect"}
+						</button>
+					)}
+				</span>
+			</div>
+			{connected && (
+				<label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground" data-testid="chatgpt-background-consent">
+					<input type="checkbox" className="mt-0.5 accent-foreground"
+						checked={status?.backgroundUseAllowed === true}
+						disabled={busy}
+						onChange={(event) => {
+							const allowed = event.currentTarget.checked;
+							const native = window.lh as typeof window.lh & {
+								chatGPTSetBackgroundUse?: (allowed: boolean) => Promise<ChatGPTStatus>;
+							};
+							if (native?.chatGPTSetBackgroundUse) void change(() => native.chatGPTSetBackgroundUse!(allowed));
+						}}
+					/>
+					<span>Allow ChatGPT plan use by autonomous background learning agents. Off by default; teaching messages you send can still use your plan.</span>
+				</label>
+			)}
+			{(error || (status?.error && !dialogOpen)) && <p role="alert" className="pt-1 text-xs text-red-500">{error || status?.error}</p>}
+			{dialogOpen && status && (
+				<ChatGPTConnectDialog
+					status={status}
+					copied={copied}
+					onCopy={() => void copyLink()}
+					onOpenBrowser={() => void openBrowser()}
+					onRetry={() => void connect()}
+					onClose={closeDialog}
+				/>
+			)}
+		</div>
+	);
 }
 
 /** The curated tools group, pinned by id (the catalog owns the copy;
@@ -413,6 +599,7 @@ export function KeysSection({
 	return (
 		<>
 			<SettingsGroup label="Model providers" testid="group-provider-keys">
+				<ChatGPTPlanRow />
 				{providerRows.map((status) => (
 					<KeyTableRow
 						key={status.id}

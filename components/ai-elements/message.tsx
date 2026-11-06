@@ -34,7 +34,7 @@ import {
   type PluginConfig,
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
-import { transformMathDelimiters } from "@/src/core";
+import { transformMathDelimiters, repairMathForDisplay } from "@/src/core";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: LhViewMessage["role"];
@@ -357,12 +357,14 @@ export const streamdownPlugins = {
 
 export const MessageResponse = memo(
   ({ className, children, ...props }: MessageResponseProps) => {
-    // Legacy backslash delimiters are converted in a single linear scan;
-    // native dollar math passes through to Streamdown unchanged. Incomplete
-    // legacy spans are left for a later render when their closer arrives.
+    // All text surfaces now share math escape repair: a serialized
+    // \\times, doubled \\begin or JSON-escaped command is repaired ONLY
+    // inside balanced math spans, without modifying saved messages.
+    // Legacy delimiters then convert to the Streamdown form. Unbalanced
+    // streaming fragments remain literal until their closer arrives.
     const content =
       typeof children === "string"
-        ? transformMathDelimiters(children)
+        ? transformMathDelimiters(repairMathForDisplay(children))
         : children;
 
     return (

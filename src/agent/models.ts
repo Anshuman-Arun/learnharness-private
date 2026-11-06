@@ -11,7 +11,13 @@ import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
+import {
+	CHATGPT_PROVIDER_ID,
+	CHATGPT_SOURCE_PROVIDER_ID,
+	ChatGPTBrokerCredentialStore,
+} from "./chatgpt-broker.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
+import { prepareChatGPTResponsesPayload } from "./chatgpt-responses-payload.ts";
 
 /** App identity is immutable and shared by Models and every native Agent.
  * Agent's default Pi attribution otherwise overrides the Models identity. */
@@ -35,6 +41,10 @@ export const APP_IDENTITY = Object.freeze({
 
 export interface PiEngine {
 	model: Model<Api>;
+	/** The settings-selected billing/provider identity. May differ from the
+	 * pi-ai transport provider (ChatGPT plan maps to the OpenAI Responses API).
+	 * Missing on injected test engines for backward compatibility. */
+	providerId?: string;
 	streamFn: StreamFunction;
 	/** The resolved (config-or-settings, CLAMPED) thinking level —
 	 *  observability + tests; the streamFn pins it anyway. */
@@ -44,6 +54,7 @@ export interface PiEngine {
 export type { ThinkingLevel };
 
 let collection: ReturnType<typeof createModels> | undefined;
+let chatGPTCollection: ReturnType<typeof createModels> | undefined;
 
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
@@ -59,6 +70,26 @@ export function piModels() {
 		for (const provider of builtinProviders()) collection.setProvider(provider);
 	}
 	return collection;
+}
+
+export function piChatGPTModels() {
+	if (!chatGPTCollection) {
+		chatGPTCollection = createModels({
+			identity: APP_IDENTITY,
+			credentials: new ChatGPTBrokerCredentialStore(),
+			// Subscription authentication is a separate billing boundary. If the
+			// broker has no authorized OAuth credential, ambient OPENAI_API_KEY
+			// must NEVER be used as an alternative.
+			authContext: {
+				env: async () => undefined,
+				fileExists: async () => false,
+			},
+		});
+		for (const provider of builtinProviders()) {
+			if (provider.id === CHATGPT_SOURCE_PROVIDER_ID) chatGPTCollection.setProvider(provider);
+		}
+	}
+	return chatGPTCollection;
 }
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */
@@ -94,8 +125,10 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
  *  keys seam reflects file-saved keys into env), so the engine never
  *  hardcodes OpenRouter's. */
 export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
-	const models: Models = piModels();
-	const model = models.getModel(spec.provider, spec.id);
+	const usesChatGPT = spec.provider === CHATGPT_PROVIDER_ID;
+	const models: Models = usesChatGPT ? piChatGPTModels() : piModels();
+	const provider = usesChatGPT ? CHATGPT_SOURCE_PROVIDER_ID : spec.provider;
+	const model = models.getModel(provider, spec.id);
 	if (!model) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);
 	}
@@ -107,6 +140,7 @@ export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 		: defaultThinkingLevel(model);
 	return {
 		model,
+		providerId: spec.provider,
 		level,
 		// bound streamSimple: the agent loop forwards state.thinkingLevel as
 		// `reasoning` (undefined = off on pi-ai's scale); the clamp above keeps
@@ -114,6 +148,20 @@ export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
 		streamFn: (requestModel, context, options) =>
 			models.streamSimple(requestModel, context, {
 				...options,
+				// Do not let an explicitly supplied ambient key/header bypass the
+				// ChatGPT broker boundary on the subscription-only path.
+				...(usesChatGPT ? {
+					apiKey: undefined, env: undefined, headers: undefined,
+					// pi-ai's regular OpenAI transport may emit top-level
+					// function tools, explicit system messages, or sampling
+					// fields rejected by ChatGPT token-sharing preview.
+					// Keep the original onPayload hook for observability but
+					// enforce the subscription contract *after* it.
+					onPayload: async (payload, runtimeModel) => {
+						const changed = await options?.onPayload?.(payload, runtimeModel);
+						return prepareChatGPTResponsesPayload((changed ?? payload) as { input: unknown });
+					},
+				} : {}),
 				reasoning: level === "off" ? undefined : level,
 			}),
 	};

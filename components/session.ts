@@ -100,7 +100,10 @@ export function useChatSession({ chatId, initialMessages, initiallyInFlight }: U
 		[model],
 	);
 
-	const send = useCallback((input: ChatInput) => void model.send(input), [model]);
+	// Resolve on the durable POST acknowledgment, independently of stream lifetime.
+	const send = useCallback((input: ChatInput) => new Promise<boolean>((resolve) => {
+		void model.send(input, () => resolve(true)).then(() => resolve(false), () => resolve(false));
+	}), [model]);
 	const steer = useCallback((text: string) => void model.steer(text), [model]);
 	const submitAnswer = useCallback(
 		(tool: string, toolCallId: string, output: QuestionAnswerData) =>

@@ -107,6 +107,57 @@ export const METER_CELLS = 48;
  *  section's openRow state and the PUT /api/keys/:id seam). */
 export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
 
+/** A named device is a strict choice: never silently record from another mic. */
+export function dictationAudioConstraints(microphoneId = "default"): MediaStreamConstraints {
+	return {
+		audio: {
+			...(microphoneId !== "default" ? { deviceId: { exact: microphoneId } } : {}),
+			channelCount: 1,
+			echoCancellation: true,
+			noiseSuppression: true,
+			autoGainControl: true,
+		},
+	};
+}
+
+/** ID changes across localhost origins; match a uniquely named physical mic after a restart. */
+export function findMicrophoneByLabel(
+	label: string,
+	devices: readonly Pick<MediaDeviceInfo, "kind" | "label" | "deviceId">[],
+): string | undefined {
+	if (!label) return undefined;
+	const matches = devices.filter((item) => item.kind === "audioinput" && item.label === label && item.deviceId);
+	return matches.length === 1 ? matches[0]?.deviceId : undefined;
+}
+
+async function selectedMicrophone(): Promise<MediaStream> {
+	const response = await fetch("/api/settings", { cache: "no-store" });
+	if (!response.ok) throw new Error("Could not read microphone setting.");
+	const body = (await response.json()) as { settings?: { general?: { microphoneId?: string; microphoneLabel?: string } } | null };
+	const id = body.settings?.general?.microphoneId ?? "default";
+	const label = body.settings?.general?.microphoneLabel ?? "";
+	const media = navigator.mediaDevices;
+	if (id === "default") return media.getUserMedia(dictationAudioConstraints());
+	try {
+		return await media.getUserMedia(dictationAudioConstraints(id));
+	} catch (error) {
+		// Never use a different microphone silently on a genuine permission error.
+		if (!(error instanceof DOMException) || (error.name !== "NotFoundError" && error.name !== "OverconstrainedError") || !label) throw error;
+	}
+	let available = await media.enumerateDevices();
+	let resolved = findMicrophoneByLabel(label, available);
+	if (!resolved && !available.some((item) => item.kind === "audioinput" && item.label)) {
+		// Chromium hides labels until permission is granted on this origin.
+		// Open the default mic briefly ONLY to unlock enumeration, never to stream.
+		const permissionStream = await media.getUserMedia({ audio: true });
+		permissionStream.getTracks().forEach((track) => track.stop());
+		available = await media.enumerateDevices();
+		resolved = findMicrophoneByLabel(label, available);
+	}
+	if (!resolved) throw new DOMException("Saved microphone unavailable", "NotFoundError");
+	return media.getUserMedia(dictationAudioConstraints(resolved));
+}
+
 /** The client-authored KEYLESS line (zero-keys wave, owner 2026-09-25):
  * the token route's raw 503 message is dev-speak ("add it to auth.json
  * (desktop) or .env.local (dev)") — the surface says the short truth
@@ -247,6 +298,12 @@ export function useDictationTarget(append: (text: string) => void, claimed: bool
 
 export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
 
+/** A socket whose stop has been requested must not reconnect and reopen
+ * microphone capture. One reconnect is permitted only for unexpected loss. */
+export function shouldReconnectDictation(code: number, stopRequested: boolean, attempts: number): boolean {
+	return code !== 1000 && !stopRequested && attempts < 1;
+}
+
 export type Dictation = {
 	phase: DictationPhase;
 	/** Terminal-state explanation, shown inside the wide button (cleared on the next start). */
@@ -309,6 +366,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	const genRef = useRef(0); // stale-handler guard (dictate pattern)
 	const safetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const reconnectsRef = useRef(0);
+	const stopRequestedRef = useRef(false);
 	/** The deferred transcript (owner round 2): finals land here during the
 	 *  run and flush into the primary input once, at teardown. */
 	const bufferRef = useRef<string[]>([]);
@@ -363,6 +421,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
 		(gen: number, token: string) => {
+			if (gen !== genRef.current || stopRequestedRef.current) return;
 			// Minted JWTs authenticate via the "bearer" subprotocol — ["token",
 			// jwt] is rejected at the handshake (verified live; "token" is for
 			// raw API keys only, as in the owner's pi dictate extension).
@@ -370,16 +429,22 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			wsRef.current = ws;
 
 			ws.addEventListener("open", () => {
-				if (gen !== genRef.current) return;
+				if (gen !== genRef.current || ws !== wsRef.current || stopRequestedRef.current) return;
 				// Mitigation A: everything captured during the handshake (or a
 				// reconnect gap) goes out now, in order — Deepgram accepts
 				// faster-than-realtime sends.
-				for (const frame of pendingRef.current) ws.send(frame);
+				try {
+					for (const frame of pendingRef.current) ws.send(frame);
+				} catch {
+					setError("Dictation audio could not be sent. Check the connection and retry.");
+					cleanup();
+					return;
+				}
 				pendingRef.current = [];
 				setPhase("recording");
 			});
 			ws.addEventListener("message", (ev) => {
-				if (gen !== genRef.current) return;
+				if (gen !== genRef.current || ws !== wsRef.current) return;
 				let msg: any;
 				try {
 					msg = JSON.parse(ev.data as string);
@@ -395,16 +460,20 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				}
 			});
 			ws.addEventListener("close", (ev) => {
-				if (gen !== genRef.current) return;
-				if (ev.code === 1000) {
-					// Our own CloseStream landing: finalize now — the stop path's
-					// safety net stays as the no-close backstop only.
+				if (gen !== genRef.current || ws !== wsRef.current) return;
+				if (ev.code === 1000 || stopRequestedRef.current) {
+					// Graceful server closure is only a successful stop when
+					// WE requested CloseStream. Otherwise the recording ended
+					// unexpectedly and must not report a clean transcript.
+					if (!stopRequestedRef.current) {
+						setError("Dictation ended unexpectedly. Check the captured text and retry if incomplete.");
+					}
 					cleanup();
 					return;
 				}
 				// Abnormal close mid-run: ONE reconnect with a fresh token (the
 				// research pass: resume is our job, no SDK to lean on).
-				if (reconnectsRef.current < 1) {
+				if (shouldReconnectDictation(ev.code, stopRequestedRef.current, reconnectsRef.current)) {
 					reconnectsRef.current++;
 					mintFreshToken() // always FRESH — a stale warm token is the likely culprit
 						.then((t) => {
@@ -430,6 +499,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		setError(null);
 		setPhase("connecting");
 		reconnectsRef.current = 0;
+		stopRequestedRef.current = false;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
 		const gen = ++genRef.current;
@@ -442,9 +512,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// first use.
 		const tokenPromise = warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
-		const micPromise = navigator.mediaDevices.getUserMedia({
-			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-		});
+		const micPromise = selectedMicrophone();
 		let stream: MediaStream;
 		try {
 			stream = await micPromise;
@@ -464,17 +532,29 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			const worklet = new AudioWorkletNode(ctx, "pcm-capture");
 			workletRef.current = worklet;
 			worklet.port.onmessage = (e) => {
+				if (gen !== genRef.current || stopRequestedRef.current) return;
 				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
-				} else if (msg.type === "audio") {
+				} else if (msg.type === "audio" && msg.buffer instanceof ArrayBuffer) {
 					const ws = wsRef.current;
-					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
-					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
-					// queue, capped; the open handler flushes in order.
-					else {
-						pendingRef.current.push(msg.buffer!);
-						if (pendingRef.current.length > 256) pendingRef.current.shift();
+					if (ws && ws.readyState === WebSocket.OPEN) {
+						try {
+							ws.send(msg.buffer);
+						} catch {
+							setError("Dictation audio could not be sent. Check the connection and retry.");
+							cleanup();
+						}
+					} else {
+						// Do not silently discard the first seconds of speech
+						// when a Bluetooth handshake or Deepgram connection
+						// stalls longer than the bounded audio queue.
+						if (pendingRef.current.length >= 256) {
+							setError("Dictation connection stalled and audio could not be preserved. Retry.");
+							cleanup();
+							return;
+						}
+						pendingRef.current.push(msg.buffer);
 					}
 				}
 			};
@@ -489,6 +569,8 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			const msg =
 				e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")
 					? "Microphone permission denied"
+					: e instanceof DOMException && (e.name === "NotFoundError" || e.name === "OverconstrainedError")
+						? "Selected microphone unavailable — choose another in Settings → General"
 					: e instanceof Error
 						? e.message
 						: "mic unavailable";
@@ -509,12 +591,19 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		if (gen !== genRef.current) return;
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
-		openSocket(gen, token);
+		try {
+			openSocket(gen, token);
+		} catch (cause) {
+			if (gen !== genRef.current) return;
+			setError(cause instanceof Error ? cause.message : "Deepgram connection could not start");
+			cleanup();
+		}
 	}, [openSocket, cleanup]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
 		if (phase !== "recording" && phase !== "connecting") return;
+		stopRequestedRef.current = true;
 		setPhase("stopping");
 
 		// Mic dies FIRST — no more audio enqueues (dictate pattern). The
@@ -710,7 +799,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 			<Hint
 				// The owner flagged this copy good ("Stop dictation (Esc)") —
 				// kept verbatim; only the machinery moved to the styled tooltip.
-				label="Stop dictation (Esc)"
+				label={phase === "connecting" ? "Connecting microphone and transcription" : "Stop dictation (Esc)"}
 				side="top"
 			>
 				<button
@@ -721,15 +810,15 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 				data-testid="dictation-toggle"
 				className="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-destructive/10 px-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
 			>
-				{phase === "stopping" ? (
+				{phase === "stopping" || phase === "connecting" ? (
 					<Loader2Icon className="size-3.5 animate-spin" />
 				) : (
 					<MicIcon className="size-3.5" />
 				)}
-					Stop
+					{phase === "connecting" ? "Connecting" : "Stop"}
 				</button>
 			</Hint>
-			<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-destructive" aria-hidden />
+			{phase !== "connecting" && <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-destructive" aria-hidden />} 
 			{/* Fixed width while recording — nothing ever appends text beside it
 			    (no interims, owner round 1). Cells carry no minimum width; the
 			    COUNT adapts to the measured row space (owner round 2). */}

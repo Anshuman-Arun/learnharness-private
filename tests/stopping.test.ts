@@ -9,3 +9,15 @@ describe('finite-horizon stopping',()=>{
  it('dominates all static thresholds in expectation and compares using repeatable shared offers',()=>{for(let threshold=1;threshold<=7;threshold+=.5)assert.ok(staticThresholdValue(game.config,threshold)<=stoppingTable(game.config)[3]!.value+1e-12);const a=compareStoppingPolicies(game.config,4,42);assert.deepEqual(a,compareStoppingPolicies(game.config,4,42));assert.ok(Math.abs(a.optimalMean-a.optimalExact)<.1);assert.ok(Math.abs(a.staticMean-a.staticExact)<.1);});
  it('hides future seeds and decision values until finished and restores persisted games',()=>{let g=changeStopping({action:'start',config:{sides:6,horizon:2,cost:0},predictedValue:4,reasoning:'Compare current offer with remaining value'});assert.equal('seed'in g,false);assert.equal('table'in g,false);g=changeStopping({action:'decide',id:g.id,index:0,choice:'continue'});assert.equal('regret'in g.decisions[0]!,false);const done=changeStopping({action:'decide',id:g.id,index:1,choice:'stop'});assert.ok("table" in done && done.table);assert.ok('regret'in done.decisions[0]!);assert.equal(stoppingGames().find(x=>x.id===g.id)?.finished,true);});
 });
+
+it('agrees with an exhaustive offer-tree oracle at horizon and cost boundaries',()=>{
+ function value(sides:number,draws:number,cost:number):number{
+  let total=0;
+  for(let offer=1;offer<=sides;offer++)total+=draws===1?offer:Math.max(offer,value(sides,draws-1,cost)-cost);
+  return total/sides;
+ }
+ for(const sides of [2,3,6])for(const horizon of [1,2,4])for(const cost of [0,.25,1,100]){
+  const config={sides,horizon,cost};
+  assert.ok(Math.abs(stoppingTable(config)[horizon]!.value-value(sides,horizon,cost))<1e-12);
+ }
+});

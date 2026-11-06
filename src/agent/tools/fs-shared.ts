@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -34,6 +35,91 @@ export const WALK_TIMEOUT_MS = 10_000;
  * Explicit paths (ls/read of ~/Library/…) are NOT filtered — only walks.
  */
 const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]);
+
+
+/** Local agent tools must never ingest application secrets, OAuth vaults,
+ * private session data, or common OS credentials. The model can be exposed
+ * to untrusted web/PDF text that attempts prompt-injection exfiltration. */
+const PRIVATE_DIR_PARTS = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", ".configstore"]);
+const PRIVATE_FILENAMES = new Set([
+	"auth.json", ".netrc", ".npmrc", ".pypirc", ".git-credentials",
+	"chatgpt-oauth.enc.json", "chatgpt-device-id", "id_rsa", "id_ed25519",
+	"credentials.json", "credentials", "known_hosts",
+]);
+
+function pathWithin(candidate: string, root: string): boolean {
+	const normalizedRoot = path.resolve(root);
+	const normalizedCandidate = path.resolve(candidate);
+	// Windows filesystem lookups are ordinarily case-insensitive. A learner
+	// must not bypass private application folders with alternate casing.
+	const from = process.platform === "win32" ? normalizedRoot.toLowerCase() : normalizedRoot;
+	const to = process.platform === "win32" ? normalizedCandidate.toLowerCase() : normalizedCandidate;
+	const rel = path.relative(from, to);
+	return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
+/** Match both configured and canonical storage paths. Windows short names
+ * and junctions can spell the same directory differently; comparing a real
+ * candidate against only the configured spelling leaves secrets readable. */
+function privateRootContains(candidate: string, root: string): boolean {
+	if (pathWithin(candidate, root)) return true;
+	try { return pathWithin(candidate, realpathSync.native(root)); }
+	catch { return false; } // An absent root cannot contain an existing file.
+}
+
+/** Call on the real candidate path as well as the requested spelling. */
+export function isPrivateSourcePath(p: string): boolean {
+	const resolved = path.resolve(p);
+	// Reject Linux pseudo-filesystems: /proc/self/environ exposes the
+	// Next child process's OAuth broker capability via an ordinary read.
+	if (process.platform !== "win32" &&
+		["/proc", "/sys", "/dev", "/run/secrets"].some((root) => pathWithin(resolved, root))) return true;
+	const parts = resolved.split(/[\\/]+/).map((x) => x.toLowerCase());
+	const base = parts[parts.length - 1] ?? "";
+	// A slash-containing directory name cannot match path segments.
+	// Check the actual Linux secret-store ancestry instead.
+	const keyring = path.join(os.homedir(), ".local", "share", "keyrings");
+	if (privateRootContains(resolved, keyring)) return true;
+	if (PRIVATE_DIR_PARTS.has(base) || parts.some((part) => PRIVATE_DIR_PARTS.has(part))) return true;
+	if (PRIVATE_FILENAMES.has(base) || base === ".env" || base.startsWith(".env.")) return true;
+	const roots = [
+		process.env.LH_DATA_DIR,
+		process.env.LH_AUTH_FILE && path.dirname(process.env.LH_AUTH_FILE),
+		process.env.LH_AUTH_FILE,
+		path.join(process.cwd(), "data"),
+		path.join(process.cwd(), ".env.local"),
+		path.join(process.cwd(), "auth.json"),
+		path.join(os.homedir(), ".config", "LearnHarness Private"),
+		path.join(os.homedir(), ".config", "LearnHarness"),
+		path.join(os.homedir(), "Library", "Application Support", "LearnHarness"),
+		path.join(os.homedir(), "Library", "Application Support", "LearnHarness Private"),
+		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness Private"),
+		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness PR20 Test"),
+		process.env.APPDATA && path.join(process.env.APPDATA, "LearnHarness"),
+	].filter((item): item is string => Boolean(item));
+	return roots.some((root) => privateRootContains(resolved, root));
+}
+
+/** Fail closed if a symlink reaches a secret. Return the checked real path,
+ * so readers never reopen the unvalidated alias. */
+export async function guardSourcePath(p: string): Promise<string> {
+	const absolute = path.resolve(p);
+	// Block even nonexistent private paths before touching the filesystem.
+	if (isPrivateSourcePath(absolute)) {
+		throw new Error("Access denied: application credentials and private OS files cannot be read by the learner's tutor.");
+	}
+	let real: string;
+	try {
+		real = await fs.realpath(absolute);
+	} catch (cause) {
+		const code = (cause as NodeJS.ErrnoException).code ?? "unknown";
+		throw new Error(`Path not found: ${absolute} (${code})`);
+	}
+	if (isPrivateSourcePath(real)) {
+		throw new Error("Access denied: application credentials and private OS files cannot be read by the learner's tutor.");
+	}
+	return real;
+}
 
 /** Resolve a tool path argument: absolute stays, relative/absent → home.
  *  (pi resolves against the project cwd; the harness's "project" is the
@@ -143,6 +229,7 @@ export async function walkFiles(
 	if (signal?.aborted) return { timedOut: false, aborted: true };
 
 	const walkDir = async (dir: string): Promise<boolean> => {
+		if (isPrivateSourcePath(dir) || isPrivateSourcePath(await fs.realpath(dir).catch(() => dir))) return false;
 		if (Date.now() > deadline) {
 			timedOut = true;
 			return true; // stop
@@ -167,6 +254,7 @@ export async function walkFiles(
 				return true;
 			}
 			const full = path.join(dir, entry.name);
+			if (isPrivateSourcePath(full)) continue;
 			if (entry.isDirectory()) {
 				if (EXCLUDED_DIR_NAMES.has(entry.name)) continue;
 				if (await walkDir(full)) return true;

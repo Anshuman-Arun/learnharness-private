@@ -70,7 +70,7 @@ describe("the schema's argument order (reasoning before the pick)", () => {
 			);
 			assert.deepEqual(keys, schema === quizInputSchema
 				? ["type", "nodeId", "question", "options", "multiSelect", "explanation", "correctAnswer", "details"]
-				: ["question", "options", "multiSelect", "explanation", "correctAnswer", "details"]);
+				: ["question", "options", "multiSelect", "explanation", "correctAnswer", "details", "conceptId"]);
 		}
 	});
 });

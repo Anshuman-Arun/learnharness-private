@@ -149,7 +149,7 @@ export function EstimationTrainer() {
 							<p>
 								{current.question.assumptionDependent
 									? "Fermi scenarios are excluded from calibration: the reference depends on assumptions."
-									: `Factor error ${current.score!.factorError.toFixed(3)}×; reference ${current.score!.covered ? "inside" : "outside"} interval; log interval score ${current.score!.intervalScore.toFixed(3)} (lower is better).`}
+									: `Factor error ${current.score!.factorError === null ? "exceeds numeric range" : current.score!.factorError.toFixed(3) + "×"}; reference ${current.score!.covered ? "inside" : "outside"} interval; log interval score ${current.score!.intervalScore.toFixed(3)} (lower is better).`}
 							</p>
 						</div>
 					)}

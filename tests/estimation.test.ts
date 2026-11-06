@@ -12,3 +12,12 @@ describe('estimation and interval calibration',()=>{
  it('rejects inverted intervals, missing reasoning and invalid probabilities',()=>{assert.throws(()=>parseEstimateAnswer({estimate:2,low:3,high:4,reasoning:'x'}));assert.throws(()=>parseEstimateAnswer({estimate:2,low:1,high:4,reasoning:''}));const a=changeEstimate({action:'start',kind:'probability'});assert.throws(()=>changeEstimate({action:'answer',id:a.id,answer:{estimate:1,low:.1,high:2,reasoning:'x'}}),/Probability/);});
  it('hides reference and explanation until commitment, persists reasoning and locks the attempt',()=>{const a=changeEstimate({action:'start',kind:'root'},100);assert.equal('reference'in a.question,false);assert.equal('explanation'in a.question,false);const answer={estimate:20,low:1,high:100,reasoning:'bounded by integer squares'};const done=changeEstimate({action:'answer',id:a.id,answer},200);assert.ok('reference'in done.question);assert.equal(done.answer?.reasoning,answer.reasoning);assert.equal(listEstimates().find(x=>x.id===a.id)?.submittedAt,200);assert.throws(()=>changeEstimate({action:'answer',id:a.id,answer}),/already committed/);});
 });
+
+it('keeps log scores finite for accepted subnormal estimates and reports factor overflow explicitly',()=>{
+ const answer=parseEstimateAnswer({estimate:Number.MIN_VALUE,low:Number.MIN_VALUE,high:Number.MIN_VALUE,reasoning:'A very small positive estimate'});
+ const score=estimateScore(estimateQuestion('product',0),answer);
+ assert.ok(Number.isFinite(score.logError));
+ assert.ok(Number.isFinite(score.intervalScore));
+ assert.equal(score.factorError,null);
+ assert.equal(JSON.parse(JSON.stringify(score)).logError,score.logError);
+});

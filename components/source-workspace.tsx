@@ -5,7 +5,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Pause, Play, Search } from "lucide-react";
-import { documentCoverage, parseLearningEvidence, type DocumentSource, type DocumentNode } from "@/src/core";
+import {
+	documentCoverage,
+	parseLearningEvidence,
+	trainingEvidence,
+	type DocumentSource,
+	type DocumentNode,
+} from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { SourceMap } from "@/components/source-map";
@@ -88,7 +94,14 @@ export function SourceWorkspace({ id }: { id: string }) {
 				prerequisites: source.edges
 					.filter((e) => e.to === node.id)
 					.map((e) => source.nodes.find((n) => n.id === e.from))
-					.filter(Boolean),
+					.filter((n): n is DocumentNode => !!n)
+					.map((n) => ({
+						id: n.id,
+						title: n.title,
+						kind: n.kind,
+						statement: n.statement,
+						citations: n.citations.slice(0, 1),
+					})),
 			};
 			const images = [];
 			if (source.pages.find((p) => p.number === page)?.needsVisual) {
@@ -103,8 +116,12 @@ export function SourceWorkspace({ id }: { id: string }) {
 				});
 				images.push({ name: `source-page-${page}.png`, mimeType: "image/png", data });
 			}
+			const staged = trainingEvidence(snapshot);
 			const evidence = parseLearningEvidence({
-				code: [{ name: "source-concept.json", language: "json", source: JSON.stringify(snapshot, null, 2) }],
+				code: staged.code?.map((file) => ({
+					...file,
+					name: file.name.replace("training-record", "source-concept"),
+				})),
 				...(images.length ? { images } : {}),
 			});
 			const response = await fetch("/api/chats", {

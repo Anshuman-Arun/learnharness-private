@@ -24,18 +24,20 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog, safeStorage } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
+const { createChatGPTOAuthRuntime } = require("./chatgpt-oauth.cjs");
 
 // Mirrors SIDEBAR_AUTOCLOSE in components/sidebar.tsx — keep in sync (the
 // renderer owns the number; this is the IPC widen target).
 const SIDEBAR_AUTOCLOSE = 928;
 
-const PRODUCT_NAME = "LearnHarness";
+const PRODUCT_NAME = "LearnHarness Private";
 
 // APP NAME → userData (owner, 2026-10-10): the Application Support dir is
 // exactly "LearnHarness" in dev AND packaged. Packaged Electron would
@@ -123,11 +125,15 @@ if (process.argv.includes("--browser-service")) {
 				win.focus();
 			}
 		});
-		main();
+		main().catch((error) => {
+			log(`Failed to start LearnHarness: ${error?.stack ?? error}`);
+			app.quit();
+		});
 	}
 }
 
 let serverProcess = null;
+let chatGPTOAuthRuntime = null;
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
 // in an event handler): the window + child server are the product, and
@@ -183,7 +189,7 @@ function log(line) {
 	}
 }
 
-function startServer(port) {
+function startServer(port, healthSecret) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
 			process.execPath,
@@ -195,12 +201,19 @@ function startServer(port) {
 					ELECTRON_RUN_AS_NODE: "1",
 					NODE_ENV: "production",
 					PORT: String(port),
+					LH_DESKTOP_HEALTH_SECRET: healthSecret,
 					HOSTNAME: "127.0.0.1", // the server defaults to 0.0.0.0 — never
 					LH_DATA_DIR: DATA_DIR(),
 					// The auth/keys store — the child reads AND writes this file itself
 					// (no env injection anymore: a spawn-time copy would shadow every
 					// settings-page key change until restart; env wins over file).
 					LH_AUTH_FILE: AUTH_FILE(),
+					...(chatGPTOAuthRuntime
+						? {
+								LH_CHATGPT_BROKER_URL: chatGPTOAuthRuntime.brokerUrl,
+								LH_CHATGPT_BROKER_SECRET: chatGPTOAuthRuntime.brokerSecret,
+							}
+						: {}),
 				},
 				stdio: ["ignore", "pipe", "pipe"],
 			},
@@ -211,24 +224,59 @@ function startServer(port) {
 		child.stderr.on("data", fwd);
 		child.on("exit", (code, signal) => {
 			log(`server exited (code=${code} signal=${signal})`);
+			if (serverProcess !== child) return; // already shutting down
 			serverProcess = null;
+			// The port may be recycled by another local process. Never leave
+			// an Electron window with privileged preload pointing at a dead
+			// origin that a different server can subsequently occupy.
+			for (const win of BrowserWindow.getAllWindows()) win.destroy();
+			app.quit();
 		});
-		resolve(child);
+		child.once("error", (error) => {
+			log(`server could not start: ${error.message}`);
+			if (serverProcess === child) serverProcess = null;
+			reject(error);
+		});
+		child.once("spawn", () => resolve(child));
 	});
 }
 
 /** No "ready" event exists — poll until the server answers (docs-confirmed). */
-function waitUntilUp(url, tries = 150) {
+function waitUntilUp(baseUrl, healthSecret, tries = 150) {
+	const healthUrl = new URL("/api/desktop-health", baseUrl).toString();
+	const deadline = Date.now() + 30_000;
 	return new Promise((resolve, reject) => {
+		let settled = false;
+		const done = (error) => {
+			if (settled) return;
+			settled = true;
+			if (error) reject(error);
+			else resolve(true);
+		};
 		const attempt = (n) => {
-			const req = http.get(url, (res) => {
+			if (settled) return;
+			if (!serverProcess || serverProcess.exitCode !== null) {
+				done(new Error("Private desktop server exited before readiness."));
+				return;
+			}
+			if (n <= 0 || Date.now() >= deadline) {
+				done(new Error("Private desktop server did not pass authenticated health checks."));
+				return;
+			}
+			const retry = () => { if (!settled) setTimeout(() => attempt(n - 1), 200); };
+			const nonce = crypto.randomBytes(16).toString("base64url");
+			const challengeUrl = new URL(healthUrl);
+			challengeUrl.searchParams.set("challenge", nonce);
+			const expected = crypto.createHmac("sha256", healthSecret).update(nonce).digest("base64url");
+			const req = http.get(challengeUrl, (res) => {
+				const ready = res.statusCode === 200 &&
+					res.headers["x-lh-app-ready"] === expected;
 				res.resume();
-				resolve(res.statusCode !== undefined);
+				if (ready) done();
+				else retry();
 			});
-			req.on("error", () => {
-				if (n <= 0) reject(new Error(`server never answered on ${url}`));
-				else setTimeout(() => attempt(n - 1), 200);
-			});
+			req.setTimeout(1500, () => req.destroy(new Error("Health check timed out")));
+			req.on("error", retry);
 		};
 		attempt(tries);
 	});
@@ -307,6 +355,13 @@ function createWindow(url) {
 	});
 
 	const allowedOrigin = () => new URL(url).origin;
+	const openSafeExternal = (target) => {
+		try {
+			const parsed = new URL(target);
+			if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return;
+			void shell.openExternal(target);
+		} catch { /* Reject malformed and non-web URLs. */ }
+	};
 	// Deny-by-default; the ONLY grants are media (mic/STT groundwork) and
 	// clipboard-sanitized-write — the copy affordances in the transcript
 	// (md-blocks copy corners) call navigator.clipboard.writeText(), which
@@ -319,7 +374,10 @@ function createWindow(url) {
 	const fromOwnOrigin = (origin, permission) =>
 		origin === allowedOrigin() && allowedPermissions.has(permission);
 	session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-		const requestOrigin = details.requestingUrl ? new URL(details.requestingUrl).origin : null;
+		let requestOrigin = null;
+		try {
+			if (details?.requestingUrl) requestOrigin = new URL(details.requestingUrl).origin;
+		} catch { /* Malformed URLs do not receive OS microphone permissions. */ }
 		callback(fromOwnOrigin(requestOrigin, permission));
 	});
 	session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => {
@@ -327,13 +385,16 @@ function createWindow(url) {
 	});
 
 	win.webContents.on("will-navigate", (event, target) => {
-		if (new URL(target).origin !== allowedOrigin()) {
+		let sameOrigin = false;
+		try { sameOrigin = new URL(target).origin === allowedOrigin(); }
+		catch { /* Unknown target schemes never navigate inside the app. */ }
+		if (!sameOrigin) {
 			event.preventDefault();
-			void shell.openExternal(target);
+			openSafeExternal(target);
 		}
 	});
 	win.webContents.setWindowOpenHandler(({ url: target }) => {
-		void shell.openExternal(target);
+		openSafeExternal(target);
 		return { action: "deny" };
 	});
 
@@ -434,7 +495,9 @@ function checkForUpdates({ manual = false } = {}) {
 }
 
 function installUpdateNow() {
-	// Kill the server BEFORE the quit-and-install (see block comment).
+	// Private builds have no updater. A stale renderer IPC command must not
+	// kill the learning server with no actual install to follow.
+	if (!autoUpdater) return;
 	try {
 		killServer();
 	} catch {
@@ -444,6 +507,8 @@ function installUpdateNow() {
 }
 
 function setupAutoUpdater() {
+	// Private derivative: never fetch or install upstream releases.
+	return;
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
 		return;
@@ -501,7 +566,6 @@ function installMenu() {
 				{ role: "about" },
 				// Manual check (Wave C): answers via native dialog — no renderer
 				// round-trip. The 24h automatic checks stay silent.
-				{ label: "Check for Updates…", click: () => checkForUpdates({ manual: true }) },
 				{ type: "separator" },
 				{ role: "hide" },
 				{ role: "hideOthers" },
@@ -551,22 +615,51 @@ async function main() {
 	});
 
 	// The child must not outlive us — cover every quit path.
-	app.on("before-quit", killServer);
+	app.on("before-quit", () => {
+		killServer();
+		chatGPTOAuthRuntime?.close();
+	});
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
 	await app.whenReady();
+	const devUrl = process.env.LH_DEV_URL;
+	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
+	const appOrigin = new URL(url).origin;
+
+	// next dev runs in a different process without the broker capability;
+	// prevent false "connected" state that fails every model request.
+	if (!devUrl) try {
+		chatGPTOAuthRuntime = await createChatGPTOAuthRuntime({
+			userDataDir: app.getPath("userData"),
+			safeStorage,
+			shell,
+			ipcMain,
+			log,
+			authorizeIpc: (event) => {
+				const sender = event?.sender;
+				const frame = event?.senderFrame;
+				const win = sender && BrowserWindow.fromWebContents(sender);
+				return !!(sender && frame && frame === sender.mainFrame &&
+					frame.origin === appOrigin && win &&
+					win.webContents === sender && !win.isDestroyed());
+			},
+		});
+		log("ChatGPT OAuth broker ready");
+	} catch (err) {
+		log(`ChatGPT OAuth unavailable: ${err?.message ?? err}`);
+	}
+	if (devUrl) log("ChatGPT connection unavailable in desktop:dev; use a packaged build.");
 
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
 	// spawn, no packaging, full HMR. The rest of this shell still applies
 	// (guards, menu, single instance).
-	const devUrl = process.env.LH_DEV_URL;
-	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
 	if (!devUrl) {
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
-		await startServer(new URL(url).port);
-		await waitUntilUp(url);
+		const healthSecret = crypto.randomBytes(32).toString("base64url");
+		await startServer(new URL(url).port, healthSecret);
+		await waitUntilUp(url, healthSecret);
 		log(`server up: ${url}`);
 	} else {
 		log(`dev mode: ${devUrl}`);

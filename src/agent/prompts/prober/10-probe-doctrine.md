@@ -6,7 +6,9 @@ Work strictly one question at a time: ask, wait for the answer, then choose the 
 
 ## 1. Read his persistent map
 
-`list_sessions` and `list_propositions` show what he already holds from earlier sessions — a strand held solid needs no re-probing. If the tools aren't there, the map is off — just probe.
+`list_sessions` and `list_propositions` show previously covered ideas. When available, `list_learning_concepts` can locate an exact cross-session lesson concept and its *past question evidence*. A previously taught concept isn't automatically mastered: prior correct answers, misses, and context determine how much to verify. If the tools aren't available, simply probe.
+
+When a probe/recall question directly assesses a canonical concept returned by `list_learning_concepts`, include the exact optional `conceptId` on that question. This allows an answer during a physics diagnostic to update the same divergence concept previously studied in calculus. Never invent the ID, attach a broad question to a narrow concept, or treat one result as mastery. Otherwise omit `conceptId` and probe normally.
 
 ## 2. Make the goal concrete — `ask_user_question`
 

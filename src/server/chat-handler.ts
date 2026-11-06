@@ -7,6 +7,7 @@ import {
 	type TeachingAgent,
 } from "../agent/teacher-agent.ts";
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
+import { CHATGPT_PROVIDER_ID, getChatGPTBrokerStatus, getChatGPTBrokerModels } from "../agent/chatgpt-broker.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
 import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
 import type { ModelRole } from "../../config.ts";
@@ -33,7 +34,7 @@ import {
 	resolveConversationSpec,
 	resolveRoleSpec,
 } from "../core/settings-resolution.ts";
-import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, type ProviderKeyMissing } from "../core/settings.ts";
+import { CHATGPT_BACKGROUND_DISABLED, modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, type ProviderKeyMissing } from "../core/settings.ts";
 import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, unregisterTurn } from "./turn-runs.ts";
@@ -87,8 +88,25 @@ const jobRunner = createJobRunner({
 	// reads the resolved engine's provider and asks THIS check (the agent
 	// layer may not read the key store); a missing key refuses the spawn
 	// with the 503-envelope family instead of dying mid-run.
-	providerKeyMissing: (provider, tier) =>
-		providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]),
+	providerKeyMissing: async (provider, tier, modelId) => {
+		if (provider === CHATGPT_PROVIDER_ID) {
+			const status = await getChatGPTBrokerStatus();
+			if (!status.connected) return providerKeyMissingEnvelope(provider, [tier]);
+			if (status.backgroundUseAllowed !== true) return {
+				...providerKeyMissingEnvelope(provider, [tier]),
+				error: CHATGPT_BACKGROUND_DISABLED,
+			};
+			try {
+				if (!modelId || !(await getChatGPTBrokerModels()).some((model) => model.id === modelId)) {
+					return providerKeyMissingEnvelope(provider, [tier]);
+				}
+			} catch {
+				return providerKeyMissingEnvelope(provider, [tier]);
+			}
+			return null;
+		}
+		return providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]);
+	},
 	// Search port wave (2026-09-20): the researcher's web_search runs on the
 	// injected port — resolved FRESH per job (key rotations land immediately).
 	// null = honestly unavailable; the dispatch-level drop (below) uses the
@@ -109,8 +127,25 @@ export const extraction = createExtractionPipeline({
 	// Key-presence gate (provider-key interlude, 2026-09-25): same check
 	// the job runner gets — a stage engine whose provider key is gone
 	// refuses BEFORE any batch runs (the typed throw), never mid-run.
-	providerKeyMissing: (provider, tier) =>
-		providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]),
+	providerKeyMissing: async (provider, tier, modelId) => {
+		if (provider === CHATGPT_PROVIDER_ID) {
+			const status = await getChatGPTBrokerStatus();
+			if (!status.connected) return providerKeyMissingEnvelope(provider, [tier]);
+			if (status.backgroundUseAllowed !== true) return {
+				...providerKeyMissingEnvelope(provider, [tier]),
+				error: CHATGPT_BACKGROUND_DISABLED,
+			};
+			try {
+				if (!modelId || !(await getChatGPTBrokerModels()).some((model) => model.id === modelId)) {
+					return providerKeyMissingEnvelope(provider, [tier]);
+				}
+			} catch {
+				return providerKeyMissingEnvelope(provider, [tier]);
+			}
+			return null;
+		}
+		return providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]);
+	},
 });
 
 
@@ -201,10 +236,26 @@ export async function handleChatInput(
 	// persist (nothing durable changes); wake-pipeline turns ride the same
 	// path. The affected tier is strong — the conversation chain's own tier
 	// (a chat.model override still resolves through it).
-	if (!providerKeyPresent(conversation.provider)) {
+	const authenticated = conversation.provider === CHATGPT_PROVIDER_ID
+		? (await getChatGPTBrokerStatus()).connected
+		: providerKeyPresent(conversation.provider);
+	if (!authenticated) {
 		const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
 		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
 		return Response.json(envelope, { status: 503 });
+	}
+	if (conversation.provider === CHATGPT_PROVIDER_ID) {
+		let allowed = false;
+		try {
+			allowed = (await getChatGPTBrokerModels()).some((model) => model.id === conversation.id);
+		} catch { /* Fail closed on catalog discovery outage. */ }
+		if (!allowed) {
+			return Response.json({
+				code: "chatgpt_model_unavailable",
+				error: "The selected ChatGPT model is unavailable to this account. Refresh Providers and choose an available model.",
+				provider: CHATGPT_PROVIDER_ID,
+			}, { status: 503 });
+		}
 	}
 
 	// THE COMPACTION GATE (owner round 14, 2026-10-05 — the structural
@@ -222,7 +273,7 @@ export async function handleChatInput(
 	if (evidence?.images?.length && !conversationEngine.model.input.includes("image")) {
 		return Response.json({ error: "This model cannot read images. Choose an image-capable conversation model before submitting your sketch.", code: "image_model_required" }, { status: 400 });
 	}
-	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
+	const modelIdForCompaction = `${conversation.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
 			chatStore: stores.chatStore,
@@ -334,7 +385,7 @@ export async function handleChatInput(
 	const engine = conversationEngine;
 	// Provider-qualified stamp (model slots wave): matches the price table's
 	// provider:id keys.
-	const modelId = `${engine.model.provider}:${engine.model.id}`;
+	const modelId = `${engine.providerId ?? engine.model.provider}:${engine.model.id}`;
 	// Tests inject a factory: the agent is stateless per turn, so each
 	// request builds a fresh one off the record — the factory mirrors that
 	// seam exactly. Wave B: the record IS the agent state (native messages;
@@ -462,6 +513,22 @@ export async function handleChatInput(
 			onError: (error) => {
 				console.error(`[chat ${chatId}] turn error:`, error);
 				return "An error occurred.";
+			},
+			// A settle failure is not "the loop broke" — the teacher DID reply,
+			// the turn just could not be made durable. Retrying would burn
+			// another turn on a chat whose record is already suspect, so the
+			// honest instruction is to reload and read the real transcript.
+			onSettleError: () => "The reply could not be saved. Reload the page to see the transcript.",
+			// THE LIVENESS SAFETY NET: onFinish's own body clears these on the
+			// happy path, and a throw anywhere inside it used to skip endTurn —
+			// leaving the chat "in flight" for the 30-minute TTL, so every later
+			// send got a bogus 409 for a turn that was already dead. endTurn is
+			// idempotent (a missing entry emits nothing), so running it again is
+			// free.
+			onSettleFailure: () => {
+				endTurn(chatId);
+				unregisterTurn(chatId);
+				unregisterLiveAgent(chatId);
 			},
 			onFinish: (turnMessages, isAborted) => {
 				// Wave B: the record write is the agent's own final state —
