@@ -108,7 +108,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
 		const stored = localStorage.getItem(STORAGE_KEY);
 		// Default: open (first run introduces the sidebar).
-		setOpen(stored === null ? true : stored === "1");
+		setOpen(!IS_ELECTRON && window.innerWidth < 700 ? false : stored === null ? true : stored === "1");
 		setMounted(true);
 		return () => off?.();
 	}, []);
@@ -675,7 +675,7 @@ function SessionsSidebar() {
 				    labels room; teaching keeps the original draft route,
 				    practice carries its mode. */}
 				<div className="mx-3 mb-2 flex flex-col gap-1.5">
-					<Link href="/training" className="rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent">Quant training</Link>
+					<Link href="/training" className="rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent">Workbench</Link>
 					<button
 						type="button"
 						data-testid="new-session"
@@ -923,9 +923,11 @@ function SessionsSidebar() {
 
 /** The app frame: sidebar inline + content. Rendered once in the root layout. */
 export function AppShell({ children }: { children: React.ReactNode }) {
+	const { open, toggle } = useSidebar();
 	return (
 		<SettingsDialogProvider>
 			<SessionsSidebar />
+			{open && <button className="sidebar-mobile-backdrop" aria-label="Close navigation" onClick={toggle} />}
 			<main className="min-w-0 flex-1">{children}</main>
 			{/* The single document-level keydown listener (keyboard wave A) —
 			    after the content in the tree, but it's window-level so order only

@@ -56,3 +56,5 @@ export * from "./mistakes";
 export * from "./retrieval";
 export * from "./quant-sprints";
 export * from "./cpp-challenges";
+
+export * from "./documents.ts";

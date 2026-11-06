@@ -71,3 +71,32 @@ export function arithmeticSummary(round: ArithmeticRound, now = Date.now()) {
 			return { operation, attempts: attempts.length, correct: times.length, medianMs: times.length ? (times[Math.floor((times.length - 1) / 2)]! + times[Math.floor(times.length / 2)]!) / 2 : null };
 		}) };
 }
+
+/** Typed answers are timestamped at the keyboard, then persisted in order.
+ * Retries replay the same ordinal; they never count a second time. */
+export interface ArithmeticInput {
+	ordinal: number; index: number; answer: string; at: number;
+}
+export function syncArithmetic(round: ArithmeticRound, raw: unknown, now: number, finishAt?: unknown): ArithmeticRound {
+	if (!Array.isArray(raw) || raw.length > 500) throw new Error("Sync up to 500 attempts at a time");
+	let next = round;
+	for (const item of raw) {
+		const event = item as ArithmeticInput;
+		if (!event || !Number.isSafeInteger(event.ordinal) || event.ordinal < 0 || !Number.isSafeInteger(event.index) || typeof event.answer !== "string" || !/^-?\d{1,12}$/.test(event.answer) || !Number.isSafeInteger(event.at)) throw new Error("Invalid arithmetic attempt");
+		if (event.ordinal < next.attempts.length) {
+			const previous = next.attempts[event.ordinal]!;
+			if (previous.index !== event.index || previous.answer !== Number(event.answer) || previous.submittedAt !== event.at) throw new Error("This round changed in another tab; your local attempt is preserved");
+			continue;
+		}
+		if (event.ordinal !== next.attempts.length) throw new Error("An earlier answer has not synced yet");
+		if (now > next.deadline + 15000) throw new Error("This round arrived too late to save; its local results are preserved");
+		if (event.at < (next.attempts.at(-1)?.submittedAt ?? next.startedAt) || event.at >= next.deadline || event.at > now + 1000) throw new Error("Attempt is outside this round's clock");
+		next = answerArithmetic(next, event.answer, event.index, event.at);
+	}
+	if (finishAt !== undefined) {
+		if (!Number.isSafeInteger(finishAt) || (finishAt as number) < (next.attempts.at(-1)?.submittedAt ?? next.startedAt) || (finishAt as number) > Math.min(next.deadline, now + 1000)) throw new Error("Invalid finish time");
+		if (next.endedAt !== undefined && next.endedAt !== finishAt) throw new Error("This round has already finished");
+		next = { ...next, endedAt: finishAt as number };
+	}
+	return next;
+}

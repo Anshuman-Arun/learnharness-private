@@ -1,4 +1,4 @@
-import { answerArithmetic, startArithmeticRound, type ArithmeticRound } from "../core/arithmetic.ts";
+import { answerArithmetic, startArithmeticRound, syncArithmetic, type ArithmeticRound } from "../core/arithmetic.ts";
 import { stores } from "./stores.ts";
 
 export function listArithmeticRounds(): ArithmeticRound[] {
@@ -18,7 +18,8 @@ export function changeArithmeticRound(body: unknown, now = Date.now()): Arithmet
 	if (typeof input.id !== "string") throw new Error("Round id is required");
 	const round = stores.trainingStore.read<ArithmeticRound>("arithmetic", input.id);
 	if (!round) throw new Error("Round not found");
-	const next = input.action === "answer" ? answerArithmetic(round, input.answer, input.index, now)
+	const next = input.action === "sync" ? syncArithmetic(round, input.attempts, now, input.finishAt)
+		: input.action === "answer" ? answerArithmetic(round, input.answer, input.index, now)
 		: input.action === "stop" ? { ...round, endedAt: round.endedAt ?? Math.min(now, round.deadline) }
 		: (() => { throw new Error("Unknown arithmetic action"); })();
 	stores.trainingStore.write("arithmetic", next);

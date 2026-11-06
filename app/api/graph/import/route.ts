@@ -13,7 +13,7 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { extraction, NotesImportError } from "@/src/server";
+import { extraction, NotesImportError, createDocument, getDocument, prepareDocument } from "@/src/server";
 import {
 	ModelsNotConfiguredError,
 	PROVIDER_KEY_MISSING_CODE,
@@ -25,8 +25,9 @@ export const dynamic = "force-dynamic";
 
 interface ImportResult {
 	requestIndex: number;
-	outcome: "completed" | "failed" | "partial" | "aborted" | "busy";
+	outcome: "completed" | "queued" | "failed" | "partial" | "aborted" | "busy";
 	filePath: string;
+	documentId?: string;
 	ok: boolean;
 	stats?: EmissionStats;
 	error?: string;
@@ -41,12 +42,14 @@ interface ImportResult {
 }
 
 export async function POST(request: Request) {
+	if (Number(request.headers.get("content-length") ?? 0) > 51 * 1024 * 1024) return Response.json({ error: "Choose files up to 50 MB total" }, { status: 413 });
 	const form = await request.formData();
 	const files = form.getAll("files").filter((f): f is File => f instanceof File);
 	if (files.length === 0) {
 		return Response.json({ results: [] as ImportResult[], error: "no files" }, { status: 400 });
 	}
 
+	if (files.reduce((n, f) => n + f.size, 0) > 50 * 1024 * 1024) return Response.json({ error: "Choose files up to 50 MB total" }, { status: 413 });
 	const results: ImportResult[] = [];
 	const queue = files.map((file, requestIndex) => ({ file, requestIndex }));
 	const workers = Array.from({ length: Math.min(3, files.length) }, async () => {
@@ -55,7 +58,18 @@ export async function POST(request: Request) {
 			if (!next) return;
 			const { file, requestIndex } = next;
 			try {
-				const text = await file.text();
+				const bytes = new Uint8Array(await file.arrayBuffer());
+				const isPdf = Buffer.from(bytes.subarray(0, 1024)).includes(Buffer.from("%PDF-"));
+				if (isPdf || /\.pdf$/i.test(file.name)) {
+					let source = await createDocument(bytes, file.name);
+					if (!source.selectedPages.length && source.pageCount <= 300) source = await prepareDocument(source.id, "all");
+					results.push({ filePath: file.name, requestIndex, outcome: "queued", ok: true, stats: { nodes: 0, chains: 0 }, documentId: getDocument(source.id).id });
+					continue;
+				}
+				if (bytes.subarray(0, 8192).includes(0)) throw new Error("This file is not plain text. Use a PDF or UTF-8 notes.");
+				let text: string;
+				try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+				catch { throw new Error("This notes file is not valid UTF-8 text"); }
 				const stats = await extraction.importNotes({ filePath: file.name, text });
 				results.push({ filePath: file.name, requestIndex, outcome: "completed", ok: true, stats });
 			} catch (err) {

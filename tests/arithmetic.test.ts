@@ -81,3 +81,25 @@ describe("local arithmetic service", () => {
 		await action({ action: "stop", id: round.id });
 	});
 });
+
+describe("keyboard-first arithmetic persistence", () => {
+	it("accepts an ordered offline batch without network gaps and replays it once", async () => {
+		const { syncArithmetic } = await import("../src/core/arithmetic.ts");
+		let round = startArithmeticRound("keyboard", { ...DEFAULT_ARITHMETIC_CONFIG, durationSeconds: 15 }, 7, 1000);
+		const events = Array.from({ length: 40 }, (_, index) => ({ ordinal: index, index, answer: String(arithmeticQuestion(round.config, round.seed, index).answer), at: 1100 + index * 100 }));
+		round = syncArithmetic(round, events, 6000);
+		assert.equal(round.index, 40); assert.equal(round.attempts[1]?.elapsedMs, 100);
+		assert.deepEqual(syncArithmetic(round, events, 6100), round);
+		assert.throws(() => syncArithmetic(round, [{ ...events[0], answer: "999" }], 6200), /another tab/);
+		assert.throws(() => syncArithmetic(round, [{ ordinal: 41, index: 40, answer: "1", at: 6200 }], 6300), /earlier answer/);
+	});
+	it("saves answers typed before the deadline during a bounded late flush, without extending the clock", async () => {
+		const { syncArithmetic } = await import("../src/core/arithmetic.ts");
+		const round = startArithmeticRound("late-flush", { ...DEFAULT_ARITHMETIC_CONFIG, durationSeconds: 15 }, 7, 1000);
+		const event = { ordinal: 0, index: 0, answer: String(arithmeticQuestion(round.config, round.seed, 0).answer), at: 15999 };
+		const saved = syncArithmetic(round, [event], 17000, 16000);
+		assert.equal(saved.deadline, 16000); assert.equal(saved.endedAt, 16000); assert.equal(saved.index, 1);
+		assert.throws(() => syncArithmetic(round, [{ ...event, at: 16000 }], 17000), /clock/);
+		assert.throws(() => syncArithmetic(round, [event], 32000), /too late/);
+	});
+});

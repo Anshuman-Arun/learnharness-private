@@ -37,7 +37,7 @@ export default function ScratchpadCanvas({ page, onChange, onReady, disabled = f
 	}
 	return <div className="h-[65vh] min-h-96 overflow-hidden rounded-xl border" data-testid="scratchpad-canvas">
 		<Excalidraw initialData={{ elements: page.elements as unknown as readonly ExcalidrawElement[], appState: { scrollX: page.view.scrollX, scrollY: page.view.scrollY, zoom: { value: page.view.zoom as AppState["zoom"]["value"] }, viewBackgroundColor: page.view.backgroundColor } }}
-			onChange={changed} excalidrawAPI={ready} aiEnabled={false} theme="light" viewModeEnabled={disabled} validateEmbeddable={() => false}
+			onChange={changed} excalidrawAPI={ready} aiEnabled={false} theme="dark" viewModeEnabled={disabled} validateEmbeddable={() => false}
 			UIOptions={{ tools: { image: false }, canvasActions: { loadScene: false, saveToActiveFile: false, saveAsImage: false, export: false, toggleTheme: false } }} />
 	</div>;
 }
