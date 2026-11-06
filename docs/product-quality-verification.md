@@ -24,11 +24,11 @@ The source view includes a searchable outline, focused DAG, original page and ci
 
 ## Verification
 
-- Full repository regression, typecheck, ESLint and production build.
+- Full repository regression: **1,989 passed**. Typecheck, ESLint and production build passed.
 - Native decoding/rendering of an original four-page mathematical PDF, wrong-page/invented citation rejection, missing-block and cycle rejection, two-pass native-image delivery, failed-chunk resume without duplicates, abort without commit and targeted gap retry.
 - Independent enumeration checks for conditional sample spaces and stopping values; legacy exam stability.
 - Real Docker-isolated C++ solutions for all five challenges, incorrect-example hardcoding rejection and hidden-output redaction.
-- Standalone production browser checks for teaching-mode reversal, rapid arithmetic input under a two-second delayed request, PDF/chapter reload and native rendering, deterministic fixture DAG navigation/study handoff, commit-before-reveal, drafts, notebook/recall scheduling, code execution/judging and tablet touch recovery.
+- Standalone production browser suite: **15 passed**, covering teaching-mode reversal, rapid arithmetic input under a two-second delayed request, PDF/chapter reload and native rendering, deterministic fixture DAG navigation/study handoff, commit-before-reveal, drafts, notebook/recall scheduling, code execution/judging and tablet touch recovery.
 - Desktop and 390px browser screenshots inspected; narrow-layout overflow checked for dashboard, interview, code, review, sources and scratch. The mobile audit found and fixed the desktop-sidebar overflow.
 
 The deterministic DAG fixture verifies pipeline/UI contracts, not model intelligence. This cloud environment has no configured provider key/model slots, so live-model semantic coverage on a new paper remains unverified. Configure strong/vision in Settings and evaluate a representative chapter before treating extraction quality as established.
