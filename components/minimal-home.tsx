@@ -136,7 +136,7 @@ export function MinimalHome({
 				ref={fileInputRef}
 				type="file"
 				multiple
-				accept=".md,.markdown,.txt"
+				accept=".md,.markdown,.txt,.pdf"
 				className="hidden"
 				onChange={(e) => {
 					onImportFiles(e.target.files);
@@ -194,7 +194,7 @@ export function MinimalHome({
 						</Hint>
 					</div>
 				</div>
-				<NotesImportErrors errors={notesImport.errors} />
+				<NotesImportErrors errors={notesImport.errors} sources={notesImport.sources} />
 				{costs && costs.runs.length > 0 && <GraphCostControl costs={costs} />}
 			</div>
 

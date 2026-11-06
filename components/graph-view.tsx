@@ -907,7 +907,7 @@ export function GraphChromeRow({
 					ref={fileInputRef}
 					type="file"
 					multiple
-					accept=".md,.markdown,.txt"
+					accept=".md,.markdown,.txt,.pdf"
 					className="hidden"
 					onChange={(e) => {
 						onImportFiles(e.target.files);
@@ -1605,7 +1605,7 @@ export function GraphView({
 				/>
 			</div>
 
-			<NotesImportErrors errors={notesImport.errors} />
+			<NotesImportErrors errors={notesImport.errors} sources={notesImport.sources} />
 			{/* Top-right tail (owner, 2026-09-20): the pipeline cost number —
 			    just a number, hover-highlighted, dropdown breakdown — then
 			    the running-pipeline pills under it. Lives BELOW the actions

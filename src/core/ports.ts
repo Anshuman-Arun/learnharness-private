@@ -220,3 +220,14 @@ export interface AuthStore {
 	deleteAuthVar(name: string): void;
 }
 
+
+/** Original source material and its cited map, separate from learning evidence. */
+export interface DocumentStore {
+	list(): import("./documents.ts").DocumentSource[];
+	read(id: string): import("./documents.ts").DocumentSource | null;
+	write(source: import("./documents.ts").DocumentSource): void;
+	writePdf(id: string, bytes: Uint8Array): void;
+	readPageImage(id: string, page: number): Uint8Array | null;
+	writePageImage(id: string, page: number, bytes: Uint8Array): void;
+	pdfPath(id: string): string;
+}

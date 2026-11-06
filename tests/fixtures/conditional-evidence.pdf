@@ -1,0 +1,88 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 4 /Kids [ 3 0 R 5 0 R 7 0 R 9 0 R ] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 387 >>
+stream
+BT /F1 12 Tf 54 730 Td 19 TL
+(Conditional evidence) Tj T*
+(Definition: P\(A | B\) = P\(A and B\) / P\(B\), provided P\(B\) > 0.) Tj T*
+(The denominator restricts the sample space to the observed event B.) Tj T*
+(For disjoint causes A and not A, P\(B\) = P\(B | A\)P\(A\) + P\(B | not A\)P\(not A\).) Tj T*
+(This partition assumption is needed to normalize both possible causes.) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 364 >>
+stream
+BT /F1 12 Tf 54 730 Td 19 TL
+(Bayes odds) Tj T*
+(Prior odds for A are P\(A\) / P\(not A\), when both probabilities are positive.) Tj T*
+(The likelihood ratio of evidence E is P\(E | A\) / P\(E | not A\).) Tj T*
+(Posterior odds equal prior odds multiplied by the likelihood ratio.) Tj T*
+(Proof: divide the two Bayes formulas and cancel the common P\(E\).) Tj T*
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 432 >>
+stream
+BT /F1 12 Tf 54 730 Td 19 TL
+(A diagnostic example) Tj T*
+(A condition affects 1 percent of a population.) Tj T*
+(A test has sensitivity 90 percent and specificity 95 percent.) Tj T*
+(True positive mass is 0.01 * 0.90 = 0.009.) Tj T*
+(False positive mass is 0.99 * 0.05 = 0.0495.) Tj T*
+(Thus P\(condition | positive\) = 0.009 / 0.0585 = 2 / 13.) Tj T*
+(The small base rate matters even though the test is usually correct.) Tj T*
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents 10 0 R >>
+endobj
+10 0 obj
+<< /Length 522 >>
+stream
+BT /F1 12 Tf 54 730 Td 19 TL
+(Sequential evidence and its limit) Tj T*
+(For two conditionally independent observations, multiply their likelihood ratios.) Tj T*
+(Independence must hold conditional on A and separately conditional on not A.) Tj T*
+(Duplicating the same positive test result does not provide independent evidence.) Tj T*
+(Exercise: with prior odds 1:9 and independent likelihood ratios 3 and 2, find posterior odds.) Tj T*
+(Solution: posterior odds are 6:9 = 2:3, so posterior probability is 2 / 5.) Tj T*
+ET
+endstream
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000135 00000 n 
+0000000310 00000 n 
+0000000748 00000 n 
+0000000923 00000 n 
+0000001338 00000 n 
+0000001513 00000 n 
+0000001996 00000 n 
+0000002172 00000 n 
+trailer
+<< /Size 11 /Root 1 0 R >>
+startxref
+2746
+%%EOF

@@ -1,13 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
 
 // Transport-only types: never import the server's extraction/agent module here.
 export interface NotesImportResult {
 	requestIndex: number;
 	filePath: string;
+	documentId?: string;
 	ok: boolean;
-	outcome: "completed" | "failed" | "partial" | "aborted" | "busy";
+	outcome: "completed" | "queued" | "failed" | "partial" | "aborted" | "busy";
 	stats?: { nodes: number; chains?: number; droppedChains?: number };
 	error?: string;
 	code?: string;
@@ -27,7 +29,8 @@ export function parseNotesImportResults(body: unknown, files: readonly File[]): 
 		const r = raw as NotesImportResult;
 		if (!Number.isInteger(r.requestIndex) || r.requestIndex < 0 || r.requestIndex >= files.length || seen.has(r.requestIndex) || r.filePath !== files[r.requestIndex]!.name) throw invalid();
 		seen.add(r.requestIndex);
-		if (!["completed", "failed", "partial", "aborted", "busy"].includes(r.outcome) || typeof r.ok !== "boolean" || r.ok !== (r.outcome === "completed")) throw invalid();
+		if (r.outcome === "queued" && (typeof r.documentId !== "string" || !/^doc_[a-f0-9]{32}$/.test(r.documentId))) throw invalid();
+		if (!["completed", "queued", "failed", "partial", "aborted", "busy"].includes(r.outcome) || typeof r.ok !== "boolean" || r.ok !== (r.outcome === "completed" || r.outcome === "queued")) throw invalid();
 		if (r.stats !== undefined && (!r.stats || typeof r.stats !== "object" || !Number.isFinite(r.stats.nodes) || r.stats.nodes < 0 || (r.stats.chains !== undefined && (!Number.isFinite(r.stats.chains) || r.stats.chains < 0)))) throw invalid();
 		if (r.ok && !r.stats) throw invalid();
 		if (!r.ok && typeof r.error !== "string") throw invalid();
@@ -54,16 +57,18 @@ export async function postNotesImport(files: readonly File[]): Promise<NotesImpo
 /** Only error text survives a request; selected Files stay request-local. */
 export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () => void } = {}) {
 	const [errors, setErrors] = useState<string[]>([]);
+	const [sources, setSources] = useState<Array<{ id: string; name: string }>>([]);
 	const [importing, setImporting] = useState(false);
 	const pending = useRef(false);
 	const submit = async (files: File[]) => {
 		if (pending.current || files.length === 0) return;
 		pending.current = true;
 		setImporting(true);
-		setErrors([]);
+		setErrors([]); setSources([]);
 		try {
 			callbacks.onStart?.();
 			const results = await postNotesImport(files);
+			setSources(results.filter(r => r.documentId).map(r => ({ id: r.documentId!, name: r.filePath })));
 			setErrors(results
 				.filter((result) => !result.ok)
 				.sort((a, b) => a.requestIndex - b.requestIndex)
@@ -78,13 +83,11 @@ export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () 
 		}
 	};
 	return {
-		errors, importing,
+		errors, sources, importing,
 		onImportFiles: (files: FileList | null) => { if (files) void submit(Array.from(files)); },
 	};
 }
 
-export function NotesImportErrors({ errors }: { errors: readonly string[] }) {
-	return <>{errors.map((error, i) => (
-		<p key={i} role="alert" className="max-w-full whitespace-pre-wrap break-words text-xs text-red-400">{error}</p>
-	))}</>;
+export function NotesImportErrors({ errors, sources = [] }: { errors: readonly string[]; sources?: readonly { id: string; name: string }[] }) {
+	return <>{errors.map((error, i) => <p key={i} role="alert" className="max-w-full whitespace-pre-wrap break-words text-xs text-red-400">{error}</p>)}{sources.map(source => <p key={source.id} role="status" className="text-xs text-muted-foreground">{source.name} added to Sources. <Link href={`/sources/${source.id}`} className="underline">Open source map</Link></p>)}</>;
 }

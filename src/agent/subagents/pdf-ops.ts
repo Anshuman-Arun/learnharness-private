@@ -63,13 +63,14 @@ async function openDocument(filePath: string) {
 	return { doc: await task.promise, task };
 }
 
-/** Concatenate a page's text items into a body string. */
+/** Preserve pdfjs line boundaries; adapted from upstream PR #353 (AGPL-3.0). */
 function itemsToText(items: unknown[]): string {
 	let out = "";
 	for (const it of items) {
 		if (it && typeof it === "object" && "str" in (it as Record<string, unknown>)) {
-			const str = (it as { str?: unknown }).str;
+			const { str, hasEOL } = it as { str?: unknown; hasEOL?: unknown };
 			if (typeof str === "string") out += str;
+			if (hasEOL === true) out += "\n";
 		}
 	}
 	return out;
@@ -236,4 +237,32 @@ export function renderDir(filePath: string): string {
 		h = Math.imul(h, 0x01000193) >>> 0;
 	}
 	return path.join("/tmp", `lh-pdf-${h.toString(16).padStart(8, "0")}`);
+}
+/** One document read, bounded to the selected chapter; always release pdfjs resources. */
+export async function pdfSourcePages(filePath: string, numbers: number[]) {
+	const { doc, task } = await openDocument(filePath);
+	try {
+		const pages = [];
+		for (const number of numbers) {
+			if (number < 1 || number > doc.numPages) throw new Error("Page is outside this PDF");
+			const page = await doc.getPage(number), content = await page.getTextContent();
+			const text = itemsToText(content.items as unknown[]).trim();
+			if (text.length > 120000) throw new Error(`Page ${number} has an unusually large text layer; inspect this PDF before importing`);
+			const viewport = page.getViewport({ scale: 1 });
+			const ops = await page.getOperatorList();
+			const pdfjs = await loadPdfjs();
+			const images = ops.fnArray.filter(op => [pdfjs.OPS.paintImageXObject, pdfjs.OPS.paintInlineImageXObject].includes(op)).length;
+			const needsVisual = text.length < 100 || mathDensity(text) > .012 || images > 0;
+			pages.push({ number, text, width: viewport.width, height: viewport.height, needsVisual, warnings: text.length < 100 ? ["Sparse or missing text layer; visual reading required"] : [] });
+		}
+		return pages;
+	} finally { await task.destroy().catch(() => {}); }
+}
+export async function pdfSourceMetadata(filePath: string) {
+	const { doc, task } = await openDocument(filePath);
+	try {
+		const metadata = await doc.getMetadata().catch(() => null);
+		const title = metadata?.info && typeof metadata.info === "object" && "Title" in metadata.info && typeof metadata.info.Title === "string" ? metadata.info.Title : "";
+		return { pageCount: doc.numPages, title };
+	} finally { await task.destroy().catch(() => {}); }
 }

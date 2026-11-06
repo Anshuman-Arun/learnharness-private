@@ -59,7 +59,7 @@ test('pre-merge production browser workflows', { timeout: 600000 }, async t => {
    const p = await page('/training/estimation'); await click(p, 'New estimate'); await p.waitForSelector('[name=estimate]'); assert.equal(await p.$('[data-testid=estimate-reference]'), null);
    await fill(p, '[name=estimate]', '100'); await fill(p, '[name=low]', '200'); await fill(p, '[name=high]', '300'); await fill(p, '[name=reasoning]', 'Bracket the rounded product.');
    await click(p, 'Commit and inspect'); await p.waitForSelector('[role=alert]'); assert.equal(await p.$('[data-testid=estimate-reference]'), null);
-   await fill(p, '[name=low]', '10'); await click(p, 'Commit and inspect'); await p.waitForSelector('[data-testid=estimate-reference]'); await p.reload({ waitUntil: 'networkidle2' }); await click(p, 'product · review'); await p.waitForSelector('[data-testid=estimate-reference]');
+   await fill(p, '[name=low]', '10'); await click(p, 'Commit and inspect'); await p.waitForSelector('[data-testid=estimate-reference]'); await p.reload({ waitUntil: 'networkidle2' }); await p.click('details summary'); await click(p, 'tail-risk · review'); await p.waitForSelector('[data-testid=estimate-reference]');
    await click(p, 'New estimate'); await p.waitForSelector('[name=estimate]');
    for (const name of ['estimate','low','high']) await fill(p, '[name='+name+']', '5e-324');
    await fill(p, '[name=reasoning]', 'Exercise a finite subnormal input.'); await click(p, 'Commit and inspect');

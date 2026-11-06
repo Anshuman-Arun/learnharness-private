@@ -90,6 +90,9 @@ export * from "./mistakes";
 export * from "./retrieval";
 export * from "./quant-sprints";
 export * from "./cpp-challenges";
+
+export * from "./documents.ts";
+export * from "./study-transfer.ts";
 export * from "./training-evidence";
 
 // Read-only canonical cross-session learning map (pure; browser-safe).
