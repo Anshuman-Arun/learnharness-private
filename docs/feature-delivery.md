@@ -1,5 +1,7 @@
 # Feature delivery and review map
 
+This records the original feature stack. The subsequent [product quality overhaul](product-quality-verification.md) consolidates these surfaces and adds PDF source maps; use that document for current behavior.
+
 All 15 features are implemented on separate pushed branches and are open as **draft PRs #8–#22**. They form a stack, with each PR based on the preceding feature branch. Main has not been changed or merged. The additional [validation PR #23](https://github.com/Anshuman-Arun/learnharness-private/pull/23), `fix/pre-merge-validation`, carries the tablet reconnect/concurrency/Windows fixes and expanded production regression suite. See [pre-merge-validation.md](pre-merge-validation.md).
 
 Descriptions and base/head pairs are in [feature-prs.json](feature-prs.json).
