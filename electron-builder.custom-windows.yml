@@ -1,0 +1,12 @@
+# One-time user-owned Windows desktop variant.
+# Inherits the upstream production Electron/Next packaging configuration.
+extends: ./electron-builder.yml
+appId: com.anshuman.learnharness.custom
+productName: LearnHarness Custom
+win:
+  icon: build/icon.ico
+  artifactName: "LearnHarness-Custom-${version}-${arch}-setup.${ext}"
+publish:
+  - provider: github
+    owner: Anshuman-Arun
+    repo: learnharness-private
