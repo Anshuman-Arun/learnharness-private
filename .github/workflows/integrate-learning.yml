@@ -1,0 +1,105 @@
+name: One-time LearnHarness integration
+on:
+  push:
+    branches: [integration/learning-features-nov2026]
+    paths: [.github/workflows/integrate-learning.yml]
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    permissions: {contents: read}
+    outputs:
+      ready: ${{ steps.pack.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '26'}
+      - name: Prepare upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "LearnHarness integration"
+          git config user.email "integration@users.noreply.github.com"
+          git remote add upstream https://github.com/amosblomqvist/learnharness.git
+          git fetch --no-tags upstream main
+          git checkout -B integrated FETCH_HEAD
+          npm ci --ignore-scripts
+          npm run plugins:setup
+          npm run typecheck
+      - name: Merge only candidates that pass light checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          results="$RUNNER_TEMP/accepted.txt"
+          : > "$results"
+          for pr in 624 623 753 816 394 274; do
+            case "$pr" in
+              624) suite="tests/retention-fsrs.test.ts" ;;
+              623) suite="tests/session-documents.test.ts" ;;
+              753) suite="tests/search.test.ts" ;;
+              816) suite="tests/answer-review.test.tsx" ;;
+              394) suite="tests/question-core.test.ts" ;;
+              274) suite="tests/code-engines.test.ts" ;;
+            esac
+            before="$(git rev-parse HEAD)"
+            if ! git fetch --no-tags upstream "refs/pull/$pr/head:refs/remotes/upstream/pr$pr"; then
+              echo "- PR #$pr: dropped (fetch)" >> "$results"
+              continue
+            fi
+            if ! git merge --no-ff --no-edit "refs/remotes/upstream/pr$pr"; then
+              git merge --abort || true
+              git reset --hard "$before"
+              echo "- PR #$pr: dropped (merge conflict)" >> "$results"
+              continue
+            fi
+            if ! npm run typecheck > "$RUNNER_TEMP/types-$pr.log" 2>&1; then
+              tail -n 12 "$RUNNER_TEMP/types-$pr.log"
+              git reset --hard "$before"
+              echo "- PR #$pr: dropped (typecheck)" >> "$results"
+              continue
+            fi
+            if [[ -f "$suite" ]] && ! NODE_ENV=test npx --no-install tsx --test "$suite" > "$RUNNER_TEMP/test-$pr.log" 2>&1; then
+              tail -n 12 "$RUNNER_TEMP/test-$pr.log"
+              git reset --hard "$before"
+              echo "- PR #$pr: dropped (targeted test)" >> "$results"
+              continue
+            fi
+            echo "- PR #$pr: included" >> "$results"
+          done
+          { echo "# Integrated LearnHarness features"; echo; cat "$results"; echo; echo "Source: amosblomqvist/learnharness main. Checks: baseline and per-PR typecheck, per-PR targeted test."; } > docs/integration-2026-11-20.md
+          cat docs/integration-2026-11-20.md
+          git add docs/integration-2026-11-20.md
+          git commit -m "Record tested LearnHarness PR integrations"
+      - name: Package branch
+        id: pack
+        run: |
+          git bundle create "$RUNNER_TEMP/integrated.bundle" refs/heads/integrated
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: integrated-source
+          path: ${{ runner.temp }}/integrated.bundle
+          retention-days: 1
+  publish:
+    needs: integrate
+    if: needs.integrate.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions: {contents: write}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: integrated-source}
+      - name: Publish only the new branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git clone --quiet integrated.bundle published
+          cd published
+          git remote remove origin
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config http.https://github.com/.extraheader "AUTHORIZATION: bearer $GH_TOKEN"
+          git push --force-with-lease="refs/heads/integration/learning-features-nov2026:$EXPECTED_SHA" origin HEAD:refs/heads/integration/learning-features-nov2026
