@@ -27,5 +27,5 @@ jobs:
           cd published
           git remote remove origin
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git config http.https://github.com/.extraheader "AUTHORIZATION: bearer $GH_TOKEN"
+          git config http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git push --force-with-lease="refs/heads/integration/learning-features-nov2026:$EXPECTED_SHA" origin HEAD:refs/heads/integration/learning-features-nov2026
