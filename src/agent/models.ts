@@ -3,21 +3,26 @@ import {
 	createModels,
 	getSupportedThinkingLevels,
 	type Api,
+	type CacheRetention,
 	type Model,
 	type Models,
+	type MutableModels,
+	type Provider,
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import { lazyApi, lazyStream } from "@earendil-works/pi-ai/api/lazy";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
-import {
-	CHATGPT_PROVIDER_ID,
-	CHATGPT_SOURCE_PROVIDER_ID,
-	ChatGPTBrokerCredentialStore,
-} from "./chatgpt-broker.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
-import { prepareChatGPTResponsesPayload } from "./chatgpt-responses-payload.ts";
+import { chatGPTModel } from "./chatgpt-bridge.ts";
+import { chatGPTStream } from "./chatgpt-stream.ts";
+import type { ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
+import { createClaudeCodeProvider } from "./claude-code/provider.ts";
+import { streamClaudeCode } from "./claude-code/stream.ts";
+import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
+import { nativeSubscriptionStream } from "./subscription-stream.ts";
 
 /** App identity is immutable and shared by Models and every native Agent.
  * Agent's default Pi attribution otherwise overrides the Models identity. */
@@ -28,7 +33,7 @@ export const APP_IDENTITY = Object.freeze({
 
 /**
  * The one engine factory every agent's model comes from (the pi-ai swap,
- * docs/pi-engine-swap.md). BYOK ALL THE WAY DOWN (owner, 2026-09-22):
+ * docs/archive/pi-engine-swap.md). BYOK ALL THE WAY DOWN (owner, 2026-09-22):
  * there are no factory pins — every engine resolves from a RESOLVED SPEC
  * (the settings chain's output) and the one builder here wires it to
  * pi-ai's federated catalogs.
@@ -41,20 +46,56 @@ export const APP_IDENTITY = Object.freeze({
 
 export interface PiEngine {
 	model: Model<Api>;
-	/** The settings-selected billing/provider identity. May differ from the
-	 * pi-ai transport provider (ChatGPT plan maps to the OpenAI Responses API).
-	 * Missing on injected test engines for backward compatibility. */
-	providerId?: string;
 	streamFn: StreamFunction;
-	/** The resolved (config-or-settings, CLAMPED) thinking level —
-	 *  observability + tests; the streamFn pins it anyway. */
+	/** The initially resolved (config-or-settings, CLAMPED) thinking level.
+	 *  Custom streams re-resolve the original preference per operation. */
 	level?: ThinkingLevel;
 }
 
 export type { ThinkingLevel };
 
+// Route handlers can have separate module instances in Next.js. All of
+// their collections see the same validated overlay without changing auth.
+const CATALOG_KEY = Symbol.for("lh.model-catalog-overlay");
+const catalogGlobal = globalThis as typeof globalThis & { [CATALOG_KEY]?: ReadonlyMap<string, readonly Model<Api>[]> };
+
+export function setModelCatalogOverlay(models: ReadonlyMap<string, readonly Model<Api>[]>): void {
+	catalogGlobal[CATALOG_KEY] = models;
+}
+
+function withCatalogOverlay(provider: Provider): Provider {
+	return {
+		...provider,
+		getModels: () => {
+			const extra = catalogGlobal[CATALOG_KEY]?.get(provider.id);
+			return extra?.length ? [...provider.getModels(), ...extra] : provider.getModels();
+		},
+		getAllModels: () => {
+			const base = provider.getAllModels?.() ?? provider.getModels();
+			const extra = catalogGlobal[CATALOG_KEY]?.get(provider.id);
+			return extra?.length ? [...base, ...extra] : base;
+		},
+	};
+}
+
 let collection: ReturnType<typeof createModels> | undefined;
-let chatGPTCollection: ReturnType<typeof createModels> | undefined;
+interface ProviderSource {
+	sync(models: MutableModels): void;
+	isCustom(id: string): boolean;
+}
+let providerSource: ProviderSource | undefined;
+
+/** Configuration IO is injected by the server; the agent never imports stores. */
+export function configureProviderSource(source: ProviderSource): void {
+	// Server module re-evaluation can replace the source while this collection
+	// survives. Retire only the previous source's routes, not built-ins.
+	if (collection && providerSource) {
+		for (const provider of collection.getProviders()) {
+			if (providerSource.isCustom(provider.id)) collection.deleteProvider(provider.id);
+		}
+	}
+	providerSource = source;
+}
 
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
  *  catalog (model slots wave, 2026-09-20): engines and the picker resolve
@@ -67,29 +108,18 @@ let chatGPTCollection: ReturnType<typeof createModels> | undefined;
 export function piModels() {
 	if (!collection) {
 		collection = createModels({ identity: APP_IDENTITY });
-		for (const provider of builtinProviders()) collection.setProvider(provider);
-	}
-	return collection;
-}
-
-export function piChatGPTModels() {
-	if (!chatGPTCollection) {
-		chatGPTCollection = createModels({
-			identity: APP_IDENTITY,
-			credentials: new ChatGPTBrokerCredentialStore(),
-			// Subscription authentication is a separate billing boundary. If the
-			// broker has no authorized OAuth credential, ambient OPENAI_API_KEY
-			// must NEVER be used as an alternative.
-			authContext: {
-				env: async () => undefined,
-				fileExists: async () => false,
-			},
-		});
 		for (const provider of builtinProviders()) {
-			if (provider.id === CHATGPT_SOURCE_PROVIDER_ID) chatGPTCollection.setProvider(provider);
+			// Keep the native Bedrock implementation reachable by standalone tracing.
+			// Pi's default Node-only loader hides this import from bundlers. Only
+			// replace its lazy forwarding; preserve the native factory's auth/catalog.
+			collection.setProvider(withCatalogOverlay(provider.id === "amazon-bedrock"
+				? { ...provider, ...lazyApi(() => import("@earendil-works/pi-ai/api/bedrock-converse-stream")) }
+				: provider));
 		}
+		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
 	}
-	return chatGPTCollection;
+	providerSource?.sync(collection);
+	return collection;
 }
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */
@@ -124,46 +154,64 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
  *  key is resolved by pi-ai itself from the environment per request (the
  *  keys seam reflects file-saved keys into env), so the engine never
  *  hardcodes OpenRouter's. */
-export function piEngineForSpec(spec: ResolvedModelSpec): PiEngine {
-	const usesChatGPT = spec.provider === CHATGPT_PROVIDER_ID;
-	const models: Models = usesChatGPT ? piChatGPTModels() : piModels();
-	const provider = usesChatGPT ? CHATGPT_SOURCE_PROVIDER_ID : spec.provider;
-	const model = models.getModel(provider, spec.id);
+export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle, cacheRetention?: () => CacheRetention | undefined): PiEngine {
+	const models: Models = piModels();
+	const nativeId = nativeSubscriptionId(spec.provider);
+	const registeredModel = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
+	const custom = providerSource?.isCustom(spec.provider) ?? false;
+	// Custom endpoint owners authorize image attempts independently of sparse
+	// discovery metadata. Never promote the registered/catalog capabilities.
+	const permitImages = (value: Model<Api>): Model<Api> => ({ ...value, input: ["text", "image"] });
+	const model = custom && registeredModel ? permitImages(registeredModel) : registeredModel;
 	if (!model) {
 		throw new Error(`${spec.provider} catalog has no model ${spec.id}`);
 	}
 	// UNSET level → the baked default order (first entry the model
 	// supports); SET level → pi's native nearest-clamp (model swaps keep
 	// the user's intent and adapt honestly).
-	const level = spec.thinkingLevel
-		? clampThinkingLevel(model, spec.thinkingLevel)
+	const thinkingPreference = spec.thinkingLevel;
+	const level = thinkingPreference
+		? clampThinkingLevel(model, thinkingPreference)
 		: defaultThinkingLevel(model);
+	// A lesson's agent loop can stay alive through many tool calls. Remember
+	// only that this is a custom route, never its configuration for that run.
 	return {
 		model,
-		providerId: spec.provider,
 		level,
-		// bound streamSimple: the agent loop forwards state.thinkingLevel as
-		// `reasoning` (undefined = off on pi-ai's scale); the clamp above keeps
-		// the pin honest even when config or settings drift off the map.
-		streamFn: (requestModel, context, options) =>
-			models.streamSimple(requestModel, context, {
+		// The agent loop forwards state.thinkingLevel as `reasoning` (undefined
+		// = off on pi-ai's scale). Built-ins keep the factory clamp; custom
+		// requests re-resolve thinking against their current metadata below.
+		streamFn: (requestModel, context, options) => {
+			// Read the slot preference for every operation, not just engine creation.
+			// Unset adds NOTHING: native defaults/env and explicit caller options survive.
+			const retention = cacheRetention?.();
+			const requestOptions = {
 				...options,
-				// Do not let an explicitly supplied ambient key/header bypass the
-				// ChatGPT broker boundary on the subscription-only path.
-				...(usesChatGPT ? {
-					apiKey: undefined, env: undefined, headers: undefined,
-					// pi-ai's regular OpenAI transport may emit top-level
-					// function tools, explicit system messages, or sampling
-					// fields rejected by ChatGPT token-sharing preview.
-					// Keep the original onPayload hook for observability but
-					// enforce the subscription contract *after* it.
-					onPayload: async (payload, runtimeModel) => {
-						const changed = await options?.onPayload?.(payload, runtimeModel);
-						return prepareChatGPTResponsesPayload((changed ?? payload) as { input: unknown });
-					},
-				} : {}),
+				...(retention !== undefined ? { cacheRetention: retention } : {}),
 				reasoning: level === "off" ? undefined : level,
-			}),
+			};
+			if (custom) {
+				// Revalidate before EVERY upstream model operation, including later
+				// tool-loop steps. Resolve thinking from the ORIGINAL preference (or
+				// existing default order), not a previous metadata snapshot's clamp.
+				// Pi retains the setup of an operation already in flight.
+				const current = piModels();
+				const currentModel = current.getModel(spec.provider, spec.id);
+				if (!currentModel) return lazyStream(requestModel, async () => { throw new Error("The selected custom model is unavailable."); });
+				const currentLevel = thinkingPreference
+					? clampThinkingLevel(currentModel, thinkingPreference)
+					: defaultThinkingLevel(currentModel);
+				return current.streamSimple(permitImages(currentModel), context, { ...requestOptions, reasoning: currentLevel === "off" ? undefined : currentLevel });
+			}
+			const purpose = typeof background === "function" ? background : () => background;
+			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
+			// Direct Anthropic auth is resolved per request. Keep full replay: Pi's
+			// message-thread fingerprint does not include that rotating credential.
+			const wireModel = requestModel.provider === "anthropic" && requestModel.api === "anthropic-messages"
+				? { ...requestModel, compat: { ...requestModel.compat, supportsMessageThreads: false } }
+				: requestModel;
+			return stream(wireModel, context, requestOptions);
+		},
 	};
 }
 

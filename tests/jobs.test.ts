@@ -10,7 +10,7 @@
  *      CONTINUES — no turn break at the call), a job record exists, and the
  *      test runner (fake deliver) produces the steer
  *   4. runner completion: a fake researcher model (web_search call → final
- *      text brief, globalThis.fetch stubbed) → the job stores the result,
+ *      text brief, safeFetchOverride stubbed) → the job stores the result,
  *      the steer carries the brief + sources, the fake deliver flips the
  *      job done
  *   5. runner failure: a model that throws → the failure steer still fires
@@ -25,8 +25,9 @@
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
-import { after, afterEach, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type AssistantMessage, type FauxResponseStep } from "@earendil-works/pi-ai";
 import {
 	accumulateJobUsage,
@@ -46,23 +47,26 @@ import {
 import { composeInstructions, createTeacherAgent } from "../src/agent/teacher-agent.ts";
 import { createTeacherTools } from "../src/agent/tools.ts";
 import { webTools } from "../src/agent/tools/web.ts";
+import { safeFetchOverride } from "../src/agent/tools/safe-fetch.ts";
 import { handleChatRequest } from "../src/server/chat-handler.ts";
 import { runningTurn } from "../src/server/turn-runs.ts";
 import {
 	abortJob,
 	deliverJobResult,
-	noteSteerVisible,
+	noteSteersDurable,
+	discardChatDeliveries,
 	reconcileUserSteers,
 	recoverStaleJobs,
 	registerLiveAgent,
 	setJobRespawn,
-	setTurnRunner,
+	setTurnRunner as setRawTurnRunner,
+	type TurnRunner,
 	settleSteers,
 	steerLiveChat,
 	unregisterLiveAgent,
 } from "../src/server/jobs.ts";
-import { registerJobAbort, unregisterJobAbort } from "../src/agent/subagents/aborts.ts";
-import { beginTurn, endTurn } from "../src/server/turn-liveness.ts";
+import { isJobLive, registerJobAbort, unregisterJobAbort } from "../src/agent/subagents/aborts.ts";
+import { beginTurn, endTurn, isTurnRunning } from "../src/server/turn-liveness.ts";
 import { persistTurn } from "../src/server/turn-service.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { jobStore } from "../src/store/jobs.ts";
@@ -140,11 +144,13 @@ afterEach(() => {
 			if (job && job.status === "running") {
 				jobStore.updateJob(id, { status: "done", activity: "settled (fence)" });
 			}
+			if (job?.delivery?.status === "pending") jobStore.updateJob(id, { delivery: { ...job.delivery, status: "delivered" } });
 			unregisterJobAbort(id);
 		} catch {
 			/* already gone */
 		}
 	}
+	for (const chatId of createdChats) discardChatDeliveries(chatId);
 	// Late wakes from a prior test must be inert: a no-op respawn can't
 	// increment anyone's counter, a no-op runner can't spawn real work.
 	setJobRespawn(() => {});
@@ -346,8 +352,11 @@ describe("steer helpers (contracts.ts)", () => {
 			cacheReadTokens: 4,
 			cacheWriteTokens: undefined,
 			reasoningTokens: undefined,
+			cacheWrite1hTokens: undefined,
+			calls: [{ inputTokens: 10, outputTokens: 5, cacheReadTokens: 4, cacheWriteTokens: undefined, cacheWrite1hTokens: undefined, reasoningTokens: undefined }],
 			steps: 1,
 			lastStep: {
+				cacheWrite1hTokens: undefined,
 				inputTokens: 10,
 				outputTokens: 5,
 				cacheReadTokens: 4,
@@ -364,7 +373,9 @@ describe("steer helpers (contracts.ts)", () => {
 		assert.equal(total.cacheWriteTokens, undefined, "never reported stays absent — never zero");
 		assert.equal(total.reasoningTokens, undefined);
 		assert.equal(total.steps, 2, "one step per model call, reported or not");
+		assert.equal(total.calls?.length, 2);
 		assert.deepEqual(total.lastStep, {
+			cacheWrite1hTokens: undefined,
 			inputTokens: 20,
 			outputTokens: 0,
 			cacheReadTokens: undefined,
@@ -449,14 +460,23 @@ function fakeDeliver() {
 		steers,
 		deliver: async (steer: SteerMessage) => {
 			steers.push(steer);
-			const jobId = (steer.details as { jobId: string }).jobId;
-			const job = jobStore.getJob(jobId);
-			if (job && job.status === "running") {
-				const failed = job.result ? isSubagentFailure(job.kind, job.result as never) : true;
-				jobStore.updateJob(jobId, { status: failed ? "error" : "done", activity: failed ? "failed" : "delivered" });
-			}
+			const job = jobStore.getJob((steer.details as { jobId: string }).jobId)!;
+			chatStore.saveMessages(job.chatId, [...chatStore.getChat(job.chatId)!.messages, steer]);
+			noteSteersDurable(job.chatId, [steer]);
 		},
 	};
+}
+
+/** Fake wakes model canonical input acceptance, not just HTTP acknowledgement. */
+function setTurnRunner(run: TurnRunner): void {
+	setRawTurnRunner(async (chatId, input) => {
+		const status = await run(chatId, input);
+		if (status === 200 && input.type === "steers") {
+			const record = chatStore.getChat(chatId);
+			if (record) chatStore.saveMessages(chatId, [...record.messages, ...input.steers.filter((s) => !steerDelivered(record.messages, s.id))]);
+		}
+		return status;
+	});
 }
 
 // ─── 3. dispatch: the tool call acks mid-turn and spawns ─────────────────────
@@ -521,7 +541,7 @@ describe("dispatch (async protocol §2)", () => {
 
 		const done = jobStore.getJob(job!.id)!;
 		assert.equal(done.status, "done");
-		assert.equal(done.activity, "delivered");
+		assert.equal(done.activity, "finished");
 
 		// The steer carries the brief on its model-facing content; the
 		// artifact payload rides details for the (UI) renderer.
@@ -598,7 +618,7 @@ describe("research runner (async protocol §3)", () => {
 		// The job is done, with the activity line from the tool call.
 		const done = jobStore.getJob(job.id)!;
 		assert.equal(done.status, "done");
-		assert.equal(done.activity, "delivered", "the fake deliver flips the status like the pipeline");
+		assert.equal(done.activity, "finished", "delivery does not own the worker status");
 		const result = done.result as ResearchResult;
 		assert.equal(result.brief, BRIEF);
 		assert.ok(result.sources.length > 0, "sources parsed from the brief");
@@ -608,6 +628,68 @@ describe("research runner (async protocol §3)", () => {
 		// flip; the search line fired before it. The search itself ran on
 		// the INJECTED port — the stub saw the query (no network):
 		assert.deepEqual(search.queries, ["sigma.js latest version (5)"]);
+	});
+
+	it("research beyond twelve tool turns delivers one final brief and accounts for every turn", async () => {
+		const chat = chatStore.createChat("Test: uncapped research"); trackChat(chat.id);
+		const toolCallId = "call-uncapped-research";
+		chatStore.saveMessages(chat.id, nativeToolMessages("which version?", "research", toolCallId, RESEARCH_INPUT));
+		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId }); trackJob(job.id);
+		const delivery = fakeDeliver(), search = stubSearch();
+		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver, searchProvider: () => search });
+		researchModelOverride.current = fauxEngine([
+			...Array.from({ length: 15 }, (_, index) => fauxAssistantMessage([
+				fauxText("Progress, not the final brief."),
+				fauxToolCall("web_search", { query: `source ${index}` }, { id: `search_${index}` }),
+			], { stopReason: "toolUse" })),
+			fauxAssistantMessage(BRIEF),
+		]);
+		try { await runner.runJob(job.id); }
+		finally { researchModelOverride.current = undefined; }
+		const done = jobStore.getJob(job.id)!;
+		assert.equal(done.status, "done"); assert.equal(done.error, undefined);
+		assert.equal((done.result as ResearchResult).brief, BRIEF);
+		assert.ok((done.result as ResearchResult).sources.some(source => source.url === "https://www.sigmajs.org/docs"));
+		assert.equal(done.usage?.steps, 16); assert.equal(done.usage?.calls?.length, 16);
+		assert.equal(search.queries.length, 15);
+		assert.equal(delivery.steers.length, 1);
+		assert.ok(delivery.steers[0]!.content.includes(BRIEF));
+	});
+
+	it("a keyless fetch-only researcher still completes and delivers a sourced job result", async () => {
+		const url = "https://example.com/supplied-source";
+		const brief = `## Summary\nVerified supplied source. [Source](${url})\n\n## Sources\n- Source (${url})`;
+		const input = { question: `Verify ${url}` };
+		const chat = chatStore.createChat("Test: keyless fetch-only research");
+		trackChat(chat.id);
+		chatStore.saveMessages(chat.id, nativeToolMessages("verify supplied URL", "research", "call-keyless", input));
+		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-keyless" });
+		trackJob(job.id);
+		const delivery = fakeDeliver();
+		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver, searchProvider: () => null });
+		const fetched: string[] = [];
+		safeFetchOverride.current = (async (source) => {
+			fetched.push(String(source));
+			assert.equal(String(source), url);
+			return new Response("Synthetic verified source content", { headers: { "content-type": "text/plain" } });
+		}) as typeof fetch;
+		researchModelOverride.current = fauxEngine([
+			fauxAssistantMessage([fauxToolCall("web_fetch", { url }, { id: "keyless-fetch" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText(brief)]),
+		]);
+		try {
+			await runner.runJob(job.id);
+		} finally {
+			researchModelOverride.current = undefined;
+			safeFetchOverride.current = undefined;
+		}
+		assert.deepEqual(fetched, [url]);
+		const done = jobStore.getJob(job.id)!;
+		assert.equal(done.status, "done");
+		assert.equal((done.result as ResearchResult).brief, brief);
+		assert.ok((done.result as ResearchResult).sources.some((s) => s.url === url));
+		assert.equal(delivery.steers.length, 1);
+		assert.equal(isSubagentFailure("research", done.result as ResearchResult), false);
 	});
 
 	it("a failing runner still steers (the teacher learns the outcome) and the job lands error", async () => {
@@ -675,6 +757,33 @@ describe("research runner (async protocol §3)", () => {
 describe("pdf runner (sources v0)", () => {
 	const PDF_FIXTURE = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
 	const PDF_INPUT = { path: PDF_FIXTURE, question: "What is the integral of x dx?" };
+	const relativePath = path.join("Course notes", "sample document.pdf");
+	let home: string;
+	let homeAlias: string;
+	const originalHome = process.env.HOME;
+	const originalUserProfile = process.env.USERPROFILE;
+
+	before(() => {
+		home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-pdf-job-home-"));
+		const target = path.join(home, relativePath);
+		fs.mkdirSync(path.dirname(target), { recursive: true });
+		fs.copyFileSync(PDF_FIXTURE, target);
+		// Exercise a genuine alias even when the outer test HOME/TMPDIR are
+		// canonical. Callers need not canonicalize their environment first.
+		homeAlias = `${home}-alias`;
+		fs.symlinkSync(home, homeAlias, process.platform === "win32" ? "junction" : "dir");
+		process.env.HOME = homeAlias;
+		process.env.USERPROFILE = homeAlias;
+	});
+
+	after(() => {
+		if (originalHome === undefined) delete process.env.HOME;
+		else process.env.HOME = originalHome;
+		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+		else process.env.USERPROFILE = originalUserProfile;
+		fs.unlinkSync(homeAlias);
+		fs.rmSync(home, { recursive: true, force: true });
+	});
 
 	/** A pdf-reader that triages, extracts pages 1-2, then briefs. */
 	function pdfReaderModel(): PiEngine {
@@ -704,7 +813,7 @@ describe("pdf runner (sources v0)", () => {
 
 		const done = jobStore.getJob(job.id)!;
 		assert.equal(done.status, "done");
-		assert.equal(done.activity, "delivered");
+		assert.equal(done.activity, "finished");
 		const result = done.result as PdfResult;
 		assert.equal(result.path, PDF_FIXTURE);
 		assert.match(result.brief, /integral rule/);
@@ -716,6 +825,56 @@ describe("pdf runner (sources v0)", () => {
 		assert.equal((steer.details as { kind: string }).kind, "pdf");
 		assert.ok(steer.content.includes("integral rule"), "steer text carries the brief");
 	});
+
+	for (const mode of ["dispatch", "recovery"] as const) {
+		it(`resolves a home-relative PDF through aliased HOME from ${mode} input without rewriting history`, async () => {
+			assert.equal(os.homedir(), homeAlias);
+			assert.notEqual(homeAlias, fs.realpathSync.native(homeAlias));
+			const chat = chatStore.createChat(`Test: relative PDF ${mode}`);
+			trackChat(chat.id);
+			const toolCallId = `call-pdf-relative-${mode}`;
+			const input = { ...PDF_INPUT, path: relativePath };
+			const messages = nativeToolMessages("read this pdf", "pdf", toolCallId, input);
+			const before = structuredClone(messages);
+			chatStore.saveMessages(chat.id, messages);
+			const job = jobStore.createJob({ kind: "pdf", chatId: chat.id, toolCallId });
+			trackJob(job.id);
+			const delivery = fakeDeliver();
+			const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver });
+			pdfModelOverride.current = pdfReaderModel();
+			try {
+				await runner.runJob(job.id, mode === "dispatch" ? input : undefined);
+			} finally {
+				pdfModelOverride.current = undefined;
+			}
+
+			// Worker completion is not the delivery barrier: wait for canonical
+			// acceptance before asserting the history prefix and appended result.
+			await waitFor(() => jobStore.getJob(job.id)?.delivery?.status === "delivered", 8000, "canonical PDF delivery acknowledgement");
+			const done = jobStore.getJob(job.id)!;
+			assert.equal(done.status, "done");
+			assert.deepEqual(done.delivery, { kind: "result", status: "delivered" });
+			const result = done.result as PdfResult;
+			assert.equal(result.path, fs.realpathSync.native(path.join(home, relativePath)));
+			assert.match(result.brief, /integral rule/);
+			assert.deepEqual(result.pagesRead, [1, 2]);
+			assert.deepEqual(result.pagesConsulted, [1, 2]);
+			assert.equal(delivery.steers.length, 1);
+			assert.equal(input.path, relativePath, "dispatch input remains relative");
+			const persisted = chatStore.getChat(chat.id)!.messages;
+			assert.deepEqual(persisted.slice(0, before.length), before, "original history and tool-call arguments remain as supplied");
+			const steer = delivery.steers[0]!;
+			assert.equal(steer.id, `steer_${job.id}`);
+			assert.equal(steer.role, "custom");
+			assert.equal(steer.customType, "subagent-steer");
+			const details = steer.details as { jobId: string; kind: string; toolCallId: string; result: PdfResult };
+			assert.equal(details.jobId, job.id);
+			assert.equal(details.kind, "pdf");
+			assert.equal(details.toolCallId, toolCallId);
+			assert.deepEqual(details.result, result, "the canonical steer carries the resolved PDF result");
+			assert.deepEqual(persisted.slice(before.length), [steer], "exactly one captured result is appended after the unchanged history");
+		});
+	}
 
 	it("an unreadable source: the job lands error with the PDF failed: brief and the steer flags the gap", async () => {
 		const chat = chatStore.createChat("Test: pdf runner failure");
@@ -785,7 +944,7 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 		const job = jobStore.createJob({ kind, chatId: chat.id, toolCallId: `call-${jobStore.listJobs(chat.id).length}` });
 		trackJob(job.id);
 		const result: ResearchResult = { brief: "Done: it works.", sources: [{ title: "s", url: "https://x.test" }] };
-		jobStore.updateJob(job.id, { result, activity: "delivering result" });
+		jobStore.updateJob(job.id, { result, status: "done", activity: "finished", delivery: { kind: "result", status: "pending" } });
 		const steer = buildSubagentSteer(job, result);
 		return { chatId: chat.id, jobId: job.id, steer };
 	}
@@ -840,7 +999,7 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 		await waitFor(() => jobStore.getJob(jobId)!.status !== "running", 8000, "job flip after delivery");
 
 		assert.equal(jobStore.getJob(jobId)!.status, "done");
-		assert.equal(jobStore.getJob(jobId)!.activity, "delivered");
+		assert.equal(jobStore.getJob(jobId)!.delivery?.status, "delivered");
 		assert.ok(seen, "the turn runner fired");
 		assert.equal(seen.chatId, chatId);
 		assert.equal(seen.steers.length, 1);
@@ -878,7 +1037,8 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 
 		await delay(1200);
 		assert.equal(fired, 0, "no wake while the quiz is pending");
-		assert.equal(jobStore.getJob(jobId)!.status, "running", "job stays running while blocked");
+		assert.equal(jobStore.getJob(jobId)!.status, "done", "worker is finished while delivery waits");
+		assert.equal(jobStore.getJob(jobId)!.delivery?.status, "pending");
 
 		// The learner answers: the real tool result clears the dangling call.
 		const record = chatStore.getChat(chatId)!;
@@ -902,7 +1062,7 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 		assert.equal(jobStore.getJob(jobId)!.status, "done");
 	});
 
-	it("the dismissal pause holds deliveries — no wake until the user's next turn settles (A2)", async () => {
+	for (const pause of ["dismissal", "question recovery"] as const) it(`the ${pause} pause holds deliveries until the user's next turn settles`, async () => {
 		const { chatId, jobId, steer } = setup();
 		let fired = 0;
 		setTurnRunner(async () => {
@@ -910,9 +1070,9 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 			return 200;
 		});
 
-		// The record ends in a DISMISSAL (owner design 2026-10-03): the
-		// question was skipped via the silent route — no dangling call (the
-		// quiz gate would pass), so ONLY the dismissal pause holds the wake.
+		// Both resolutions clear the dangling call, so only the persisted
+		// manual-only pause holds the wake. Recovery can be interrupted after
+		// write-ahead but before any replacement output is persisted.
 		chatStore.saveMessages(chatId, [
 			{ id: "u1", role: "user", content: "hello", timestamp: 1 } as never,
 			{
@@ -931,9 +1091,9 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 				role: "toolResult",
 				toolCallId: "quiz-call",
 				toolName: "quiz",
-				content: [{ type: "text", text: "skipped" }],
-				details: { kind: "quiz", questionText: "q", dontKnow: false, answers: [], dismissed: true, answeredAt: "t" },
-				isError: false,
+				content: [{ type: "text", text: pause === "dismissal" ? "skipped" : "Replacement requested" }],
+				details: pause === "dismissal" ? { kind: "quiz", questionText: "q", dontKnow: false, answers: [], dismissed: true, answeredAt: "t" } : { questionRecovery: true },
+				isError: pause === "question recovery",
 				timestamp: 1,
 			} as never,
 		]);
@@ -941,8 +1101,8 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 		const delivery = deliverJobResult(steer);
 
 		await delay(1200);
-		assert.equal(fired, 0, "no wake while the session sits dismissal-paused");
-		assert.equal(jobStore.getJob(jobId)!.status, "running", "the delivery holds (queued, not lost)");
+		assert.equal(fired, 0, `no wake while the session sits ${pause}-paused`);
+		assert.equal(jobStore.getJob(jobId)!.delivery?.status, "pending", "the delivery holds (queued, not lost)");
 
 		// The user's next message is the wake — its turn settles, and the
 		// settlement re-pump lands the held delivery right after it.
@@ -1014,7 +1174,8 @@ describe("Wave C: live steering handoff + settlement reconciliation", () => {
 		await waitFor(() => handed.length === 1, 8000, "marker handed to the live agent");
 		await delay(1200);
 		assert.equal(fired, 0, "no wake while the run is live");
-		assert.equal(jobStore.getJob(jobId)!.status, "running", "job flips only at delivery");
+		assert.equal(jobStore.getJob(jobId)!.status, "done", "worker finished before delivery");
+		assert.equal(jobStore.getJob(jobId)!.delivery?.status, "pending");
 
 		// Settlement: the run persisted the injected marker.
 		unregisterLiveAgent(chatId);
@@ -1127,20 +1288,15 @@ describe("Wave C: live steering handoff + settlement reconciliation", () => {
 		assert.equal(jobStore.getJob(jobId)!.status, "done");
 	});
 
-	it("noteSteerVisible flips the job at the visibility seam — before any settle (owner ruling 2026-09-26)", async () => {
-		// The dock fix: the marker reaching the learner's view (wire
-		// message_end / write-ahead persist) flips the job NOW — the
-		// delivering turn may keep teaching for minutes. Idempotent with
-		// the settle-path finalize.
+	it("only a durable marker acknowledges delivery, independently of worker completion", () => {
 		const { chatId, jobId, steer } = setup();
-		assert.equal(jobStore.getJob(jobId)!.status, "running");
-		noteSteerVisible(steer);
-		assert.equal(jobStore.getJob(jobId)!.status, "done", "flipped at the seam, no turn settled");
-		noteSteerVisible(steer); // the settle-path flip re-runs — no-op
 		assert.equal(jobStore.getJob(jobId)!.status, "done");
-		// A probe-handoff (no jobId) is a harmless no-op.
-		const handoff = buildProbeHandoffSteer(chatId);
-		noteSteerVisible(handoff);
+		assert.equal(jobStore.getJob(jobId)!.delivery?.status, "pending");
+		chatStore.saveMessages(chatId, [...chatStore.getChat(chatId)!.messages, steer]);
+		noteSteersDurable(chatId, [steer]);
+		noteSteersDurable(chatId, [steer]);
+		assert.equal(jobStore.getJob(jobId)!.delivery?.status, "delivered");
+		assert.equal(jobStore.getJob(jobId)!.activity, "finished");
 	});
 
 	it("the idle wake carries EVERY pending marker in ONE turn", async () => {
@@ -1166,17 +1322,25 @@ describe("Wave C: live steering handoff + settlement reconciliation", () => {
 });
 
 
-	it("fails the job (error status) when the wake turn errors unrecoverably", async () => {
-		const { jobId, steer } = setup();
-		setTurnRunner(async () => 500);
-
-		await deliverJobResult(steer).then(
-			() => assert.fail("expected delivery to reject"),
-			() => undefined,
-		);
-		const errored = jobStore.getJob(jobId)!;
-		assert.equal(errored.status, "error");
-		assert.match(errored.error ?? "", /status 500/);
+	it("a failed start stays pending without changing the worker outcome", async () => {
+		const { chatId, jobId, steer } = setup();
+		let attempts = 0;
+		setTurnRunner(async () => { attempts++; return 500; });
+		const delivery = deliverJobResult(steer);
+		await waitFor(() => attempts === 1, 8000, "failed start attempted");
+		await delay(1000);
+		assert.equal(attempts, 1, "no automatic retry loop");
+		assert.equal(jobStore.getJob(jobId)!.status, "done");
+		assert.equal(jobStore.getJob(jobId)!.error, undefined);
+		assert.equal(jobStore.getJob(jobId)!.delivery?.status, "pending");
+		const handed: SteerMessage[] = [];
+		assert.ok(beginTurn(chatId));
+		registerLiveAgent(chatId, { steer: (m: SteerMessage) => handed.push(m) } as never);
+		assert.deepEqual(handed.map((m) => m.id), [steer.id]);
+		unregisterLiveAgent(chatId);
+		settleSteers(chatId, [steer]);
+		endTurn(chatId);
+		await delivery;
 	});
 });
 
@@ -1285,49 +1449,6 @@ describe("persistTurn (native history, Wave B)", () => {
 		assert.equal(record.messages.length, 2);
 		assert.equal((record.messages[1] as { isError: boolean }).isError, true);
 	});
-
-	it("THROWS on a failed write (the silent-turn fix: a lost reply is never a finished turn)", () => {
-		const chat = chatStore.createChat("Test: persist failure is not silent");
-		trackChat(chat.id);
-		const realSave = chatStore.saveMessages;
-		chatStore.saveMessages = () => {
-			throw new Error("EACCES: the record is not writable");
-		};
-		const quiet = console.error;
-		console.error = () => {}; // the seam logs its own failure; keep the run clean
-		try {
-			// The turn ran, the teacher replied, and the write that would keep
-			// the reply failed. Returning [] here is what made the turn settle
-			// exactly like a successful one, with an empty transcript to show
-			// for it — the caller must be able to tell, and report it.
-			assert.throws(
-				() =>
-					persistTurn(
-						chatStore,
-						chat.id,
-						0,
-						[
-							{
-								id: "",
-								role: "assistant",
-								content: [{ type: "text", text: "Mercury." }],
-								api: "openai-completions",
-								provider: "openrouter",
-								model: "test",
-								usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-								stopReason: "stop",
-								timestamp: 1,
-							} as never,
-						],
-						false,
-					),
-				/EACCES/,
-			);
-		} finally {
-			chatStore.saveMessages = realSave;
-			console.error = quiet;
-		}
-	});
 });
 
 // ─── prompt composition hygiene (the README leak) ─────────────────────────────
@@ -1366,8 +1487,8 @@ describe("prompt composition", () => {
 		const prober = composeInstructions("prober");
 		assert.ok(!prober.includes("There is no rush"), "the old no-rush framing is retired");
 		assert.ok(
-			prober.includes("every wasted question is resolution the final map doesn't get"),
-			"the efficiency-is-resolution directive is in",
+			prober.includes("for the time and effort they spend answering"),
+			"the probe optimizes evidence for the learner's answering effort",
 		);
 		assert.ok(!prober.includes("Question principles"), "the teach-phase fragment never composes into the prober");
 	});
@@ -1546,23 +1667,23 @@ describe("abort (src/server/jobs.ts abortJob)", () => {
 			// model slots wave: the stamp is the ENGINE's actual model,
 			// provider-qualified — the scripted faux engine here.
 			assert.equal(job.usage!.model, "faux:faux-1");
-			// faux estimates tokens from the prompt/response text — the
-			// pinned fact is that the ONE completed step's spend survived.
-			assert.ok(job.usage!.inputTokens! > 0, "input tokens billed");
+			// This is a fresh faux session; its prompt can be entirely cache writes.
+			assert.ok((job.usage!.inputTokens ?? 0) + (job.usage!.cacheWriteTokens ?? 0) > 0, "the completed step's prompt usage survived");
+			assert.ok(job.usage!.cacheWriteTokens! > 0, "cache writes survived");
 			assert.ok(job.usage!.outputTokens! > 0, "output tokens billed");
 		} finally {
 			researchModelOverride.current = undefined;
 		}
 	});
 
-	it("aborting a delivering job drops the queued result steer and wakes with the abort note instead", async () => {
+	it("a finished worker with a queued result is no longer abortable", async () => {
 		const chat = chatStore.createChat("Test: abort delivering job");
 		trackChat(chat.id);
 		chatStore.saveMessages(chat.id, [{ id: "u1", role: "user", content: "hello", timestamp: 1 } as never]);
 		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId: "call-abort3" });
 		trackJob(job.id);
 		const result: ResearchResult = { brief: "Done: it works.", sources: [{ title: "s", url: "https://x.test" }] };
-		jobStore.updateJob(job.id, { result, activity: "delivering result" });
+		jobStore.updateJob(job.id, { result, status: "done", activity: "finished", delivery: { kind: "result", status: "pending" } });
 
 		// Block the pump's idle gates so the result steer sits QUEUED, not in flight.
 		assert.ok(beginTurn(chat.id));
@@ -1574,18 +1695,18 @@ describe("abort (src/server/jobs.ts abortJob)", () => {
 		void deliverJobResult(buildSubagentSteer(job, result)).catch(() => {
 			/* dropped by the abort below */
 		});
-		await waitFor(() => jobStore.getJob(job.id)!.activity === "delivering result", 8000, "queued");
+		assert.equal(jobStore.getJob(job.id)!.delivery?.status, "pending");
 
 		const outcome = abortJob(job.id);
-		assert.ok(outcome.ok);
-		assert.equal(jobStore.getJob(job.id)!.status, "error");
-		assert.equal(jobStore.getJob(job.id)!.error, "Aborted by learner");
+		assert.deepEqual(outcome, { ok: false, reason: "not_running" });
+		assert.equal(jobStore.getJob(job.id)!.status, "done");
+		assert.equal(jobStore.getJob(job.id)!.error, undefined);
 
 		endTurn(chat.id); // gates open — whatever is left in the queue fires
 		await waitFor(() => fired.length > 0, 8000, "wake fired");
-		assert.equal(fired.length, 1, "exactly one delivery — the result steer was dropped");
-		assert.equal((fired[0]!.details as { aborted: boolean }).aborted, true, "the abort steer, not the result");
-		assert.equal(jobStore.getJob(job.id)!.status, "error", "terminal after the wake");
+		assert.equal(fired.length, 1, "exactly one result delivery");
+		assert.equal(fired[0]!.customType, "subagent-steer");
+		assert.equal(jobStore.getJob(job.id)!.status, "done");
 	});
 
 	it("outcome reasons: not_found for unknown, not_running for settled jobs", () => {

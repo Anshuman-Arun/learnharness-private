@@ -7,80 +7,21 @@ import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList, ThinkingMenuList } from "@/components/settings/model-menu";
 import { composeSlotModel } from "@/components/settings/agent-section";
 import { MenuShell } from "@/components/menu-shell";
+import { useInteractionLayers } from "@/components/interaction-layers";
+import { isInputShortcutScopeEligible } from "@/components/plugin-input-focus";
+import { ModelPickerPill } from "@/components/model-picker-pill";
 import { Hint } from "@/components/ui/hint";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
+import { useModelCatalog } from "@/components/model-catalog";
+export { useModelCatalog } from "@/components/model-catalog";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 
-/** GET /api/models is cached per page load for instant menu opens, but
- *  the federation is LIVE per call — keys saved mid-session widen the
- *  catalog immediately server-side. ModelControl therefore re-fetches on
- *  every model-menu open (stale-while-revalidate: the cached list shows
- *  instantly, the fresh one swaps in while the menu is open). */
-let catalogCache: ModelCatalogResponse | undefined;
-let catalogInflight: Promise<ModelCatalogResponse> | undefined;
-let catalogGeneration = 0;
-const catalogListeners = new Set<(value: ModelCatalogResponse | undefined) => void>();
-
-/** A revoked/changed account invalidates earlier responses, including a
- * request that started while its previous OAuth grant was still active. */
-export function fetchCatalog(force = false): Promise<ModelCatalogResponse> {
-	if (force) {
-		catalogGeneration += 1;
-		catalogCache = undefined;
-		catalogInflight = undefined;
-		for (const notify of catalogListeners) notify(undefined);
-	}
-	if (catalogInflight) return catalogInflight;
-	const generation = catalogGeneration;
-	const request = fetch("/api/models", { cache: "no-store" })
-		.then((r) => {
-			if (!r.ok) throw new Error(`catalog request failed: ${r.status}`);
-			return r.json() as Promise<ModelCatalogResponse>;
-		})
-		.then((c) => {
-			if (generation !== catalogGeneration) throw new Error("Superseded model catalog request");
-			catalogCache = c;
-			for (const notify of catalogListeners) notify(c);
-			return c;
-		})
-		.catch((err) => {
-			// Only the current request may clear its own retry marker.
-			if (generation === catalogGeneration) catalogInflight = undefined;
-			throw err;
-		});
-	catalogInflight = request;
-	return request;
-}
-
-export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; refresh: () => void } {
-	const [catalog, setCatalog] = useState(catalogCache);
-	useEffect(() => {
-		catalogListeners.add(setCatalog);
-		if (catalogCache) setCatalog(catalogCache);
-		else void fetchCatalog().catch(() => {
-			/* No phantom provider models on outage. Retry when opening
-			   the model menu or when credentials change. */
-		});
-		return () => { catalogListeners.delete(setCatalog); };
-	}, []);
-	const refresh = useCallback(() => {
-		void fetchCatalog(true).catch(() => {
-			/* All mounted pickers already invalidated; do not restore an
-			   old catalog after a disconnect or failed status request. */
-		});
-	}, []);
-	return { catalog, refresh };
-}
-
-/** provider:id → contextWindow over the cached catalog — the client-side
- *  twin of the server's catalogContextLimits join (context-meter
- *  amendment, owner 2026-09-23: pi's live catalog is the ONLY limit
- *  source — no hardcoded fallback exists anywhere, so a model missing
- *  from the index reads limit-null and the meter renders usage-only,
- *  the honest-render precedent). Consumed by the stats bar: the same
- *  cached /api/models fetch the picker rides feeds the denominator. */
+/** provider:id → known contextWindow over the cached catalog, mirroring
+ * the server's catalogContextLimits join. CLI aliases have no global
+ * denominator: the stats bar uses that session's actual CLI report instead.
+ * Missing limits always render usage-only, without a hardcoded fallback. */
 export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Map<string, number> {
-	return new Map(catalog.models.map((m) => [`${m.provider}:${m.id}`, m.contextWindow]));
+	return new Map(catalog.models.flatMap((m) => m.contextWindow === null ? [] : [[`${m.provider}:${m.id}`, m.contextWindow] as const]));
 }
 
 /**
@@ -99,13 +40,16 @@ export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Ma
  * changing the new-session default. Unpicked reads "—" (the
  * no-factory-fallback language: the UI never presents a default model).
  */
-export function ModelControl({ chatId }: { chatId?: string }) {
+export function ModelControl({ chatId, onModelChange }: { chatId?: string; onModelChange?: (model: string | undefined) => void }) {
 	const { catalog, refresh } = useModelCatalog();
 	const [models, setModels] = useState<ModelsSettings | undefined>();
-	const [session, setSession] = useState<ChatSettings | undefined>();
+	// A successful read with no settings is a legacy session; undefined
+	// means no session record is known yet, not permission to inherit Strong.
+	const [session, setSession] = useState<{ settings?: ChatSettings }>();
 	const [open, setOpen] = useState<"model" | "thinking" | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const interactions = useInteractionLayers();
 
 	// The record read — BOTH mount and the cross-surface signal land
 	// here (fix wave: another surface's models write re-reads into the
@@ -117,8 +61,8 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 	const readRecord = useCallback(() => {
 		if (chatId) {
 			fetch(`/api/chats/${chatId}`)
-				.then((r) => r.json() as Promise<{ settings?: ChatSettings }>)
-				.then((body) => setSession(body.settings))
+				.then((r) => { if (!r.ok) throw new Error(`session read failed: ${r.status}`); return r.json() as Promise<{ settings?: ChatSettings }>; })
+				.then((body) => setSession({ settings: body.settings }))
 				.catch(() => {
 					/* same read-only posture as a models-section failure */
 				});
@@ -139,22 +83,26 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 
 	useSettingsSaved((section) => {
 		if (section === "models") readRecord();
-		if (section === "keys") refresh();
 	});
 
 	// Dual-bound truth: chat mode displays the session's own record,
-	// falling back to the strong slot for legacy unstamped sessions —
-	// EXACTLY what resolveConversationSpec runs. Draft mode is the strong
-	// slot itself.
+	// falling back to Strong only for a successfully read legacy unstamped
+	// session — EXACTLY what resolveConversationSpec runs. An unresolved or
+	// failed record read must not report a provisional global preference as
+	// this session's identity (including to the Send guard). Draft mode is
+	// the strong slot itself.
 	const strong = models?.strong;
 	const override: ChatSettings | undefined = chatId
-		? {
-				model: session?.model ?? strong?.model,
-				thinkingLevel: session?.thinkingLevel ?? strong?.thinkingLevel,
-			}
+		? session ? {
+				model: session.settings?.model ?? strong?.model,
+				thinkingLevel: session.settings?.thinkingLevel ?? strong?.thinkingLevel,
+			} : undefined
 		: strong;
 	const effectiveId = override?.model?.id;
 	const effectiveProvider = override?.model?.provider;
+	useEffect(() => {
+		onModelChange?.(effectiveProvider && effectiveId ? `${effectiveProvider}:${effectiveId}` : undefined);
+	}, [effectiveProvider, effectiveId, onModelChange]);
 	const storedLevel = override?.thinkingLevel;
 	const entry = catalog?.models.find(
 		(m) => m.id === effectiveId && m.provider === effectiveProvider,
@@ -177,27 +125,19 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 	useEffect(() => {
 		if (open === null) return;
 		const onPointerDown = (e: PointerEvent) => {
+			const popup = interactions.getTopLayer();
+			if (popup?.kind !== "popup" || !containerRef.current?.contains(popup.anchorRef?.current ?? null) || !interactions.isElementEligible(popup.rootRef.current)) return;
 			const t = e.target as Element;
 			if (t instanceof Element && t.closest("[data-lh-menu]")) return;
 			if (containerRef.current && !containerRef.current.contains(t)) {
 				setOpen(null);
 			}
 		};
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				// Claim the Esc (keyboard wave A): the window-level chain must
-				// not ALSO stop dictation / abort the turn under this menu.
-				e.stopPropagation();
-				setOpen(null);
-			}
-		};
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
 		};
-	}, [open]);
+	}, [open, interactions]);
 
 	// One write seam: composeSlotModel preserves the cheap/vision siblings
 	// (replace-whole-section discipline) and the per-field independence of
@@ -252,7 +192,7 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 					return;
 				}
 				const stored = (await res.json().catch(() => null)) as { settings?: ChatSettings } | null;
-				setSession(stored?.settings ?? next);
+				setSession({ settings: stored?.settings ?? next });
 				setOpen(null);
 			} catch {
 				setError("Could not reach the server — try again.");
@@ -283,16 +223,18 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 	// tab-focus. Both work from any focus, including mid-typing.
 	useEffect(() => {
 		const onOpenPicker = () => {
+			if (!isInputShortcutScopeEligible(containerRef.current, interactions)) return;
 			setOpen("model");
 			setError(null);
 			refresh(); // mid-session key changes widen the menu (cache fix)
 		};
 		window.addEventListener("lh:kbd-open-model-picker", onOpenPicker);
 		return () => window.removeEventListener("lh:kbd-open-model-picker", onOpenPicker);
-	}, [refresh]);
+	}, [refresh, interactions]);
 
 	useEffect(() => {
 		const onCycleThinking = () => {
+			if (!isInputShortcutScopeEligible(containerRef.current, interactions)) return;
 			if (levels.length === 0) return;
 			const idx = effectiveLevel === undefined ? -1 : levels.indexOf(effectiveLevel);
 			const next = levels[(idx + 1) % levels.length];
@@ -301,7 +243,7 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 		};
 		window.addEventListener("lh:kbd-cycle-thinking", onCycleThinking);
 		return () => window.removeEventListener("lh:kbd-cycle-thinking", onCycleThinking);
-	}, [levels, effectiveLevel, effectiveProvider, effectiveId, apply]);
+	}, [levels, effectiveLevel, effectiveProvider, effectiveId, apply, interactions]);
 
 	// Selecting a model (click and Enter share one path): keep the
 	// thinking level only when the new model supports it — otherwise
@@ -331,27 +273,15 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 	return (
 		<div ref={containerRef} className="relative flex items-center gap-1.5" data-testid="model-control">
 			<Hint
-				// Trimmed (owner, subtlety round 2026-09-25): "Model selector"
-				// — the long sentence was way too much. ⌘K opens this same
-				// menu (registry, override-aware).
-				label="Model selector"
+				label={effectiveId ? `${effectiveProvider ? `${effectiveProvider}:` : ""}${effectiveId}` : "Model selector"}
 				action="open-model-picker"
 				side="bottom"
 			>
-				<button
-				type="button"
-				data-testid="stats-model"
-				onClick={() => openMenu("model")}
-				aria-expanded={open === "model"}
-				// Chrome look (owner, fix wave round 3): matches the graph
-				// view's floating top-right buttons (import notes, gear,
-				// coverage) — blurred, fuller opacity, shadowed — so the
-				// graph no longer bleeds through these pills.
-				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted"
-			>
-				<span className="text-card-foreground">{effectiveId ? prettyModel(effectiveId) : "—"}</span>
-				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
-			</button>
+				<ModelPickerPill
+					data-testid="stats-model"
+					onClick={() => openMenu("model")}
+					aria-expanded={open === "model"}
+				>{effectiveId ? prettyModel(effectiveId) : "—"}</ModelPickerPill>
 			</Hint>
 			<Hint
 				// "Thinking" + its real shortcut via the registry (owner interlude
@@ -361,29 +291,14 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 				action="cycle-thinking"
 				side="bottom"
 			>
-				<button
-				type="button"
-				data-testid="stats-thinking"
-				onClick={() => {
-					// No model picked → nothing to set a level FOR: the click
-					// is a no-op, never an empty menu.
-					if (entry === undefined) return;
-					openMenu("thinking");
-				}}
-				aria-expanded={open === "thinking"}
-				// Chrome look (owner, fix wave round 3): matches the graph
-				// view's floating top-right buttons (import notes, gear,
-				// coverage) — blurred, fuller opacity, shadowed — so the
-				// graph no longer bleeds through these pills.
-				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted"
-			>
-				{/* Just the level — the button reads like the model button reads
-				   the model name (owner, stats-control round 1). */}
-				<span className="text-card-foreground">
-					{effectiveLevel === undefined ? "—" : (THINKING_LABEL[effectiveLevel] ?? effectiveLevel)}
-				</span>
-				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
-			</button>
+				<ModelPickerPill
+					data-testid="stats-thinking"
+					onClick={() => {
+						if (entry === undefined) return;
+						openMenu("thinking");
+					}}
+					aria-expanded={open === "thinking"}
+				>{effectiveLevel === undefined ? "—" : (THINKING_LABEL[effectiveLevel] ?? effectiveLevel)}</ModelPickerPill>
 			</Hint>
 
 			{/* The shared dropdown body (extracted 2026-09-20): the agent
@@ -392,7 +307,7 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 			{open === "model" && (
 				<MenuShell
 					anchorRef={containerRef}
-					testid="model-menu"
+					testid="model-menu" onClose={() => { setOpen(null); return "closed"; }}
 					preferredSide="up"
 					menuClass="flex w-[22rem] flex-col rounded-xl border bg-card p-2 text-xs shadow-xl"
 				>
@@ -416,7 +331,7 @@ export function ModelControl({ chatId }: { chatId?: string }) {
 			{open === "thinking" && (
 				<MenuShell
 					anchorRef={containerRef}
-					testid="thinking-menu"
+					testid="thinking-menu" onClose={() => { setOpen(null); return "closed"; }}
 					preferredSide="up"
 					menuClass="flex w-44 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl"
 				>

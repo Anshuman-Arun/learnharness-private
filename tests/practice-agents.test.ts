@@ -208,14 +208,15 @@ describe("the practice agent", () => {
 		const jobs = { chatId: "c1", jobStore: null as never, spawn: (() => {}) as never, searchAvailable: () => false };
 		const graph = { chatStore: null as never, graphStore: null as never };
 		const tools = practiceTools({ ...ctxOf([]), jobs, graph });
-		// research honestly absent (no search engine live); pdf always; the
-		// prober's two map readers behind the settings gate.
+		// Both jobs remain available keylessly; the prober's two map
+		// readers stay behind their existing settings gate. Practice does
+		// not apply the teacher/prober user tool-toggle filter.
 		assert.deepEqual(
 			Object.keys(tools).sort(),
-			["conclude", "find", "grep", "list_learning_concepts", "list_propositions", "list_sessions", "ls", "pdf", "problem", "read"],
+			["conclude", "find", "grep", "list_propositions", "list_sessions", "ls", "pdf", "problem", "read", "research"],
 		);
 		const withSearch = practiceTools({ ...ctxOf([]), jobs: { ...jobs, searchAvailable: () => true }, graph });
-		assert.ok(withSearch.research, "a live engine adds research");
+		assert.ok(withSearch.research, "a live engine also keeps research");
 	});
 
 	it("constructs with exactly the two practice tools", () => {
@@ -372,13 +373,38 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		assert.match(teacher, /nothing to rush/, "the goal reiteration composes");
 	});
 
-	it("the prober doctrine steers difficulty by evidence (owner round, 2026-10-07)", () => {
+	it("the prober brackets the learner's edge without a rigid question sequence or forced miss", () => {
 		const prober = composeInstructions("prober");
-		assert.match(prober, /Enter near the top, not the bottom/);
-		assert.match(prober, /Strands inform each other/);
-		assert.match(prober, /never descending into already-bracketed territory/);
-		// the confidence + thinking signals are wired into question selection
-		assert.match(prober, /the verdict, his confidence, and his thinking field together set where the next question should sit/);
+		assert.match(prober, /A single question can reveal several strands/);
+		assert.match(prober, /the available quizzing tool to measure understanding/);
+		assert.match(prober, /A topic request tells you what the learner wants to learn, not what they already understand/);
+		assert.doesNotMatch(prober, /`probe` or `recall`|The available format is not a reason to skip probing/);
+		assert.match(prober, /reasoning is your primary evidence, whether it comes in a thinking field or in the answer text/);
+		assert.match(prober, /Prefer a short set of meaningful multiple-choice options/);
+		assert.match(prober, /Use the logic of binary search/);
+		assert.match(prober, /a well-reasoned answer can justify a big jump in difficulty/i);
+		assert.match(prober, /Go deeper when the distinction would change the lesson/);
+		assert.match(prober, /Don't present an untested boundary as a finding/);
+		assert.doesNotMatch(prober, /Binary-search every strand|escalate until it does/);
+	});
+
+	it("prober and teacher read reasoning from either channel and treat confidence as a clue", () => {
+		for (const phase of ["prober", "teacher"] as const) {
+			const prompt = composeInstructions(phase);
+			assert.match(prompt, /Free recall and free-form questions carry it in the answer text/);
+			assert.match(prompt, /A confident correct pick alone doesn't establish a floor/);
+			assert.match(prompt, /In teaching, repair a failed check before building on that step/);
+			assert.doesNotMatch(prompt, /solid knowledge — move on/);
+		}
+	});
+
+	it("blocking question guidance composes for prober and teacher without changing practice", () => {
+		for (const phase of ["prober", "teacher"] as const) {
+			const prompt = composeInstructions(phase);
+			assert.match(prompt, /Use each answer to decide what to ask next/);
+			assert.doesNotMatch(prompt, /wait for the answer|ask, then end your turn|one question per turn/i);
+		}
+		assert.doesNotMatch(composeInstructions("practice"), /Use each answer to decide what to ask next/);
 	});
 
 	it("the SHARED formatting guide composes (owner, 2026-10-04 late): LaTeX delimiters in every setting", () => {

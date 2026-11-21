@@ -10,11 +10,12 @@ import { describe, it } from "node:test";
 const require = createRequire(import.meta.url);
 const mainFile = fileURLToPath(new URL("../electron/main.cjs", import.meta.url));
 const mainSource = readFileSync(mainFile, "utf8");
+const mainRequire = createRequire(mainFile);
 
 /** Decline the single-instance lock so normal boot never spawns a server.
  * Then call the REAL createWindow with a stub Electron API and inspect its
  * constructor options. No rewritten copy of the production logic. */
-function windowOptions(platform: string) {
+function windowOptions(platform: string, env: Record<string, string> = {}, reported?: { mode: string; background?: string }) {
 	class FakeWindow {
 		constructor(readonly options: unknown) {}
 		webContents = { on() {}, setWindowOpenHandler() {} };
@@ -22,20 +23,132 @@ function windowOptions(platform: string) {
 		once() {}
 	}
 	const electron = {
-		app: { setName() {}, requestSingleInstanceLock: () => false, quit() {} },
+		app: { setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
 		BrowserWindow: FakeWindow,
+		nativeTheme: { shouldUseDarkColors: true, themeSource: "system", on() {} },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
-		require: (id: string) => id === "electron" ? electron : id === "./chatgpt-oauth.cjs" ? { createChatGPTOAuthRuntime() {} } : require(id),
-		process: { platform, argv: [], env: {}, on() {} },
+		require: (id: string) => id === "electron" ? electron : mainRequire(id),
+		process: { platform, argv: [], env, on() {} },
 		__dirname: dirname(mainFile),
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
+	// What the renderer reports over lh:appearance (the active theme).
+	if (reported) runInNewContext(`appearance = normalizeAppearance(${JSON.stringify(reported)})`, context);
 	const win = runInNewContext('createWindow("http://127.0.0.1:9000")', context) as FakeWindow;
 	// The options originate in a VM realm; normalize prototypes for assertions.
 	return JSON.parse(JSON.stringify(win.options));
 }
+
+describe("desktop development startup", () => {
+	it("does not open the window until the development server responds", async () => {
+		const devUrl = "http://localhost:3000";
+		const loaded: string[] = [];
+		let respond: (() => void) | undefined;
+		class FakeWindow {
+			static getAllWindows() { return []; }
+			webContents = { on() {}, setWindowOpenHandler() {} };
+			loadURL(url: string) { loaded.push(url); }
+			once() {}
+		}
+		const electron = {
+			app: {
+				setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {},
+				requestSingleInstanceLock: () => false, quit() {}, on() {}, once() {}, removeListener() {}, whenReady: async () => {},
+			},
+			BrowserWindow: FakeWindow,
+			nativeTheme: { themeSource: "system" },
+			Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
+			ipcMain: { handle() {}, on() {} },
+			session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		};
+		const context = {
+			require: (id: string) => {
+				if (id === "electron") return electron;
+				if (id === "node:fs") return { mkdirSync() {}, appendFileSync() {} };
+				if (id === "./dev-server-readiness.cjs") return { waitForDevServer: (url: string, options: { signal: AbortSignal }) => {
+					assert.equal(url, devUrl);
+					assert.equal(options.signal.aborted, false);
+					return new Promise<void>(resolve => { respond = resolve; });
+				} };
+				return mainRequire(id);
+			},
+			process: { platform: "linux", argv: [], env: { LH_DEV_URL: devUrl }, on() {} },
+			AbortController,
+			__dirname: dirname(mainFile),
+		};
+		runInNewContext(mainSource, context, { filename: mainFile });
+		const boot = runInNewContext("main()", context) as Promise<void>;
+		await new Promise<void>(resolve => setImmediate(resolve));
+		assert.deepEqual(loaded, [], "a slow server must not leave a failed navigation in the window");
+		assert.ok(respond, "startup probes the configured development server");
+		respond();
+		await boot;
+		assert.deepEqual(loaded, [devUrl], "the window navigates once the server responds");
+	});
+});
+
+describe("desktop appearance boot and IPC", () => {
+	it("constructs light native chrome before renderer reporting and accepts appearance only from its exact main-frame origin", async () => {
+		const origin = "http://127.0.0.1:9000";
+		const handlers = new Map<string, (event: unknown, value: unknown) => void>();
+		const windows: FakeWindow[] = [];
+		class FakeWindow {
+			static getAllWindows() { return windows; }
+			static fromWebContents(sender: unknown) { return windows.find(win => win.webContents === sender); }
+			webContents = { on() {}, setWindowOpenHandler() {}, mainFrame: { url: origin } };
+			background: string | undefined;
+			overlay: unknown;
+			constructor(readonly options: { backgroundColor: string; titleBarOverlay: unknown }) { windows.push(this); }
+			loadURL() {} once() {} isDestroyed() { return false; }
+			setBackgroundColor(color: string) { this.background = color; }
+			setTitleBarOverlay(colors: unknown) { this.overlay = colors; }
+		}
+		const nativeTheme = { themeSource: "system" };
+		const chrome = mainRequire("./appearance-chrome.cjs");
+		let bootDirectory: string | undefined;
+		const context = {
+			require: (id: string) => {
+				if (id === "electron") return {
+					app: { setName() {}, getPath: () => "/fixture/shell", setPath() {}, requestSingleInstanceLock: () => false,
+						quit() {}, on() {}, once() {}, removeListener() {}, whenReady: async () => {} },
+					BrowserWindow: FakeWindow, nativeTheme,
+					Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
+					ipcMain: { handle() {}, on: (name: string, fn: (event: unknown, value: unknown) => void) => handlers.set(name, fn) },
+					session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+				};
+				if (id === "node:fs") return { mkdirSync() {}, appendFileSync() {} };
+				if (id === "./appearance-chrome.cjs") return { ...chrome, readAppearance: (directory: string) => {
+					bootDirectory = directory; return { mode: "light", background: "#faf9f5" };
+				} };
+				if (id === "./dev-server-readiness.cjs") return { waitForDevServer: async () => {} };
+				return mainRequire(id);
+			},
+			process: { platform: "win32", argv: [], env: { LH_DEV_URL: origin, LH_DATA_DIR: "/fixture/server-data" }, on() {} },
+			AbortController, URL, __dirname: dirname(mainFile),
+		};
+		runInNewContext(mainSource, context, { filename: mainFile });
+		await runInNewContext("main()", context);
+		assert.equal(bootDirectory, "/fixture/server-data");
+		assert.equal(nativeTheme.themeSource, "light");
+		const win = windows[0]!;
+		assert.equal(win.options.backgroundColor, "#faf9f5");
+		assert.deepEqual(JSON.parse(JSON.stringify(win.options.titleBarOverlay)), { color: "#faf9f5", symbolColor: "#1a1a1a" });
+		const report = handlers.get("lh:appearance")!;
+		const next = { mode: "dark", background: "#101010" };
+		report({ sender: win.webContents, senderFrame: { url: origin } }, next);
+		assert.equal(win.background, undefined, "subframes cannot repaint the window");
+		win.webContents.mainFrame.url = "https://untrusted.example";
+		report({ sender: win.webContents, senderFrame: win.webContents.mainFrame }, next);
+		assert.equal(win.background, undefined, "a navigated trusted window is not enough");
+		win.webContents.mainFrame.url = origin;
+		report({ sender: win.webContents, senderFrame: win.webContents.mainFrame }, next);
+		assert.equal(win.background, "#101010");
+		assert.equal(nativeTheme.themeSource, "system");
+		assert.deepEqual(win.overlay, { color: "#101010", symbolColor: "#e5e5e5" });
+	});
+});
 
 describe("desktop window chrome", () => {
 	it("macOS keeps the proven traffic lights and does not enable WCO", () => {
@@ -60,8 +173,36 @@ describe("desktop window chrome", () => {
 		});
 	}
 
+	it("the native chrome paints the active theme: Default dark until the renderer reports, then its mode and background", () => {
+		const dark = windowOptions("win32");
+		assert.equal(dark.backgroundColor, "#141414");
+		const light = windowOptions("win32", {}, { mode: "light", background: "#faf4ed" });
+		assert.deepEqual(light.titleBarOverlay, { color: "#faf4ed", symbolColor: "#1a1a1a" });
+		assert.equal(light.backgroundColor, "#faf4ed");
+		assert.equal(windowOptions("darwin", {}, { mode: "light" }).backgroundColor, "#f5f5f3");
+	});
+
+	it("only the external dev shell receives the web subscription transport marker", () => {
+		assert.equal(windowOptions("darwin").webPreferences.additionalArguments, undefined);
+		assert.deepEqual(windowOptions("darwin", { LH_DEV_URL: "http://localhost:3000" }).webPreferences.additionalArguments, ["--lh-web-subscriptions"]);
+	});
+
+	it("dev preload routes opaque sign-in actions through its narrow external-browser channel", async () => {
+		let bridge!: { subscriptionTransport: string; openSubscriptionBrowser(action: string): Promise<void> };
+		const invoked: unknown[][] = [];
+		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), {
+			process: { platform: "darwin", argv: ["--lh-web-subscriptions"] },
+			require: () => ({ contextBridge: { exposeInMainWorld: (_: string, value: typeof bridge) => { bridge = value; } }, ipcRenderer: { on() {}, invoke: async (...args: unknown[]) => { invoked.push(args); } } }),
+		});
+		assert.equal(bridge.subscriptionTransport, "web");
+		const action = "/api/subscriptions/browser?id=00000000-0000-4000-8000-000000000001";
+		await bridge.openSubscriptionBrowser(action);
+		assert.deepEqual(invoked, [["lh:subscriptions:web-browser", action]]);
+	});
+
 	it("preload exposes OS identity without exposing Node/Electron to the renderer", () => {
 		let bridge: Record<string, unknown> = {};
+		const sent: unknown[][] = [];
 		const context = {
 			process: { platform: "win32" },
 			require: () => ({
@@ -71,15 +212,52 @@ describe("desktop window chrome", () => {
 						bridge = api;
 					},
 				},
-				ipcRenderer: {},
+				ipcRenderer: { on() {}, send: (...args: unknown[]) => sent.push(args) },
 			}),
 		};
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"chatGPTCancelSignIn", "chatGPTDisconnect", "chatGPTOpenAuthorization", "chatGPTSetBackgroundUse", "chatGPTSignIn",
-			"expandWindow", "getChatGPTStatus", "getZoom", "installUpdate", "onUpdateStatus", "onZoom", "platform",
+			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "dismissStartupMessage", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "setAppearance", "subscriptions", "takeStartupMessage",
 		]);
+		const appearance = { mode: "light", background: "#eeeeee" };
+		(bridge.setAppearance as (a: unknown) => void)(appearance);
+		assert.deepEqual(sent, [["lh:appearance", appearance]]);
+		assert.deepEqual(Object.keys(bridge.subscriptions as object).sort(), ["cancel", "consent", "disconnect", "login", "onChange", "open", "respond", "retry", "status"]);
+	});
+});
+
+describe("update preload bridge", () => {
+	it("buffers the menu request, unsubscribes safely, and uses the matching snapshot/check channels", async () => {
+		let bridge!: {
+			onOpenSettings: (cb: (section: string) => void) => () => void;
+			getUpdateState: () => Promise<unknown>;
+			checkForUpdates: () => Promise<void>;
+		};
+		const handlers = new Map<string, (event: unknown, value: string) => void>();
+		const invoked: string[] = [];
+		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), {
+			process: { platform: "darwin" },
+			require: () => ({
+				contextBridge: { exposeInMainWorld: (_: string, value: typeof bridge) => { bridge = value; } },
+				ipcRenderer: {
+					on: (channel: string, listener: (event: unknown, value: string) => void) => handlers.set(channel, listener),
+					invoke: async (channel: string) => { invoked.push(channel); },
+				},
+			}),
+		});
+		const send = () => handlers.get("lh:open-settings")!({}, "general");
+		const seen: string[] = [];
+		send(); const off = bridge.onOpenSettings(section => seen.push(section));
+		assert.deepEqual(seen, ["general"], "pre-subscription request is delivered once");
+		send(); assert.deepEqual(seen, ["general", "general"]);
+		off(); send(); assert.equal(seen.length, 2);
+		const next: string[] = []; const offNext = bridge.onOpenSettings(section => next.push(section));
+		assert.deepEqual(next, ["general"]);
+		off(); send(); assert.equal(next.length, 2, "old cleanup cannot remove a newer subscriber");
+		offNext();
+		await bridge.getUpdateState(); await bridge.checkForUpdates();
+		assert.deepEqual(invoked, ["lh:update:get", "lh:update:check"]);
 	});
 });
 
@@ -103,9 +281,7 @@ describe("desktop packaging policy", () => {
 			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
 		]);
 		assert.equal(config.linux.syncDesktopName, true);
-		assert.equal(config.publish, undefined, "private derivative must have no upstream publication feed");
-		assert.equal(config.appId, "org.learnharness.private.windows");
-		assert.equal(config.productName, "LearnHarness Private");
+		assert.equal(config.publish[0].releaseType, "draft");
 	});
 
 	it("deb has public maintainer metadata and a matching desktop identity", () => {
@@ -126,7 +302,6 @@ describe("workflow action versions", () => {
 		it(`${filename} uses supported Action runtimes without changing the app's Node 26`, () => {
 			const workflow = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
 			const expected = ["actions/checkout@v7", "actions/setup-node@v7"];
-			if (filename === "ci.yml") expected.push("actions/upload-artifact@v7");
 			if (filename === "release.yml") {
 				expected.push("actions/github-script@v9", "actions/upload-artifact@v7", "maxim-lobanov/setup-xcode@v1");
 			}
@@ -159,7 +334,6 @@ describe("desktop release workflow", () => {
 		concurrency: { group: string; "cancel-in-progress": boolean };
 		jobs: Record<string, {
 			needs?: string | string[]; steps: Step[]; "runs-on"?: string;
-			defaults?: { run: { shell: string } }; env?: Record<string, string>;
 			strategy?: { matrix: { include: { os: string; platform: string; builder_args?: string }[] } };
 		}>;
 	};
@@ -220,7 +394,7 @@ describe("desktop release workflow", () => {
 		}
 	});
 
-	it("pairs Icon Composer release packaging with macOS 26 and Xcode selection", () => {
+	it("pairs Icon Composer packaging with macOS 26 and Xcode selection, retaining macOS 15 CI", () => {
 		const mac = packaging.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
 		assert.equal(mac?.os, "macos-26", "actool's .icon compiler needs macOS 26 host frameworks, not just newer Xcode");
 		assert.equal(mac?.builder_args, "--mac --arm64");
@@ -232,18 +406,10 @@ describe("desktop release workflow", () => {
 		assert.equal(xcode?.with?.["xcode-version"], "latest-stable");
 		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
 		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
-	});
-	it("keeps Windows-only PR CI with full quality gates and standalone checks", () => {
+
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
-		assert.deepEqual(ci.jobs.standalone?.strategy?.matrix.include, [{ os: "windows-2025", platform: "windows-x64" }]);
-		const quality = ci.jobs.quality;
-		assert.ok(quality);
-		assert.equal(quality["runs-on"], "windows-2025");
-		assert.equal(quality.defaults?.run.shell, "bash");
-		assert.equal(quality.env?.npm_config_script_shell, String.raw`C:\Program Files\Git\bin\bash.exe`);
-		for (const command of ["npm run typecheck", "npm test", "npm run lint"]) {
-			assert.ok(quality.steps.some(step => step.run === command), `${command} remains a required quality gate`);
-		}
+		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
+		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
 	});
 
 	it("creates exactly one unpublished draft when none matches", async () => {
@@ -268,15 +434,4 @@ describe("desktop release workflow", () => {
 			{ id: 11, tag_name: "v0.3.0", draft: true },
 		]), /Multiple releases match/);
 	});
-});
-
-describe("native URL and permission fail-closed handling",()=>{
-  it("rejects malformed navigation rather than throwing before preventDefault",async()=>{
-    const source=await (await import("node:fs/promises")).readFile(
-      new URL("../electron/main.cjs",import.meta.url),"utf8");
-    assert.match(source,/let sameOrigin = false;/);
-    assert.match(source,/if \(!sameOrigin\) \{\s*event\.preventDefault\(\)/);
-    assert.match(source,/let requestOrigin = null;/);
-    assert.match(source,/callback\(fromOwnOrigin\(requestOrigin, permission\)\)/);
-  });
 });

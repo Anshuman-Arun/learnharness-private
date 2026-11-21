@@ -3,6 +3,9 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import type { JobRecord } from "../../core/contracts.ts";
 import type { JobStore } from "../../core/ports.ts";
+import { checkLearnerImage } from "./learner-image.ts";
+import { checkPdfPage } from "./pdf-figure.ts";
+import { resolveSourcePath } from "./fs-shared.ts";
 
 /**
  * Async sub-agent job tools (vision §2.5; W2/W6 kinds + the pi-model
@@ -23,11 +26,9 @@ export interface JobToolContext {
 	 *  input rides along because the spawn happens MID-STREAM, before
 	 *  onFinish persists the tool part — a transcript scan would race it. */
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
-	/** Search availability (search port wave, 2026-09-20): the honest
-	 *  disable signal for the research dispatch tool — no live engine
-	 *  means NO research tool in the registry (owner decision: registry-
-	 *  level drop, no doomed dispatch, no silent fallback). Absent =
-	 *  available (tests + any seam without search wiring). */
+	/** Search-provider availability, retained for existing composition seams.
+	 *  Research dispatch does not depend on it: web_fetch is keyless and
+	 *  web_search reports a missing provider as a recoverable tool result. */
 	searchAvailable?: () => boolean;
 }
 
@@ -55,8 +56,29 @@ export const visualInputSchema = Type.Object({
 	brief: Type.String({
 		description:
 			"Precise brief for ONE static figure: exactly what it must show — coordinates, labels, proportions, orientation. " +
-			"The maker sees NOTHING else of the lesson; a wrong or vague brief produces a wrong figure.",
+			"The maker sees NOTHING else of the lesson; a wrong or vague brief produces a wrong figure. " +
+			"With an image: which features to mark and what each label says.",
 	}),
+	image: Type.Optional(
+		Type.String({
+			description:
+				"Path to one of the learner's image files (jpg, png, gif, webp, bmp) to annotate — the maker draws on top of it " +
+				"instead of drawing from scratch.",
+		}),
+	),
+	pdf: Type.Optional(
+		Type.Object(
+			{
+				path: Type.String({ minLength: 1, description: "Path to the learner's PDF (relative or absolute), exactly as they gave it." }),
+				page: Type.Integer({ minimum: 1, description: "The 1-based page that holds the figure." }),
+			},
+			{
+				description:
+					"A figure on one page of the learner's PDF (lecture slides, a textbook chapter) to annotate — the maker crops it from " +
+					"that page and draws on the crop. Never together with image.",
+			},
+		),
+	),
 });
 
 export const pdfInputSchema = Type.Object({
@@ -80,7 +102,7 @@ function dispatch(
 	input: ResearchInput | DemoInput | VisualInput | PdfInput,
 ): string {
 	const existing = ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId);
-	const job = existing ?? ctx.jobStore.createJob({ kind, chatId: ctx.chatId, toolCallId });
+	const job = existing ?? ctx.jobStore.createJob({ kind, chatId: ctx.chatId, toolCallId, input });
 	if (!existing) ctx.spawn(job, input);
 	return `Dispatched (job ${job.id}). ${ack}`;
 }
@@ -113,6 +135,10 @@ const VISUAL_DESCRIPTION =
 	"Dispatch a background sub-agent that hand-authors ONE precise SVG figure, renders it, LOOKS at the render, and iterates " +
 	"until correct. Use it for exact spatial pictures auto-layout diagrams can't do: coordinate geometry, number lines, vectors, " +
 	"function plots, physical layouts. For flows/relations/taxonomies write mermaid inline instead. " +
+	"Pass `image` (a learner image file) to have the maker annotate that picture — arrows, outlines, labels — instead. " +
+	"Pass `pdf` ({ path, page }) to annotate a figure on one page of a learner's PDF: the maker crops it from that page itself; " +
+	"name the exact page and describe the figure in the brief so the maker can find it. " +
+	"Local image and PDF paths follow File access settings; use ls to discover allowed folders. " +
 	"The call is ASYNC and fire-and-forget — it resolves immediately and your turn continues; the verified figure arrives later " +
 	"as a new message.";
 const PDF_DESCRIPTION =
@@ -120,32 +146,27 @@ const PDF_DESCRIPTION =
 	"reading for equations and diagrams) and returns a brief with page citations. Use it when the learner gives you a PDF path " +
 	"and you need its CONTENT for the lesson. The call is ASYNC and fire-and-forget — it resolves immediately and your turn " +
 	"continues; the brief arrives later as a new message. For quick looks at plain text or image files, use the read tool " +
-	"directly instead of dispatching.";
+	"directly instead of dispatching. Local PDF paths follow File access settings; use ls to discover allowed folders.";
 
 /**
  * Per-request job tool registry: each tool closes over the composition root's
  * context (chatId + jobStore + the spawn seam), so concurrent chats never
  * share state. chat-handler wires it each turn; tests wire their own.
  *
- * The research tool drops from the registry when ctx.searchAvailable reports
- * no live engine (2026-09-20) — the teacher never sees it, so a keyless
- * server can't dispatch doomed research jobs. Jobs ALREADY in flight when
- * a key disappears still run to their honest failure (runner backstop).
+ * Research remains available without a search-provider key; the role's
+ * existing user-toggle filtering still applies outside this registry.
  */
 export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
-	const searchOn = ctx.searchAvailable?.() ?? true;
 	return {
-		...(searchOn && {
-			research: {
-				name: "research",
-				label: "research",
-				description: RESEARCH_DESCRIPTION,
-				parameters: researchInputSchema,
-				execute: serverExecute("research", researchInputSchema, (input, { toolCallId }) =>
-					dispatch(ctx, "research", toolCallId, RESEARCH_ACK, input),
-				),
-			},
-		}),
+		research: {
+			name: "research",
+			label: "research",
+			description: RESEARCH_DESCRIPTION,
+			parameters: researchInputSchema,
+			execute: serverExecute("research", researchInputSchema, (input, { toolCallId }) =>
+				dispatch(ctx, "research", toolCallId, RESEARCH_ACK, input),
+			),
+		},
 		demo: {
 			name: "demo",
 			label: "demo",
@@ -158,16 +179,29 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			label: "visual",
 			description: VISUAL_DESCRIPTION,
 			parameters: visualInputSchema,
-			execute: serverExecute("visual", visualInputSchema, (input, { toolCallId }) =>
-				dispatch(ctx, "visual", toolCallId, VISUAL_ACK, input),
-			),
+			// An unusable image path, PDF or page fails the CALL (no job is
+			// created), so the teacher corrects it in the same turn.
+			execute: serverExecute("visual", visualInputSchema, async (input, { toolCallId, signal }) => {
+				if (!ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId)) {
+					if (input.image !== undefined && input.pdf !== undefined) throw new Error("Pass either image or pdf, not both.");
+					if (input.image !== undefined) await checkLearnerImage(input.image);
+					if (input.pdf !== undefined) await checkPdfPage(input.pdf.path, input.pdf.page, signal);
+				}
+				signal?.throwIfAborted();
+				return dispatch(ctx, "visual", toolCallId, VISUAL_ACK, input);
+			}),
 		},
 		pdf: {
 			name: "pdf",
 			label: "pdf",
 			description: PDF_DESCRIPTION,
 			parameters: pdfInputSchema,
-			execute: serverExecute("pdf", pdfInputSchema, (input, { toolCallId }) => dispatch(ctx, "pdf", toolCallId, PDF_ACK, input)),
+			execute: serverExecute("pdf", pdfInputSchema, (input, { toolCallId }) => {
+				// Admission uses the current boundary; the queued reader checks
+				// again at job start. Preserve raw args/history and replay IDs.
+				if (!ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId)) resolveSourcePath(input.path);
+				return dispatch(ctx, "pdf", toolCallId, PDF_ACK, input);
+			}),
 		},
 	};
 }

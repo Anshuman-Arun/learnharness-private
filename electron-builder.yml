@@ -9,8 +9,8 @@
 #   - signed + notarized since 2026-10-08 (Developer ID Application cert in
 #     the login keychain; notary credentials in the LH_NOTARY keychain
 #     profile; the profile + team env vars are baked into desktop:dist).
-appId: org.learnharness.private.windows
-productName: LearnHarness Private
+appId: com.learnharness.LearnHarness
+productName: LearnHarness
 directories:
   output: dist
 # Icons (owner ruling, 2026-10-13) — per-platform sources in build/:
@@ -81,10 +81,12 @@ files:
   - node_modules/universalify/**/*
   - node_modules/ms/**/*
   - node_modules/argparse/**/*
-  # Sign in with ChatGPT: OIDC ID-token signature/claim verification in the
-  # trusted Electron process. jose has no runtime dependencies.
+  # Main-process ID-token signature verification (no bundled OAuth implementation).
   - node_modules/jose/**/*
 extraResources:
+  # Attribution/license for the bounded local Pi cutoff-selector port.
+  - from: docs/compaction-accounting.md
+    to: licenses/pi-compaction.md
   # Copy from the PARENT dir (.next), not .next/standalone itself:
   # electron-builder hard-excludes a copy's root node_modules and the
   # default no-filter pattern is a literal path match (empirically both
@@ -98,6 +100,11 @@ extraResources:
     filter:
       - "standalone/**/*"
 mac:
+  # The backend's --require runs before Next loads. Keep this resource
+  # outside app.asar so early Node-mode loading needs no ASAR support.
+  extraResources:
+    - from: electron/server-title-guard.cjs
+      to: server-title-guard.cjs
   icon: build/icon.icon
   # zip rides next to dmg (flipped 2026-10-08): Squirrel.Mac — Electron's
   # macOS auto-updater — installs from ZIP and cannot read DMGs. DMG is
@@ -173,4 +180,15 @@ linux:
   syncDesktopName: true
   # Both targets update via electron-updater 6.8.9. AppImage replaces its
   # own file; deb uses dpkg/apt and may request administrator permission.
-# Deliberately no publish feed. Private builds never subscribe to upstream updates.
+publish:
+  # Update feed = GitHub Releases (decided 2026-10-08): latest-mac.yml +
+  # zip/blockmap live on releases; electron-updater reads them anonymously.
+  # REQUIRES THE REPO TO BE PUBLIC before 0.3.0 ships — anonymous downloads
+  # from a private repo are impossible, and a token baked into the app
+  # would be a leak. desktop:dist passes no --publish flag, so builds never
+  # upload; publishing happens at release time (GH_TOKEN + --publish).
+  - provider: github
+    owner: amosblomqvist
+    repo: learnharness
+    # All three CI jobs contribute assets; only the owner publishes it.
+    releaseType: draft

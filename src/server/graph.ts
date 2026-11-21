@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import { buildGlobalLearningGraph } from "../core/global-learning.ts";
 import { LEDGER_FILES, POSITIONS_FILE } from "../../config.ts";
 import type { GraphSnapshot } from "../core/contracts.ts";
 import type { GraphCostSummary } from "../core/cost-summary.ts";
@@ -12,6 +11,7 @@ import {
 } from "../core/graph-deletion.ts";
 import { extractionStatuses } from "../agent/subagents/extraction.ts";
 import { stores } from "./stores.ts";
+import { callCost } from "./pricing.ts";
 
 /**
  * Server-side graph entry for the home view (GET /api/graph). A PURE READ:
@@ -20,7 +20,9 @@ import { stores } from "./stores.ts";
  * reflects whatever the pipeline has merged so far.
  */
 export function graphView(): GraphSnapshot {
-	return graphSnapshot(stores);
+	const organization = stores.sourceOrganizationStore.read();
+	const names = Object.fromEntries(Object.entries(organization.placements).flatMap(([id, p]) => p.name === undefined ? [] : [[id, p.name]]));
+	return graphSnapshot(stores, names);
 }
 
 /** The graph view's cost surface (GET /api/graph/costs — the 2026-09 cost
@@ -42,7 +44,7 @@ export function graphCosts(): GraphCostSummary {
 		.readSources()
 		.filter((s) => s.extractions?.length)
 		.map((s) => ({ filePath: s.filePath, extractions: s.extractions! }));
-	return graphCostSummary({ chats, sources });
+	return graphCostSummary({ chats, sources }, callCost);
 }
 
 /** The graph's version stamp (session-deletion wave 6): the max mtime
@@ -119,11 +121,3 @@ export function deleteGraphNode(nodeId: string): NodeDeleteOutcome {
 	return { ok: true, stats, graphRevision: graphRevision() };
 }
 
-
-/** Compose the cumulative lesson-objective DAG from persisted sessions. */
-export function globalLearningView() {
-	const records = stores.chatStore.listChats().map(s => stores.chatStore.getChat(s.id)).filter(
-		(r): r is NonNullable<typeof r> => r !== null,
-	);
-	return buildGlobalLearningGraph(records);
-}

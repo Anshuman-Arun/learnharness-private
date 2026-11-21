@@ -14,7 +14,7 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { describe, it } from "node:test";
 
 import { PracticeDock } from "../components/practice-dock.tsx";
@@ -46,7 +46,7 @@ describe("PracticeDock", () => {
 				input={{ statement: "Show that the sum is even." }}
 				expanded={true}
 				onExpand={() => {}}
-				onSubmit={async () => true}
+				onSubmit={() => {}}
 			/>,
 		);
 		assert.match(html, /Show that the sum is even\./);
@@ -70,7 +70,7 @@ describe("PracticeDock", () => {
 				input={{ statement: "Show that the sum is even." }}
 				expanded={false}
 				onExpand={() => {}}
-				onSubmit={async () => true}
+				onSubmit={() => {}}
 			/>,
 		);
 		assert.match(html, /data-testid="practice-dock-bar"/);

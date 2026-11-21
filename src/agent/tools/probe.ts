@@ -1,7 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { probeDoneInputSchema, PROBE_DONE_ACK_TEXT } from "../../core/contracts.ts";
-import { danglingQuestionOf, hasProbeDone, type LhMessage } from "../../core/native-messages.ts";
+import { hasUnresolvedQuestion, hasProbeDone, type LhMessage } from "../../core/native-messages.ts";
 import type { ChatStore } from "../../core/ports.ts";
 import { buildProbeHandoffSteer, type SteerMessage } from "../../core/contracts.ts";
 
@@ -23,7 +23,7 @@ function probeConcluded(messages: readonly LhMessage[]): boolean {
 }
 
 /**
- * probe_done — the probe→planning seam (docs/probe-teach-split.md §2).
+ * probe_done — the probe→planning seam (docs/archive/probe-teach-split.md §2).
  *
  * SERVER-SIDE. The prober concludes the probe by authoring the learner
  * assessment (the tool INPUT — it streams to the learner live and is
@@ -42,8 +42,9 @@ function probeConcluded(messages: readonly LhMessage[]): boolean {
  *     live), so the agent sees the fixed PROBE_DONE_ACK_TEXT — never an
  *     echo. details = {ok:true} only.
  *
- * The first probe_done in the transcript is also the construction seam:
- * from that message on, every request builds the TEACHER agent.
+ * The first concluded probe_done (non-failed call plus matching successful
+ * result) is also the construction seam: from that result on, every request
+ * builds the TEACHER agent. Bare calls and refused results keep probing.
  */
 export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<any>> {
 	return {
@@ -51,12 +52,13 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 			name: "probe_done",
 			label: "probe_done",
 			description:
-				"Conclude the probing phase and hand off to the teaching phase. Call this ONCE, when the probe is " +
-				"complete: every strand the lesson depends on is bracketed (a floor he reliably gets right AND a " +
-				"ceiling where it runs out), and his learning goal is concrete. The input IS the learner assessment — " +
-				"one strand per dependency the lesson will rest on, with your read of where his edge sits on it " +
-				"(floor, ceiling, misconceptions, what to build from). It streams to the learner live and becomes " +
-				"the handoff artifact the teacher plans from. Refused while a question is still open, and after " +
+				"Conclude the probing phase and hand off to the teaching phase. Call this ONCE, when the learner's " +
+				"goal is clear and the evidence about their understanding is sufficient to choose a starting point and " +
+				"plan a path. A topic request alone isn't that evidence. The input IS the learner assessment: for the " +
+				"strands the lesson depends on, report what the learner can reason from, how they connect the ideas, " +
+				"where their reasoning ran out, and what still needs checking. Report bounds supported by the evidence; " +
+				"don't force a miss once the learner has demonstrated what the lesson needs. The assessment streams to the learner live and " +
+				"becomes the handoff artifact the teacher plans from. Refused while a question is still open, and after " +
 				"the probe is already concluded. After it succeeds, say your closing sentence and end your turn.",
 			// The core-owned schema (contracts/probe.ts) — the SAME schema the UI
 			// parse seam (tool-parts.ts) runs, so boundary-valid ⇔ consumer-parseable.
@@ -65,7 +67,7 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 				const record = ctx.chatStore.getChat(ctx.chatId);
 				if (!record) return { ok: false, error: `Chat not found: ${ctx.chatId}` };
 
-				if (danglingQuestionOf(record.messages) !== null) {
+				if (hasUnresolvedQuestion(record.messages)) {
 					return {
 						ok: false,
 						error:

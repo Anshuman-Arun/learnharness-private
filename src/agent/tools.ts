@@ -1,11 +1,10 @@
 import { Type } from "typebox";
-import { buildGlobalLearningGraph } from "../core/global-learning.ts";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { invalidInputResult, questionResult, serverExecute } from "./tool-execute.ts";
 import {
 	askInputSchema,
 	askOptionProblems,
-	probeExplainInputSchema,
+	explainInputBase,
 	explainInputObject,
 	explainInputProblems,
 	parseOptionsIfString,
@@ -24,6 +23,7 @@ import { readTool } from "./tools/read.ts";
 import { lsTool } from "./tools/ls.ts";
 import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
+import { createShowImageTool } from "./tools/show-image.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import type { GraphStore } from "../core/ports.ts";
 
@@ -31,7 +31,7 @@ export { jobTools };
 export type { ProbeDoneContext } from "./tools/probe.ts";
 
 /**
- * The agent-split tool composition (docs/probe-teach-split.md §1): the
+ * The agent-split tool composition (docs/archive/probe-teach-split.md §1): the
  * PROBER and the TEACHER are different agents with different tool sets.
  * The question tools share a NAME but are genuinely DIFFERENT tools —
  * the prober's quiz has NO nodeId field at all (its declaration is built
@@ -77,14 +77,15 @@ function prepareQuestionArguments<T extends object>(args: unknown): T {
 	return args as T;
 }
 
+const optionLetterDescription = "When single-select options are lettered, the result’s `optionOrder` maps each displayed letter to its one-based position in your original `options` array, and each selected answer includes its displayed `letter`.";
+
 export const askUserQuestionTool: AgentTool<typeof askInputSchema> = {
 	name: "ask_user_question",
 	label: "ask_user_question",
 	description:
-		"Ask the learner a single question and pause until they answer. NOT graded — there is no correct answer. " +
+		"Ask the learner a single question. NOT graded — there is no correct answer. " +
 		"Use when requirements are ambiguous, preferences are needed, a decision would materially affect the lesson, " +
-		"or you need an open-ended response. ONE question per turn: call a single ask_user_question, then end your " +
-		"turn — his answer determines the next.",
+		"or you need an open-ended response. " + optionLetterDescription,
 	parameters: askInputSchema,
 	prepareArguments: prepareQuestionArguments,
 	executionMode: "sequential",
@@ -152,15 +153,13 @@ function quizDescription(delta: { name: "quiz" | "probe"; nodeId: boolean; types
 		"choice so the learner can signal a genuine gap instead of guessing. An always-present optional thinking " +
 		"field lets the learner attach his reasoning to ANY answer; it reaches you only when non-empty. " +
 		"No free-text answers — for non-graded questions use ask_user_question instead. " +
+		optionLetterDescription + " " +
 		(delta.types
 			? "Every call declares `type` — the question's role in the teaching cycle; the field's own description says when each kind fires. "
 			: "") +
 		(delta.nodeId
 			? "Set `nodeId` (required) to the plan node this question is about — validated at call time against the session's plan map. For off-map checks use ask_user_question. "
-			: "") +
-		"ONE question per turn: call a single " +
-		delta.name +
-		", then end your turn — his answer determines the next.";
+			: "");
 	// Phase-correct shape: the teach example LEADS with the required pair
 	// (type, nodeId — the 2026-10-09 drop-order ruling); the probe example
 	// carries no phase metadata at all, exactly like the probe schema.
@@ -190,8 +189,7 @@ function explainDescription(name: "explain" | "recall", nodeId: boolean): string
 		"after seeing his words. He sees the committed answer on submit. " +
 		(nodeId
 			? "Set `nodeId` (required) to the plan node this question is about — validated at call time against the session's plan map. "
-			: "") +
-		"ONE question per turn: call a single " + name + ", then end your turn — his answer determines the next."
+			: "")
 	);
 }
 
@@ -247,11 +245,11 @@ export function teachExplainToolFor(
  *  probe call shape into teaching. Old probe-phase records keep the
  *  `explain` name and parse identically (the display seam accepts
  *  both). */
-export const probeExplainTool: AgentTool<typeof probeExplainInputSchema> = {
+export const probeExplainTool: AgentTool<typeof explainInputBase> = {
 	name: "recall",
 	label: "recall",
 	description: explainDescription("recall", false),
-	parameters: probeExplainInputSchema,
+	parameters: explainInputBase,
 	prepareArguments: prepareQuestionArguments,
 	executionMode: "sequential",
 	execute: async (_toolCallId, input) => {
@@ -269,8 +267,7 @@ export interface ProberToolContext extends ProbeDoneContext {
 	jobStore: JobStore;
 	/** Fire the background runner for a freshly created job. */
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
-	/** Search availability — the research dispatch tool's honest-disable
-	 *  signal (same gate as the teacher's). Absent = available. */
+	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
 	/** The prober's graph-map reader (wave 7): present = the two map tools
 	 *  (list_sessions / list_propositions) are registered. The composition
@@ -312,20 +309,7 @@ export function createProberTools(
 	// differently-typed literals makes the whole object's type a union —
 	// unusable as Record<string, AgentTool<any>> downstream).
 	const quizzing: Record<string, AgentTool<any>> =
-		mechanics === "free" ? { recall: boundProbe(probeExplainTool) } : { probe: boundProbe(probeQuizTool) };
-	function boundProbe(tool: AgentTool<any>): AgentTool<any> {
-		return { ...tool, execute: async (id, input, ...rest) => {
-			const conceptId = input && typeof input === "object" && "conceptId" in input ? input.conceptId : undefined;
-			if (conceptId !== undefined) {
-				const records = ctx.graphStore ? ctx.chatStore.listChats().flatMap(s => {
-					const record = ctx.chatStore.getChat(s.id); return record ? [record] : [];
-				}) : [];
-				if (!buildGlobalLearningGraph(records).concepts.some(c => c.id === conceptId))
-					return invalidInputResult(tool.name, ["conceptId must be an exact ID from list_learning_concepts. Omit it for an unbound question."]);
-			}
-			return tool.execute(id, input, ...rest);
-		} };
-	}
+		mechanics === "free" ? { recall: probeExplainTool } : { probe: probeQuizTool };
 	// healToolRecord (owner, 2026-10-09 — the whitehead generalization):
 	// the standard argument heal over the WHOLE registry — every tool,
 	// not just the one the latest wobble incident landed on.
@@ -345,13 +329,12 @@ export function createProberTools(
 				// research + pdf are ALWAYS available in every phase — the
 				// prober can verify facts or read learner PDFs while assessing.
 				// demo/visual stay teach-phase-only (they need the lesson's plan
-				// context). Same gating as the teacher: toggle-filtered here,
-				// research subject to the searchAvailable gate (honestly absent
-				// when no engine is live).
+				// context). Same user-toggle filtering as the teacher; research
+				// remains available without a search-provider key.
 				...(jobs.research ? { research: jobs.research } : {}),
 				pdf: jobs.pdf!,
 				// The map reader (wave 7): present only when the settings gate
-				// opened — same registration-time drop as the search gate.
+				// opened.
 				...(ctx.graphStore
 					? proberGraphTools({ chatStore: ctx.chatStore, graphStore: ctx.graphStore })
 					: {}),
@@ -414,9 +397,7 @@ export interface TeacherToolContext extends PlanToolContext {
 	 *  rides along — the spawn fires mid-stream, before the tool part is
 	 *  persisted to the transcript (a transcript scan would race it). */
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
-	/** Search availability (search port wave, 2026-09-20): the research
-	 *  dispatch tool's honest-disable signal — no live engine = the tool
-	 *  drops from this registry (JobToolContext.searchAvailable). */
+	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
 }
 
@@ -475,11 +456,10 @@ export function createTeacherTools(
 			ls: lsTool,
 			find: findTool,
 			grep: grepTool,
+			// The learner-image display twin of read (issue #363): teacher
+			// only, always on — it shows the learner their own file.
+			show_image: createShowImageTool(ctx),
 			...planTools(ctx),
-			// Fix wave (2026-09-20): searchAvailable was RECEIVED here but
-			// DROPPED when building the inner JobToolContext — the drop-gate
-			// always took its ?? true default. Threaded now: the live signal
-			// reaches jobTools' research gate.
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},
 		withoutMechanics(enabled),

@@ -19,7 +19,8 @@
 
 import { Type, type Static } from "typebox";
 import { stripModelValueDebris } from "./value-debris.ts";
-import { evidenceDescription, parseLearningEvidence, type LearningEvidence } from "./learning-evidence.ts";
+import { expandCitationsForModel } from "./citations.ts";
+import type { PluginSubmissionImages } from "./plugin-submissions.ts";
 
 // ─── shared types ───────────────────────────────────────────────────────────
 
@@ -158,8 +159,7 @@ export function quizInputProblems(input: {
 // (All consumers read by key; the order is authoring guidance, nothing else.)
 export const quizInputBase = Type.Object({
 	question: Type.String({
-		description:
-			"The single quiz question to ask. ONE question per turn: ask, then end your turn — the answer determines the next question.",
+		description: "The single quiz question to ask.",
 	}),
 	options: Type.Array(Type.Object(quizOptionProps), {
 		minItems: 2,
@@ -200,7 +200,7 @@ export const quizInputBase = Type.Object({
 // purely MECHANICAL — no instructions on what the questions should be);
 // the enum's one-liners below say only WHEN each kind fires.
 // nodeId means "this question is ABOUT this node" — a position signal,
-// never a completion signal (docs/probe-teach-split.md §3). BOTH teaching
+// never a completion signal (docs/archive/probe-teach-split.md §3). BOTH teaching
 // types carry it. The cross-field authoring contract (the Gate-3
 // hardening: a quiz whose correctAnswer can't be graded NEVER reaches the
 // learner — schema-valid ⇔ gradeable, the rules exactly what the grading
@@ -243,9 +243,8 @@ export function questionNeedsReveal(tool: string, rawInput: unknown, phase: stri
 const predictCheckType = Type.Union([Type.Literal("predict"), Type.Literal("check")], {
 	description:
 		"REQUIRED — the question's role in the teaching cycle, as a bare word (no quotes): predict = posed BEFORE " +
-		"you teach the step (its own turn; the learner answers, then your teaching resolves it — arrives open, never " +
-		"collapsed); check = posed AFTER the step's teaching is complete (arrives collapsed behind the Check your " +
-		"understanding reveal). ONE question per turn either way.",
+		"you teach the step (arrives open, never collapsed); check = posed AFTER the step's teaching is complete " +
+		"(arrives collapsed behind the Check your understanding reveal)."
 });
 
 
@@ -275,15 +274,7 @@ export const quizInputObject = Type.Object({
  *  teacher, so nothing invites misuse). Structurally identical to
  *  quizInputBase (the old superRefine never reached the wire — it ran at
  *  the call boundary, where quizInputProblems runs now). */
-/** Optional canonical knowledge goal for cross-session diagnostic evidence.
- * This is NOT a plan nodeId: there is no lesson plan in the probe phase.
- * The server only binds it if it resolves to a real shared concept. */
-export const probeQuizInputSchema = Type.Object({
-	...quizInputBase.properties,
-	conceptId: Type.Optional(Type.String({
-		description: "Optional EXACT canonical concept id returned by list_learning_concepts. Include only when the question directly tests that concept; otherwise omit.",
-	})),
-});
+export const probeQuizInputSchema = quizInputBase;
 
 /** The DISPLAY parse for persisted quiz calls (tool-parts.ts): the base
  *  + `type` as an OPTIONAL plain string (old records carry none, and
@@ -311,8 +302,7 @@ export const quizDisplayInputSchema = Type.Object({
 
 export const explainInputBase = Type.Object({
 	question: Type.String({
-		description:
-			"The single question to ask. ONE question per turn: ask, then end your turn — the answer determines the next.",
+		description: "The single question to ask.",
 	}),
 	correctAnswer: Type.String({
 		description:
@@ -324,14 +314,6 @@ export const explainInputBase = Type.Object({
 	details: Type.Optional(
 		Type.String({ description: "Optional extra context or instructions shown under the question." }),
 	),
-});
-
-/** Optional canonical concept binding in the probing/free-recall phase. */
-export const probeExplainInputSchema = Type.Object({
-	...explainInputBase.properties,
-	conceptId: Type.Optional(Type.String({
-		description: "Optional EXACT canonical concept id returned by list_learning_concepts. Include only when this question tests the known concept; otherwise omit.",
-	})),
 });
 
 /** The TEACH-side explain object: base + the plan-position field (same
@@ -386,8 +368,7 @@ export const askInputSchema = Type.Object({
 	// whether options are present (the dock does exactly this). One less
 	// knob for the model to misuse.
 	question: Type.String({
-		description:
-			"The single question to ask the learner. ONE question per turn: ask, then end your turn — the answer determines the next question.",
+		description: "The single question to ask the learner.",
 	}),
 	details: Type.Optional(
 		Type.String({ description: "Optional extra context or instructions shown under the question." }),
@@ -425,6 +406,9 @@ export type QuestionKind = "quiz" | "ask" | "explain";
 export type SelectMode = "single-select" | "multi-select";
 export type QuestionMode = SelectMode | "text";
 
+/** Displayed letter → one-based position in the authored options array. */
+export type OptionOrder = Record<string, number>;
+
 /** Full question data — stored in the `lh_question` custom entry. */
 export interface QuestionData {
 	id: string;
@@ -438,6 +422,7 @@ export interface QuestionData {
 	context?: string;
 	mode: QuestionMode;
 	options: QuizOption[]; // display order (post-shuffle)
+	optionOrder?: OptionOrder;
 	// quiz only. NEVER send to the client before answering:
 	correctIndices?: number[];
 	// explain only. NEVER send to the client before answering:
@@ -451,7 +436,6 @@ export interface QuestionData {
  *  NO questionId (owner, tool-result diet 2026-10-02): it was the
  *  toolCallId restated — the toolResult message already carries it. */
 export interface QuestionAnswerData {
-	evidence?: LearningEvidence;
 	kind: QuestionKind;
 	/** The persisted call's tool NAME (owner, 2026-10-09): probe-phase
 	 *  calls are `probe`/`recall`, teach calls `quiz`/`explain` — the
@@ -465,6 +449,7 @@ export interface QuestionAnswerData {
 	questionType?: QuizQuestionType;
 	questionText: string;
 	options?: { index: number; label: string }[]; // snapshot for rendering
+	optionOrder?: OptionOrder; // snapshot; absent on older or unlettered answers
 	dontKnow: boolean;
 	answers: OptionAnswer[];
 	other?: string; // ask: "Other" free text
@@ -480,6 +465,8 @@ export interface QuestionAnswerData {
 	 *  2026-10-03) — a separate channel from `thinking`, captured by the
 	 *  reading field and riding the check answer. Absent when empty. */
 	readingThinking?: string;
+	/** Host-owned explicit image channels; never inferred from text or paths. */
+	images?: PluginSubmissionImages;
 	confidence?: number; // quiz only: the learner's stated probability (0-100, raw) that his selected answer is correct — never sent on "I don't know" (owner, 2026-10-01)
 	correct?: boolean; // quiz only
 	correctIndices?: number[]; // quiz only (rendering)
@@ -501,7 +488,6 @@ export interface ClientQuestion {
 
 /** What the server passes to the bridge when the learner answers. */
 export interface AnswerRequest {
-	evidence?: LearningEvidence;
 	dontKnow?: boolean;
 	values?: string[]; // option values
 	other?: string; // ask "Other"
@@ -529,6 +515,21 @@ export interface DockSelection {
 }
 
 export const emptyDockSelection = (): DockSelection => ({ selected: new Set(), otherSelected: false, dontKnow: false });
+
+/** In-memory submission snapshot: survives the question form's optimistic
+ * unmount, never written to storage. Indices use the call's stable shuffle. */
+export interface QuestionFormDraft {
+	selection: DockSelection;
+	thinking: string;
+	other: string;
+	text: string;
+	confidenceIndex: number;
+}
+
+export interface QuestionDraft {
+	form?: QuestionFormDraft;
+	readingThinking?: string;
+}
 
 /**
  * Toggling a listed option. Single-select: the option becomes THE answer and
@@ -559,9 +560,13 @@ export function toggleOther(mode: SelectMode, sel: DockSelection): DockSelection
 
 // ─── options ────────────────────────────────────────────────────────────────
 
-export function normalizeOptions(
-	options: string | Array<{ label: string; value?: string; description?: string }> | undefined,
-): QuizOption[] {
+type RawOptions = string | Array<{ label: string; value?: string; description?: string }> | undefined;
+
+export function normalizeOptions(options: RawOptions): QuizOption[] {
+	return normalizeWithPositions(options).map(({ option }) => option);
+}
+
+function normalizeWithPositions(options: RawOptions): { option: QuizOption; position: number }[] {
 	const seen = new Set<string>();
 	// The persisted tool call can carry GLM's string-encoded options —
 	// parseOptionsIfString is the same coercion the server's
@@ -571,12 +576,15 @@ export function normalizeOptions(
 		? (coerced as Array<{ label: string; value?: string; description?: string }>)
 		: [];
 	return list
-		.map((option) => ({
-			label: option.label.trim(),
-			value: option.value?.trim() || option.label.trim(),
-			description: option.description?.trim() || undefined,
+		.map((option, i) => ({
+			position: i + 1,
+			option: {
+				label: option.label.trim(),
+				value: option.value?.trim() || option.label.trim(),
+				description: option.description?.trim() || undefined,
+			},
 		}))
-		.filter((option) => {
+		.filter(({ option }) => {
 			if (option.label.length === 0) return false;
 			if (seen.has(option.value)) throw new Error(`duplicate option value "${option.value}"`);
 			seen.add(option.value);
@@ -621,6 +629,32 @@ export function shuffleOptions(options: QuizOption[], rand: () => number = Math.
 		out[j] = a;
 	}
 	return out;
+}
+
+const OPTION_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/** Shared by the pending dock and the open side-chat snapshot. Only
+ *  quizzes shuffle; keep the shuffle seed and grading keys unchanged. */
+export function questionDisplayOptions(raw: RawOptions, kind: QuestionKind, multi: boolean, toolCallId: string): {
+	options: QuizOption[]; optionOrder?: OptionOrder;
+} {
+	const authored = normalizeWithPositions(raw);
+	const options = authored.map(({ option }) => option);
+	const displayed = kind === "quiz" ? shuffleOptions(options, seededRandom(toolCallId)) : options;
+	if (kind === "explain" || multi || displayed.length === 0 || displayed.length > OPTION_LETTERS.length) return { options: displayed };
+	const positions = new Map(authored.map(({ option, position }) => [option, position]));
+	const optionOrder = Object.fromEntries(displayed.map((option, i) => [OPTION_LETTERS[i]!, positions.get(option)!]));
+	return { options: displayed, optionOrder };
+}
+
+export function optionLetterAt(displayIndex: number): string | undefined {
+	return OPTION_LETTERS[displayIndex - 1];
+}
+
+/** Resolve a letter from a mapping. Compact results only use the saved map. */
+export function displayedOptionLetter(order: OptionOrder | undefined, displayIndex: number): string | undefined {
+	const letter = optionLetterAt(displayIndex);
+	return letter && order && Object.hasOwn(order, letter) ? letter : undefined;
 }
 
 // ─── quiz grading ───────────────────────────────────────────────────────────
@@ -711,12 +745,12 @@ function formatOptionRef(options: QuizOption[], index: number): string {
  */
 export function buildAnswer(qd: QuestionData, req: AnswerRequest, tool?: string): QuestionAnswerData {
 	const base: QuestionAnswerData = {
-		...(req.evidence ? { evidence: parseLearningEvidence(req.evidence) } : {}),
 		kind: qd.kind,
 		...(tool ? { tool } : {}),
 		questionType: qd.questionType,
 		questionText: qd.question,
 		options: qd.options.map((o, i) => ({ index: i + 1, label: o.label })),
+		...(qd.optionOrder ? { optionOrder: qd.optionOrder } : {}),
 		dontKnow: req.dontKnow === true,
 		answers: [],
 		thinking: req.thinking?.trim() || undefined,
@@ -787,10 +821,14 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	if (ad.dontKnow) out.dontKnow = true;
 	// Array.isArray: the seam is called with `unknown` answers (test
 	// fixtures, foreign records) — degrade to omission, never crash.
+	if (ad.optionOrder) out.optionOrder = ad.optionOrder;
 	if (Array.isArray(ad.answers) && ad.answers.length > 0)
-		out.answers = ad.answers.map((a) => ({ index: a.index, label: a.label }));
-	if (ad.text) out.text = ad.text;
-	if (ad.other) out.other = ad.other;
+		out.answers = ad.answers.map((a) => {
+			const letter = displayedOptionLetter(ad.optionOrder, a.index);
+			return { index: a.index, label: a.label, ...(letter ? { letter } : {}) };
+		});
+	if (ad.text) out.text = expandCitationsForModel(ad.text);
+	if (ad.other) out.other = expandCitationsForModel(ad.other);
 	// The verdict + stated confidence are the learner's PERFORMANCE — new
 	// information the model needs for its next move. (dontKnow implies
 	// incorrect and carries no confidence: both stay implicit.)
@@ -801,8 +839,7 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	// thinking while reading the teaching. `note` is the pre-rename key —
 	// old records replay through here too, so both feed `thinking`.
 	const thinking = ad.thinking ?? ad.note;
-	if (thinking) out.thinking = thinking;
-	if (ad.readingThinking) out.thinkingWhileReading = ad.readingThinking;
-	if (ad.evidence) out.submittedWork = evidenceDescription(ad.evidence);
+	if (thinking) out.thinking = expandCitationsForModel(thinking);
+	if (ad.readingThinking) out.thinkingWhileReading = expandCitationsForModel(ad.readingThinking);
 	return out;
 }

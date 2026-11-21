@@ -1,9 +1,10 @@
 import { Type } from "typebox";
+import { randomUUID } from "node:crypto";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { getGraph, graphSessionIndex, graphSessionPropositions } from "../../core/graph.ts";
-import { buildGlobalLearningGraph } from "../../core/global-learning.ts";
 import type { ChatStore, GraphStore } from "../../core/ports.ts";
+import { createPropositionCandidateSearch, propositionCandidateBatch, type CandidateBatch, type CandidateProposition, type CandidateRequest } from "../../core/proposition-candidates.ts";
 
 /**
  * THE PROBER'S GRAPH TOOLS (wave 7, owner-locked 2026-09-23): context
@@ -42,47 +43,6 @@ const listPropositionsInput = Type.Object({
 export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentTool<any>> {
 	const deps = { chatStore: ctx.chatStore, graphStore: ctx.graphStore };
 	return {
-		list_learning_concepts: {
-			name: "list_learning_concepts",
-			label: "list_learning_concepts",
-			description:
-				"Search canonical cross-session LESSON concepts and previous answer evidence before probing. " +
-				"Input a specific concept term (e.g. 'divergence') or omit query for an overview. " +
-				"Returns exact concept IDs; if you pose a probe/recall question directly testing one of these concepts, " +
-				"set its optional conceptId to the exact listed ID. Never guess an ID and never attach a broad " +
-				"question to a narrow node. Historical probe results without concept IDs remain unlinked.",
-			parameters: Type.Object({
-				query: Type.Optional(Type.String({description:"Optional search term for a canonical learning objective."})),
-				includeEvidence: Type.Optional(Type.Boolean({description:"Include up to 3 past question results and learner reasoning per concept."})),
-			}),
-			execute: serverExecute("list_learning_concepts", Type.Object({
-				query: Type.Optional(Type.String()),
-				includeEvidence: Type.Optional(Type.Boolean()),
-			}),async ({query,includeEvidence}) => {
-				const records=ctx.chatStore.listChats().map(s=>ctx.chatStore.getChat(s.id)).filter(
-					(r):r is NonNullable<typeof r>=>r!==null,
-				);
-				const graph=buildGlobalLearningGraph(records);
-				const term=(query??"").trim().toLocaleLowerCase("en-US");
-				const matches=graph.concepts.filter(c=>
-					!term||c.title.toLocaleLowerCase("en-US").includes(term)||
-					c.sources.some(s=>(s.summary??"").toLocaleLowerCase("en-US").includes(term)));
-				if(!matches.length)return "No matching canonical lesson concepts. Probe normally, without conceptId.";
-				return matches.slice(0,25).map(c=>{
-					const heading=`${c.id} :: ${c.title} | ${c.correctChecks} correct / ${c.incorrectChecks} incorrect / ${c.ungradedChecks} ungraded check(s) in ${new Set(c.sources.map(s=>s.chatId)).size} lesson(s)`;
-					if(!includeEvidence) return heading;
-					const examples=c.evidence.slice(-3).reverse().map(e=>{
-						const question=e.question.slice(0,200);
-						const answer=(e.answerText??"").slice(0,200);
-						const reasoning=(e.reasoning??"").slice(0,300);
-						return `  - ${e.kind}, ${e.outcome}, ${e.answeredAt??"date unknown"}: ${question}`+
-							(answer?` | learner answer: ${answer}`:"")+
-							(reasoning?` | reasoning: ${reasoning}`:"");
-					});
-					return [heading,...examples].join("\n");
-				}).join("\n")+(matches.length>25?"\nRefine query for more.":"");
-			}),
-		},
 		list_sessions: {
 			name: "list_sessions",
 			label: "list_sessions",
@@ -129,64 +89,88 @@ export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentToo
  * auditor looks up identity candidates itself). Auditor-specific
  * versions, deliberately different from the prober's:
  *
- *   find              glob over node names + statements + aliases — the
- *                     identity workhorse; returns id + name + statement
- *                     (statement text is ESSENTIAL for identity work,
- *                     unlike the prober's names-only rule).
+ *   find_candidates   batched, ranked lexical lookup using the proposed
+ *                     findings themselves; five candidates per finding,
+ *                     explicit pagination, full statements and matched
+ *                     aliases, deduplicated within the returned batch.
  *   list_sessions     the birth-session index, no timestamps.
- *   list_propositions full proposition text (same reasoning as find).
+ *   list_propositions full proposition text (optional exploration fallback).
  *
  * No timestamps anywhere: identity work needs content, not chronology.
  * Read-only, pure core seams, same ports the snapshot reads.
  */
 
-/** Glob match — `*` spans anything, case-insensitive. `*needle*` is the
- *  expected shape; a bare term gets implicit surrounding stars. */
-function globMatch(pattern: string, text: string): boolean {
-	const raw = pattern.includes("*") ? pattern : `*${pattern}*`;
-	const re = new RegExp(
-		`^${raw.replace(/[.*+?^${}()|[\]\\]/g, (ch) => (ch === "*" ? "[\\s\\S]*" : `\\${ch}`))}$`,
-		"i",
-	);
-	return re.test(text);
+export interface AuditorCandidateBatch {
+	matches: Array<{ propositionId: string; candidateIds: string[]; nextCursor: string | null }>;
+	candidates: CandidateBatch["candidates"];
 }
 
-export function auditorGraphTools(ctx: GraphToolContext): Record<string, AgentTool<any>> {
+interface CandidateLookup {
+	id: string;
+	hints?: readonly string[];
+	cursor?: string;
+}
+
+/** Prepare the first page in code, and keep all continuations bound to this
+ * audit's immutable queries. A new search cannot accidentally inherit an old
+ * offset. Tokens are opaque, per-audit and stable when a request is repeated;
+ * none of this suppresses previously returned records. */
+export function prepareAuditorReview(ctx: GraphToolContext, propositions: readonly CandidateProposition[] = []): {
+	initialCandidates: AuditorCandidateBatch;
+	tools: Record<string, AgentTool<any>>;
+} {
 	const deps = { chatStore: ctx.chatStore, graphStore: ctx.graphStore };
 	const findInput = Type.Object({
-		query: Type.String({
-			minLength: 1,
-			description: "Glob pattern over node names, statements, and aliases — e.g. *will to power*. A bare term gets implicit surrounding *.",
-		}),
-	});
-	return {
-		find: {
-			name: "find",
-			label: "find",
-			description:
-				"Search the knowledge graph for existing propositions — glob over names, statements, and aliases. " +
-				"Returns each match's id, name, full statement, and the session(s) it was born in (a list_propositions id). " +
-				"This is how you decide whether a new proposition IS an existing one: search its key words, its synonyms, its phrasings.",
-			parameters: findInput,
-			execute: serverExecute("find", findInput, async ({ query }): Promise<string> => {
-				const nodes = getGraph(deps.graphStore).nodes;
-				const hits = nodes.filter(
-					(n) => globMatch(query, n.name) || globMatch(query, n.statement) || n.aliases.some((a) => globMatch(query, a)),
-				);
-				if (hits.length === 0) return `No existing proposition matches "${query}".`;
-				// BORN-IN POINTER (owner, 2026-09-29): a hit names its birth
-				// session(s) — find results now compose with list_propositions
-				// (read the whole session the hit came from) instead of being
-				// dead ends. Legacy no-provenance nodes name none.
-				const lines = hits.map((n) => {
-					const born = [...new Set(n.provenance.map((pt) => pt.chatId))];
-					return (
-						`- ${n.id} :: ${n.name}\n  statement: ${n.statement}` +
-						(born.length > 0 ? `\n  born in: ${born.join(", ")}` : "")
-					);
-				});
-				return `${hits.length} match(es):\n${lines.join("\n")}`;
+		propositions: Type.Array(Type.Object({
+			id: Type.String({ minLength: 1, description: "An id from the proposed findings. Its name, statement and aliases are searched automatically." }),
+			hints: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+				description: "Optional alternative words or phrases to add to the search. Plain text, not glob patterns.",
+			})),
+			cursor: Type.Optional(Type.String({ minLength: 1, description: "Continue a previous query with its nextCursor. Do not supply hints with a cursor; its query is already fixed. Omit cursor to start a new search at its first page." })),
+		}, { additionalProperties: false }), { minItems: 1, description: "Look up only findings needing a specific additional search. Include each id once." }),
+	}, { additionalProperties: false });
+	let search: ReturnType<typeof createPropositionCandidateSearch> | undefined;
+	const continuations = new Map<string, CandidateRequest>();
+	const tokens = new Map<string, string>();
+	function lookup(requests: readonly CandidateLookup[]): AuditorCandidateBatch {
+		const queries = requests.map((request): CandidateRequest => {
+			if (request.cursor === undefined) return { id: request.id, hints: request.hints ? [...request.hints] : undefined };
+			if (request.hints !== undefined) throw new Error("A continuation already fixes its query. Omit hints, or omit cursor to start a new search.");
+			const query = continuations.get(request.cursor);
+			if (!query || query.id !== request.id) throw new Error("Unknown cursor for this finding and audit. Start a fresh lookup without cursor.");
+			return query;
+		});
+		search ??= createPropositionCandidateSearch(getGraph(deps.graphStore).nodes);
+		const batch = propositionCandidateBatch(search, propositions, queries);
+		return {
+			matches: batch.matches.map((match, index) => {
+				let nextCursor: string | null = null;
+				if (match.nextOffset !== null) {
+					const query = { ...queries[index]!, offset: match.nextOffset };
+					const key = JSON.stringify([query.id, query.hints ?? [], query.offset]);
+					nextCursor = tokens.get(key) ?? randomUUID();
+					tokens.set(key, nextCursor);
+					continuations.set(nextCursor, query);
+				}
+				return { propositionId: match.propositionId, candidateIds: match.candidateIds, nextCursor };
 			}),
+			candidates: batch.candidates,
+		};
+	}
+	const initialCandidates = lookup([...new Set(propositions.map((proposition) => proposition.id))].map((id) => ({ id })));
+	const tools: Record<string, AgentTool<any>> = {
+		find_candidates: {
+			name: "find_candidates",
+			label: "find_candidates",
+			description:
+				"Find existing proposition candidates for a batch of proposed ids, using their full text and optional hints. " +
+				"Ranks word overlap across names, statements and aliases, not exact phrases or glob patterns. " +
+				"The first page is already in your input. A new search returns five ranked candidates; nextCursor continues that exact query. " +
+				"Each candidate's full statement and relevant matched aliases appear once in candidates; matches lists its ids per finding. " +
+				"An unmatched finding can remain new; a continuation is an option, not a requirement to keep searching. " +
+				"There is no cross-call suppression: repeating a request returns its full page again.",
+			parameters: findInput,
+			execute: serverExecute("find_candidates", findInput, async (input) => lookup(input.propositions)),
 		},
 		list_sessions: {
 			name: "list_sessions",
@@ -221,4 +205,5 @@ export function auditorGraphTools(ctx: GraphToolContext): Record<string, AgentTo
 			}),
 		},
 	};
+	return { initialCandidates, tools };
 }

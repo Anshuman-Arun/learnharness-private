@@ -16,17 +16,16 @@
  */
 
 export * from "./contracts.ts";
+export { embedLearnerImage } from "./learner-image-svg.ts";
 export * from "./ports.ts";
 export * from "./chains.ts";
+export * from "./source-organization.ts";
+export * from "./source-selection.ts";
+export * from "./session-folders.ts";
+export * from "./source-label.ts";
 export * from "./render-settings.ts";
 
 export * from "./question-core.ts";
-export * from "./learning-evidence.ts";
-export * from "./arithmetic.ts";
-export * from "./cpp-workspace.ts";
-export * from "./cpp-run.ts";
-export * from "./scratchpad.ts";
-export * from "./tablet.ts";
 // The event bus (push architecture, 2026-10-02): vocabulary + emit/subscribe
 // for every layer; the browser shell consumes the types + the runtime names
 // through this barrel (shell law: pure core via @/src/core only).
@@ -46,20 +45,38 @@ export * from "./math-delims.ts";
 // and the input-events contract — all
 // pure logic, browser-safe.
 export * from "./native-messages.ts";
+export { copyImmutableData } from "./immutable-data.ts";
 export * from "./compaction.ts";
 export * from "./input-events.ts";
+export { parseFilePaths, quoteFilePath, filePathLabel, isDirectoryReference, directoryReferencePath } from "./file-paths.ts";
+export type { FilePathPart } from "./file-paths.ts";
+export * from "./citations.ts";
+export { parseComposerTokens } from "./composer-tokens.ts";
+export type { ComposerToken } from "./composer-tokens.ts";
 // Wave D (owner-approved 2026-09-26): the client view model — the grouping
 // canon (one continuous assistant document, step separators) ported from
 // the deleted server projection to the client side. Pure, browser-safe.
 export * from "./view.ts";
 export * from "./tool-parts.ts";
+export * from "./answer-presentation.ts";
 export * from "./prices.ts";
+export * from "./context-usage.ts";
+export type { ChatGPTStatus, ChatGPTControlBridge } from "./contracts/chatgpt.ts";
+export { NATIVE_SUBSCRIPTIONS } from "./contracts/subscriptions.ts";
+export type { NativeSubscriptionProviderId, NativeSubscriptionLogicalId, NativeSubscriptionStatus, NativeSubscriptionSnapshot, NativeSubscriptionScope, NativeSubscriptionControlBridge, SubscriptionInteraction, SubscriptionPrompt } from "./contracts/subscriptions.ts";
 export * from "./cost-summary.ts";
+export { CLAUDE_CODE_PROVIDER, CLAUDE_CODE_MINIMUM_VERSION, type ClaudeCodeStatus } from "./contracts/claude-code.ts";
 export * from "./fuzzy.ts";
 // settings.ts + settings-resolution.ts (settings-storage wave, 2026-09-19):
 // the user-settings record's shape/sanitizer (pure) and its fully-resolved
 // view. Browser-safe — the Wave-4 panel imports these directly.
 export * from "./settings.ts";
+export * from "./file-access.ts";
+// themes.ts (theme wave, 2026-11-04): the 12-color theme vocabulary, the
+// presets and the theme → CSS-token adapter — pure, shared by the layout,
+// the provider, Settings and the themes API.
+export * from "./themes.ts";
+export * from "./dictation.ts";
 // graph-deletion.ts (wave 6): the whole module is PURE but storage-port
 // driven — the deletion RUNS server-side only. The shell needs exactly one
 // two type-only things from it: the ChatDeleteMode union (the delete
@@ -76,21 +93,21 @@ export * from "./session-navigation.ts";
 export * from "./auth-keys.ts";
 // keyboard.ts: the shortcut registry + binding normalization (pure, browser-safe).
 export * from "./keyboard.ts";
+export * from "./plugin-shortcuts.ts";
 export * from "./coverage.ts";
 // session-markdown.ts (2026-09-27 engine; first consumer 2026-10-06): the
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
-export * from "./estimation";
-export * from "./probability-lab";
-export * from "./stopping";
-export * from "./quant-questions";
-export * from "./quant-exam";
-export * from "./mistakes";
-export * from "./retrieval";
-export * from "./quant-sprints";
-export * from "./cpp-challenges";
-export * from "./training-evidence";
-
-// Read-only canonical cross-session learning map (pure; browser-safe).
-export * from "./global-learning.ts";
+// side-chat.ts (shared side conversations): ask-input validation,
+// thread lookup and the side model's lesson document. Pure, browser-safe.
+export * from "./side-chat.ts";
+export * from "./answer-review.ts";
+export * from "./plugins.ts";
+export * from "./plugin-questions.ts";
+export * from "./plugin-problems.ts";
+export * from "./plugin-view-context.ts";
+export * from "./plugin-submissions.ts";
+export type * from "./plugin-ui.ts";
+export type * from "./plugin-tree.ts";
+export * from "./plugin-agents.ts";

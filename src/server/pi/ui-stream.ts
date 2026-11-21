@@ -1,7 +1,7 @@
 import type { Agent, AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
-import type { SteerMessage } from "../../core/contracts.ts";
-import { noteSteerVisible } from "../jobs.ts";
 import { ToolCallIdUniquifier } from "./call-ids.ts";
+import type { ChatGPTRequestCycle } from "../../agent/chatgpt-request-cycle.ts";
+import { pluginQuestionLedgerFor } from "../../agent/plugin-question-tools.ts";
 
 /**
  * THE NATIVE WIRE (Wave D, owner-approved 2026-09-26): one agent turn, streamed
@@ -26,11 +26,14 @@ import { ToolCallIdUniquifier } from "./call-ids.ts";
  *   carries the same full partial a SECOND time as `assistantMessageEvent`
  *   — nothing in this app ever reads it, and re-serializing it per chunk
  *   doubled every stream frame. Client reads `event.message`, always.
- * - Question tools (quiz / ask_user_question): NO suppression (owner ruling,
+ * - Builtin question tools (quiz / ask_user_question): NO suppression (owner ruling,
  *   Wave D fork 2) — the closing `tool_execution_end` with the in-memory
  *   "Question posed" placeholder flows to the client, which ignores it
  *   (question tools are client-owned; the answer arrives as the input event).
  *   The placeholder still never persists and never reaches the model.
+ *   Plugin questions instead suppress only private-ledger-attested pose ACKs
+ *   from every carrier, after ID correlation; admitted assistant copies carry
+ *   visibility-only attempts until canonical settlement creates authority.
  * - Tool-call validation gating survives by construction: `tool_execution_end`
  *   only fires after the call cleared the boundary (an invalid call arrives
  *   as isError — never a clean end), so the dock's mount rule keys on it.
@@ -38,12 +41,6 @@ import { ToolCallIdUniquifier } from "./call-ids.ts";
  *   {"type":"turn-settled"} (served by turn-runs when no turn is running) and
  *   the loop-level {"type":"error","errorText"} (agent.continue() threw
  *   outside the event stream — mapped through the handler's masking policy).
- * - THE TERMINAL IS LAST IN FACT, NOT JUST IN NAME: [DONE] follows the settle
- *   seam (onFinish), never precedes it, because the seam may need to report a
- *   failure and every view is closed to new events once the terminal lands.
- *   A turn whose record write throws emits its error and then [DONE] — the
- *   learner is told, instead of watching a clean end produce an empty
- *   transcript.
  * - Stream-level provider errors ride their message verbatim
  *   (message_end with stopReason "error" + errorMessage).
  *
@@ -77,24 +74,20 @@ export type TurnWireEvent =
 	| { type: "error"; errorText: string };
 
 export interface PiTurnSpec {
+	/** Fresh reference cargo for an already-selected native run, including
+	 * an admission-recovery run. This hook never schedules a run itself. */
+	beforeCycle?: () => void;
+	requestCycle?: ChatGPTRequestCycle;
 	/** The per-turn agent (stateless engine — built from the record). */
 	agent: Agent;
 	/** The handler's error-masking policy for LOOP-level failures (the
 	 *  event stream itself is verbatim — provider errors ride their
 	 *  message's stopReason/errorMessage through untouched). */
 	onError?: (error: unknown) => string;
-	/** The learner-facing text for a SETTLE failure — the seam below the
-	 *  model, where a turn that ran fine still fails to become durable (a
-	 *  record write, a usage append, a registry reconcile). Separate from
-	 *  `onError` on purpose: "the loop broke" and "the reply could not be
-	 *  saved" are different truths, and the second one is the learner's
-	 *  cue to reload rather than retry. Falls back to a generic line. */
+	/** Report settlement failure while the views are still open. */
 	onSettleError?: (error: unknown) => string;
-	/** Cleanup for a settle that threw, run BEFORE the error reaches the
-	 *  views: the caller's own liveness bookkeeping (endTurn, the running-
-	 *  turn registry) is part of the seam that just failed, and skipping it
-	 *  is what leaves a dead turn looking permanently in flight. */
-	onSettleFailure?: () => void;
+	/** Release liveness even if the normal finish seam throws. */
+	onSettleFailure?: (error: unknown, reportedErrorText?: string) => void;
 	/** The canonical end-of-turn seam: persist + usage + extraction + endTurn.
 	 *  Receives the agent's FULL final state (native messages) — the caller
 	 *  persists the slice past its own base count. */
@@ -135,11 +128,13 @@ export interface PiTurnHandle {
 }
 
 export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
-	const { agent, onError, onSettleError, onSettleFailure, onFinish, usedToolCallIds, updateFlushMs = 100 } = spec;
+	const { agent, onError, onFinish, onSettleError, onSettleFailure, usedToolCallIds, updateFlushMs = 100, requestCycle } = spec;
 	const uniquifier = usedToolCallIds ? new ToolCallIdUniquifier(usedToolCallIds) : undefined;
+	const questions = pluginQuestionLedgerFor(agent);
 
 	let settled = false;
 	let sawAbort = false;
+	let reportedErrorText: string | undefined;
 
 	// THE PER-TURN STATE LOG (memory-only — the settle-only disk writes
 	// are unchanged). COMPACTION LAW (owner, 2026-10-09, supersedes the
@@ -226,11 +221,6 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 		for (const sub of subscribers) sub.done();
 		subscribers.clear();
 	};
-	// Whether an error already went on the wire for this turn: the loop-level
-	// catch may have reported one before the seam ran, and a settle failure
-	// must not announce a second, contradictory failure on top of it.
-	let errorSent = false;
-
 	// The settle seam: the record write is the agent's OWN final state
 	// (native history — signatures, usage, provider stamps all real).
 	// Copy the array: the agent may outlive this call's read.
@@ -241,87 +231,77 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	// suppressing the fresh per-turn re-seed). Our app mints no system
 	// messages of its own (the prompt is composed per turn), so dropping
 	// the role wholesale is exact; revisit if prompt-updates ever land.
-	//
-	// THE SETTLE SEAM IS UNGUARDED BY pi (agent.js awaits listeners in a plain
-	// loop, with no try/catch): a throw from onFinish — the record write, the
-	// usage append, endTurn — rejects agent.continue() and lands in the
-	// loop-level catch below, where `settled` used to swallow it silently, and
-	// AFTER closeAll had already told every view the turn ended cleanly.
-	// Catching it HERE keeps the views open long enough to say otherwise: a turn
-	// that never became durable must not be announced as a finished one.
 	const settleWith = () => {
 		try {
 			const settled_ = [...agent.state.messages].filter((m) => (m as { role?: string }).role !== "system");
-			onFinish((uniquifier?.remapSettled(settled_) as AgentMessage[]) ?? settled_, sawAbort);
+			const mapped = (uniquifier?.remapSettled(settled_) as AgentMessage[]) ?? settled_;
+			onFinish(questions?.settled(settled_, mapped) ?? mapped, sawAbort);
 		} catch (err) {
-			console.error("[turn] settle seam failed:", err);
-			// The caller's liveness bookkeeping lives inside the seam that just
-			// threw, so it must be cleared before the views are told anything.
-			try {
-				onSettleFailure?.();
-			} catch (cleanupErr) {
-				console.error("[turn] settle cleanup failed:", cleanupErr);
+			console.error("[turn] settlement failed:", err);
+			try { onSettleFailure?.(err, reportedErrorText); }
+			catch (cleanupError) { console.error("[turn] settlement cleanup failed:", cleanupError); }
+			if (reportedErrorText === undefined) {
+				reportedErrorText = onSettleError?.(err) ?? "An error occurred.";
+				send({ type: "error", errorText: reportedErrorText });
 			}
-			if (errorSent) return;
-			errorSent = true;
-			send({
-				type: "error",
-				errorText: onSettleError?.(err) ?? "The turn ended before it could be saved.",
-			});
 		}
 	};
 
 	const handle = (event: AgentEvent) => {
-		if (settled) return; // Do not double-persist a duplicate terminal event.
+		if (settled) return;
 		// THE LACAN FIX: ids uniquify HERE, before any view — the one seam
 		// every consumer downstream shares. No uniquifier → verbatim.
-		const uniqued = uniquifier ? uniquifier.event(event) : event;
+		const mapped = uniquifier ? uniquifier.event(event) : event;
+		const uniqued = questions ? questions.wire(event, mapped) : mapped;
 		// WIRE DIET: slim the one event pi double-stuffs — our views read
 		// `message`, never `assistantMessageEvent` (same full partial twice).
-		const wire: TurnWireEvent =
-			uniqued.type === "message_update"
-				? { type: "message_update", message: uniqued.message }
-				: uniqued;
-		send(wire);
+		if (uniqued) {
+			const wire: TurnWireEvent = uniqued.type === "message_update"
+				? { type: "message_update", message: uniqued.message } : uniqued;
+			send(wire);
+		}
 		if (event.type === "message_end") {
 			const m = event.message as { role?: string; stopReason?: string } | undefined;
 			if (m?.role === "assistant" && m.stopReason === "aborted") sawAbort = true;
-			// Dock fix (owner ruling 2026-09-26): an injected steer marker's
-			// message_end = the card is visible to the learner — flip the
-			// job's bookkeeping now (the turn may keep teaching for minutes;
-			// settleSteers re-runs the flip as a no-op idempotently).
-			if (m?.role === "custom") noteSteerVisible(event.message as SteerMessage);
 		}
 		if (event.type === "agent_end") {
-			// SETTLE BEFORE THE TERMINAL (the silent-turn bug): closeAll flips
-			// `settled`, after which send() is a no-op — so anything that went
-			// wrong in the settle could never reach a view again. The record
-			// write, and the failure it may report, must precede [DONE].
+			// Persist/report before the terminal closes every view to new frames.
 			settleWith();
 			closeAll();
 		}
 	};
-	agent.subscribe(handle);
+	requestCycle?.bindRelease(handle);
+	agent.subscribe((event) => {
+		if (!requestCycle?.hold(event)) handle(event);
+	});
 
 	void (async () => {
 		try {
-			await agent.continue();
+			do {
+				spec.beforeCycle?.();
+				await agent.continue();
+				if (!requestCycle) break;
+				const denied = requestCycle.deniedBeforeDispatch;
+				const locallyRejected = requestCycle.locallyRejected;
+				const outcome = requestCycle.finishNativeCycle(agent.state.messages);
+				if (denied || locallyRejected) agent.state.messages = outcome.messages;
+				if (outcome.action !== "resumeForeground") {
+					handle({ type: "agent_end", messages: [...agent.state.messages] });
+					break;
+				}
+			} while (!sawAbort);
 		} catch (err) {
 			// A loop-level failure (not a provider error — those ride the
 			// stream as stopReason "error"): surface, close, persist. If the
 			// agent already settled (agent_end reached before the throw),
 			// the seam has run — never settle twice.
 			if (settled) {
-				// A throw from AFTER the seam: the turn was already reported as
-				// complete, so the log is the only place left to say otherwise.
-				// The old early return discarded it before the console.error,
-				// which is exactly how this class of failure stayed invisible.
-				console.error("[turn] error after settle:", err);
+				console.error("[turn] error after settlement:", err);
 				return;
 			}
 			console.error("[turn] agent loop failed:", err);
-			errorSent = true;
-			send({ type: "error", errorText: onError?.(err) ?? "An error occurred." });
+			reportedErrorText = onError?.(err) ?? "An error occurred.";
+			send({ type: "error", errorText: reportedErrorText });
 			settleWith();
 			closeAll();
 		}
@@ -379,6 +359,7 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 		abort() {
 			if (settled) return;
 			sawAbort = true;
+			requestCycle?.abort();
 			agent.abort();
 		},
 	};

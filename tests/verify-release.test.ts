@@ -152,18 +152,10 @@ describe("release gate — packaging-config drift guard", () => {
 	const realConfig = yaml.load(fs.readFileSync(path.join(repoRoot, "electron-builder.yml"), "utf8"));
 	const realPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 
-	it("rejects the private derivative as an upstream public release", () => {
+	it("accepts the repository's real configuration", () => {
 		const verdict = verifyConfigAssumptions(realConfig, realPkg);
-		assert.equal(verdict.ok, false);
-		assert.match(verdict.errors.join("\n"), /productName is |would not land in the draft/);
+		assert.ok(verdict.ok, JSON.stringify(verdict, null, 2));
 	});
-	// Public-release invariants are still tested, using a synthetic copy of
-	// the original author's release configuration, not the private installer.
-	const publicFixture = {
-		...(structuredClone(realConfig) as Record<string, unknown>),
-		productName: "LearnHarness",
-		publish: [{ provider: "github", owner: "amosblomqvist", repo: "learnharness", releaseType: "draft" }],
-	};
 
 	const drifts: Array<[string, (config: Record<string, unknown>) => void]> = [
 		["linux artifactName", (config) => { (config.linux as Record<string, unknown>).artifactName = "${name}-${version}-${arch}.${ext}"; }],
@@ -179,7 +171,7 @@ describe("release gate — packaging-config drift guard", () => {
 	];
 	for (const [label, mutate] of drifts) {
 		it(`fails when ${label} drifts (expectations must be re-derived)`, () => {
-			const config = structuredClone(publicFixture) as Record<string, unknown>;
+			const config = structuredClone(realConfig) as Record<string, unknown>;
 			mutate(config);
 			const pkg = label === "package name" ? { ...realPkg, name: "other" } : realPkg;
 			const verdict = verifyConfigAssumptions(config, pkg);
@@ -375,7 +367,7 @@ describe("release gate — CLI (offline, repo config)", () => {
 	// intentionally stay at 0.2.0. A release version bump must not break tests.
 	const VERSION = (JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version: string }).version;
 	const TAG = `v${VERSION}`;
-	const tsxImport = import.meta.resolve("tsx");
+	const tsxImport = fileURLToPath(import.meta.resolve("tsx"));
 	function run(args: string[], cwd = repoRoot) {
 		return spawnSync(process.execPath, ["--import", tsxImport, script, ...args], {
 			cwd, encoding: "utf8", timeout: 60_000,
@@ -390,16 +382,6 @@ describe("release gate — CLI (offline, repo config)", () => {
 		for (const [name, content] of Object.entries(healthyFeeds(version, release))) {
 			fs.writeFileSync(path.join(root, "metadata", name), content);
 		}
-		// Verify the retired public release pipeline against a synthetic
-		// public build, not against the actual private application's settings.
-		const yaml = require("js-yaml") as {load:(v:string)=>Record<string, unknown>;dump:(v:unknown)=>string};
-		const current = yaml.load(fs.readFileSync(path.join(repoRoot, "electron-builder.yml"), "utf8"));
-		const publicConfig = {
-			...current, productName: "LearnHarness",
-			publish: [{provider:"github",owner:"amosblomqvist",repo:"learnharness",releaseType:"draft"}],
-		};
-		fs.writeFileSync(path.join(root, "electron-builder.yml"), yaml.dump(publicConfig));
-		fs.copyFileSync(path.join(repoRoot, "package.json"), path.join(root, "package.json"));
 		return { root, release };
 	}
 
@@ -424,7 +406,7 @@ describe("release gate — CLI (offline, repo config)", () => {
 	it("verify passes the complete draft and exits 0", () => {
 		const { root } = workspace();
 		try {
-			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG], root);
+			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG]);
 			assert.equal(result.status, 0, String(result.stderr));
 			assert.match(result.stdout, /11\/11 expected files present/);
 			assert.ok(result.stdout.includes(`OK: draft for ${TAG} is complete`));
@@ -440,7 +422,7 @@ describe("release gate — CLI (offline, repo config)", () => {
 			release.assets = release.assets.filter((entry) => entry.name !== `LearnHarness-${VERSION}-arm64.dmg.blockmap`);
 			release.assets.push(asset(9999, "LearnHarness-0.1.0-x64-setup.exe"));
 			fs.writeFileSync(path.join(root, "releases.json"), JSON.stringify([release]));
-			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG], root);
+			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG]);
 			assert.equal(result.status, 1);
 			assert.match(result.stderr, /arm64\.dmg\.blockmap: missing from the release/);
 			assert.match(result.stderr, /0\.1\.0-x64-setup\.exe: unexpected asset/);
@@ -454,7 +436,7 @@ describe("release gate — CLI (offline, repo config)", () => {
 		const { root } = workspace();
 		try {
 			const wrongTag = TAG === "v0.3.0" ? "v0.2.0" : "v0.3.0";
-			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", wrongTag], root);
+			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", wrongTag]);
 			assert.equal(result.status, 1);
 			assert.match(result.stderr, /does not equal "v" \+ package\.json version/);
 		} finally {
@@ -468,7 +450,7 @@ describe("release gate — CLI (offline, repo config)", () => {
 		try {
 			const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 			fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ ...pkg, version: futureVersion }));
-			// workspace() already supplied the verified public-release fixture.
+			fs.copyFileSync(path.join(repoRoot, "electron-builder.yml"), path.join(root, "electron-builder.yml"));
 			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", `v${futureVersion}`], root);
 			assert.equal(result.status, 0, String(result.stderr));
 			assert.ok(result.stdout.includes(`OK: draft for v${futureVersion} is complete`));

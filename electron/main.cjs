@@ -24,20 +24,26 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell, dialog, safeStorage } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell, dialog } = require("electron");
+const { pickAttachmentPath } = require("./attachment-picker.cjs");
+const { createChatGPT, fileStore } = require("./chatgpt.cjs");
+const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
+const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
+const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
+const { desktopAPIHeaders } = require("./desktop-api.cjs");
+const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
+const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
-const crypto = require("node:crypto");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
-const { createChatGPTOAuthRuntime } = require("./chatgpt-oauth.cjs");
 
 // Mirrors SIDEBAR_AUTOCLOSE in components/sidebar.tsx — keep in sync (the
 // renderer owns the number; this is the IPC widen target).
 const SIDEBAR_AUTOCLOSE = 928;
 
-const PRODUCT_NAME = "LearnHarness Private";
+const PRODUCT_NAME = "LearnHarness";
 
 // APP NAME → userData (owner, 2026-10-10): the Application Support dir is
 // exactly "LearnHarness" in dev AND packaged. Packaged Electron would
@@ -48,6 +54,18 @@ const PRODUCT_NAME = "LearnHarness Private";
 app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
+
+// Resolve the saved palette before window creation; renderer reports keep
+// it current after live saves. This helper needs no compiled server bundle.
+const { normalizeAppearance, themeSourceFor, serverDataDir, readAppearance, chromeColors } = require("./appearance-chrome.cjs");
+let appearance = normalizeAppearance(null);
+
+function applyChrome(win) {
+	if (win.isDestroyed()) return;
+	const colors = chromeColors(appearance);
+	win.setBackgroundColor(colors.color);
+	if (process.platform !== "darwin") win.setTitleBarOverlay(colors);
+}
 
 /** The packaged standalone server (extraResources → Resources/server).
  *  In dev LH_DEV_URL short-circuits everything: no spawn, no packaging —
@@ -125,15 +143,19 @@ if (process.argv.includes("--browser-service")) {
 				win.focus();
 			}
 		});
-		main().catch((error) => {
-			log(`Failed to start LearnHarness: ${error?.stack ?? error}`);
-			app.quit();
-		});
+		main();
 	}
 }
 
 let serverProcess = null;
-let chatGPTOAuthRuntime = null;
+let chatgpt = null;
+let chatgptChild = null;
+let subscriptions = null;
+let subscriptionChild = null;
+// Per-launch request capability, never OAuth tokens and never renderer state.
+let desktopAPISecret = null;
+let reopenWindow = null;
+const trustedAppWindows = new Set();
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
 // in an event handler): the window + child server are the product, and
@@ -189,11 +211,15 @@ function log(line) {
 	}
 }
 
-function startServer(port, healthSecret) {
+function startServer(port) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
 			process.execPath,
-			[serverEntry()],
+			// Only the macOS backend needs this: Next's native title setter
+			// otherwise checks this Node-mode process in as a foreground app.
+			process.platform === "darwin"
+				? ["--require", path.join(process.resourcesPath, "server-title-guard.cjs"), serverEntry()]
+				: [serverEntry()],
 			{
 				cwd: path.dirname(serverEntry()),
 				env: {
@@ -201,88 +227,58 @@ function startServer(port, healthSecret) {
 					ELECTRON_RUN_AS_NODE: "1",
 					NODE_ENV: "production",
 					PORT: String(port),
-					LH_DESKTOP_HEALTH_SECRET: healthSecret,
 					HOSTNAME: "127.0.0.1", // the server defaults to 0.0.0.0 — never
 					LH_DATA_DIR: DATA_DIR(),
 					// The auth/keys store — the child reads AND writes this file itself
 					// (no env injection anymore: a spawn-time copy would shadow every
 					// settings-page key change until restart; env wins over file).
 					LH_AUTH_FILE: AUTH_FILE(),
-					...(chatGPTOAuthRuntime
-						? {
-								LH_CHATGPT_BROKER_URL: chatGPTOAuthRuntime.brokerUrl,
-								LH_CHATGPT_BROKER_SECRET: chatGPTOAuthRuntime.brokerSecret,
-							}
-						: {}),
+					LH_DESKTOP_SERVER: "1",
+					LH_DESKTOP_API_SECRET: desktopAPISecret,
 				},
-				stdio: ["ignore", "pipe", "pipe"],
+				stdio: ["ignore", "pipe", "pipe", "ipc"],
 			},
 		);
 		serverProcess = child;
+		chatgptChild = attachChatGPTChild(child, chatgpt);
+		subscriptionChild = attachSubscriptionChild(child, subscriptions);
 		const fwd = (buf) => buf.toString().trimEnd().split("\n").forEach((l) => l && log(`server: ${l}`));
 		child.stdout.on("data", fwd);
 		child.stderr.on("data", fwd);
 		child.on("exit", (code, signal) => {
 			log(`server exited (code=${code} signal=${signal})`);
-			if (serverProcess !== child) return; // already shutting down
 			serverProcess = null;
-			// The port may be recycled by another local process. Never leave
-			// an Electron window with privileged preload pointing at a dead
-			// origin that a different server can subsequently occupy.
-			for (const win of BrowserWindow.getAllWindows()) win.destroy();
-			app.quit();
+			chatgptChild?.dispose();
+			chatgptChild = null;
+			subscriptionChild?.dispose();
+			subscriptionChild = null;
+			chatgpt?.close();
+			subscriptions?.close();
 		});
-		child.once("error", (error) => {
-			log(`server could not start: ${error.message}`);
-			if (serverProcess === child) serverProcess = null;
-			reject(error);
-		});
-		child.once("spawn", () => resolve(child));
+		resolve(child);
 	});
 }
 
 /** No "ready" event exists — poll until the server answers (docs-confirmed). */
-function waitUntilUp(baseUrl, healthSecret, tries = 150) {
-	const healthUrl = new URL("/api/desktop-health", baseUrl).toString();
-	const deadline = Date.now() + 30_000;
+function waitUntilUp(url, tries = 150) {
 	return new Promise((resolve, reject) => {
-		let settled = false;
-		const done = (error) => {
-			if (settled) return;
-			settled = true;
-			if (error) reject(error);
-			else resolve(true);
-		};
 		const attempt = (n) => {
-			if (settled) return;
-			if (!serverProcess || serverProcess.exitCode !== null) {
-				done(new Error("Private desktop server exited before readiness."));
-				return;
-			}
-			if (n <= 0 || Date.now() >= deadline) {
-				done(new Error("Private desktop server did not pass authenticated health checks."));
-				return;
-			}
-			const retry = () => { if (!settled) setTimeout(() => attempt(n - 1), 200); };
-			const nonce = crypto.randomBytes(16).toString("base64url");
-			const challengeUrl = new URL(healthUrl);
-			challengeUrl.searchParams.set("challenge", nonce);
-			const expected = crypto.createHmac("sha256", healthSecret).update(nonce).digest("base64url");
-			const req = http.get(challengeUrl, (res) => {
-				const ready = res.statusCode === 200 &&
-					res.headers["x-lh-app-ready"] === expected;
+			const req = http.get(url, (res) => {
 				res.resume();
-				if (ready) done();
-				else retry();
+				resolve(res.statusCode !== undefined);
 			});
-			req.setTimeout(1500, () => req.destroy(new Error("Health check timed out")));
-			req.on("error", retry);
+			req.on("error", () => {
+				if (n <= 0) reject(new Error(`server never answered on ${url}`));
+				else setTimeout(() => attempt(n - 1), 200);
+			});
 		};
 		attempt(tries);
 	});
 }
 
 function killServer() {
+	chatgpt?.close();
+	subscriptions?.close();
 	if (!serverProcess) return;
 	const child = serverProcess;
 	serverProcess = null;
@@ -296,14 +292,32 @@ function killServer() {
 	}, 3000);
 }
 
+/** Links leaving the app window may open only in a browser or mail client:
+ *  the same schemes chat markdown makes clickable. Other schemes (smb:,
+ *  file:, search-ms:, any app's custom handler) are dropped, and only the
+ *  scheme is logged. */
+const EXTERNAL_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
+function openExternalLink(target) {
+	let scheme = "unparseable";
+	try {
+		scheme = new URL(target).protocol;
+	} catch { /* logged below */ }
+	if (EXTERNAL_LINK_SCHEMES.has(scheme)) {
+		void shell.openExternal(target);
+		return;
+	}
+	log(`external link blocked (scheme ${scheme.slice(0, 40)})`);
+}
+
 /** Security posture (all defaults asserted explicitly; the guards are the
  *  checklist's own recommendations for localhost-app shells):
  *  - deny-by-default permission handler allowing only our loopback origin
  *    (groundwork for the mic/STT milestone — Electron auto-approves by
  *    default, we do not);
  *  - will-navigate pinned to the app origin; window.open always denied —
- *    external links go to the real browser via shell.openExternal. */
-function createWindow(url) {
+ *    external links go to the real browser via shell.openExternal, for
+ *    http, https and mailto only (openExternalLink). */
+function createWindow(url, beforeLoad) {
 	const win = new BrowserWindow({
 		width: 1440,
 		height: 900,
@@ -325,7 +339,7 @@ function createWindow(url) {
 				// height. Do not force the zoom-invariant native overlay to match
 				// the renderer's 60 CSS px bar: zooming out would cover its border.
 				// The renderer reserves the actual width via env(titlebar-area-*).
-				titleBarOverlay: { color: "#141414", symbolColor: "#e5e5e5" },
+				titleBarOverlay: chromeColors(appearance),
 				// Keep the custom bar alone; Alt reveals the native menu.
 				autoHideMenuBar: true,
 			}),
@@ -333,16 +347,18 @@ function createWindow(url) {
 			contextIsolation: true,
 			sandbox: true,
 			nodeIntegration: false,
+			...(process.env.LH_DEV_URL ? { additionalArguments: ["--lh-web-subscriptions"] } : {}),
 			preload: path.join(__dirname, "preload.cjs"),
 		},
 		// Live-resize + first-paint flash (owner, 2026-09-17): during a resize
 		// the native window surface changes size before Chromium's compositor
 		// has a frame at the new size, and the gap shows the window's NATIVE
 		// background — Electron's default is white, glaring on a dark app.
-		// The app background (#141414) fills the lag instead. `show: false` +
-		// ready-to-show is the same treatment for first paint: the window
-		// appears only once the page has actually rendered.
-		backgroundColor: "#141414",
+		// The app's background for the rendered mode fills the lag instead
+		// (chromeColors). `show: false` + ready-to-show is the same treatment
+		// for first paint: the window appears only once the page has
+		// actually rendered.
+		backgroundColor: chromeColors(appearance).color,
 		show: false,
 		// Narrow-window behavior (owner, 2026-09-17): 640px is the floor —
 		// below it even a wrapped chrome row gets cramped and the chat header
@@ -354,14 +370,9 @@ function createWindow(url) {
 		minHeight: 600,
 	});
 
+	trustedAppWindows.add(win);
+	win.once("closed", () => trustedAppWindows.delete(win));
 	const allowedOrigin = () => new URL(url).origin;
-	const openSafeExternal = (target) => {
-		try {
-			const parsed = new URL(target);
-			if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return;
-			void shell.openExternal(target);
-		} catch { /* Reject malformed and non-web URLs. */ }
-	};
 	// Deny-by-default; the ONLY grants are media (mic/STT groundwork) and
 	// clipboard-sanitized-write — the copy affordances in the transcript
 	// (md-blocks copy corners) call navigator.clipboard.writeText(), which
@@ -374,10 +385,7 @@ function createWindow(url) {
 	const fromOwnOrigin = (origin, permission) =>
 		origin === allowedOrigin() && allowedPermissions.has(permission);
 	session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-		let requestOrigin = null;
-		try {
-			if (details?.requestingUrl) requestOrigin = new URL(details.requestingUrl).origin;
-		} catch { /* Malformed URLs do not receive OS microphone permissions. */ }
+		const requestOrigin = details.requestingUrl ? new URL(details.requestingUrl).origin : null;
 		callback(fromOwnOrigin(requestOrigin, permission));
 	});
 	session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => {
@@ -385,19 +393,17 @@ function createWindow(url) {
 	});
 
 	win.webContents.on("will-navigate", (event, target) => {
-		let sameOrigin = false;
-		try { sameOrigin = new URL(target).origin === allowedOrigin(); }
-		catch { /* Unknown target schemes never navigate inside the app. */ }
-		if (!sameOrigin) {
+		if (new URL(target).origin !== allowedOrigin()) {
 			event.preventDefault();
-			openSafeExternal(target);
+			openExternalLink(target);
 		}
 	});
 	win.webContents.setWindowOpenHandler(({ url: target }) => {
-		openSafeExternal(target);
+		openExternalLink(target);
 		return { action: "deny" };
 	});
 
+	beforeLoad?.(win);
 	void win.loadURL(url);
 	// Zoom truth reaches the renderer for EVERY load (reload, nav): the
 	// renderer's --lh-zoom must never go stale. The fallback catcher below
@@ -466,38 +472,62 @@ const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
  * and before-quit alone would race the swap. */
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let autoUpdater = null; // electron-updater's, packaged builds only
+// Observational only: this snapshot NEVER gates a check, download or install.
+// The revision lets late subscribers reject an older in-flight IPC snapshot.
+let updateState = { status: "idle", version: null, revision: 0 };
 
-function broadcastUpdateStatus(status) {
-	for (const win of BrowserWindow.getAllWindows()) {
-		try {
-			win.webContents.send("lh:update-status", status);
-		} catch {
-			/* window mid-teardown — the next push retries */
+function reportUpdateStatus(status, version = null) {
+	try {
+		// A later check/error must not hide an update already staged for quit.
+		if (updateState.status === "downloaded" && status !== "downloaded") return;
+		updateState = { status, version: typeof version === "string" ? version : null, revision: updateState.revision + 1 };
+		for (const win of BrowserWindow.getAllWindows()) {
+			try {
+				win.webContents.send("lh:update-status", updateState);
+			} catch {
+				/* window mid-teardown — snapshot retrieval covers a later load */
+			}
 		}
+	} catch {
+		/* Status reporting must never interrupt the updater. */
+	}
+}
+
+/** Read the SAME data directory passed to the packaged server. Only an
+ * explicit false opts out; absent/corrupt/unreadable settings keep updates ON.
+ * Re-read for each automatic check so saving the toggle needs no restart. */
+function automaticUpdatesEnabled() {
+	try {
+		const settings = JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf8"));
+		return settings?.general?.autoUpdate !== false;
+	} catch {
+		return true;
 	}
 }
 
 function checkForUpdates({ manual = false } = {}) {
 	if (!autoUpdater) return;
+	if (!manual && !automaticUpdatesEnabled()) {
+		log("auto-update: automatic check skipped (turned off in Settings)");
+		return;
+	}
+	// Do not gate on display state: a stale spinner/error must never disable
+	// future background checks. electron-updater owns its in-flight work.
 	autoUpdater
 		.checkForUpdates()
 		.then((result) => {
-			// The download itself is silent (autoDownload); the banner fires on
-			// update-downloaded. Manual checks additionally answer directly.
-			if (!manual) return;
-			const version = result?.updateInfo?.version;
-			if (!version) dialog.showMessageBox({ type: "info", message: "You're up to date.", detail: `LearnHarness ${app.getVersion()} is the latest version.` });
+			// A declined check (e.g. an unsupported package) establishes no
+			// latest-version claim. Real results arrive through updater events.
+			if (!result) reportUpdateStatus("idle");
 		})
 		.catch((err) => {
 			log(`update check failed: ${err?.message ?? err}`);
-			if (manual) dialog.showMessageBox({ type: "warning", message: "Couldn't check for updates.", detail: String(err?.message ?? err) });
+			reportUpdateStatus("error");
 		});
 }
 
 function installUpdateNow() {
-	// Private builds have no updater. A stale renderer IPC command must not
-	// kill the learning server with no actual install to follow.
-	if (!autoUpdater) return;
+	// Kill the server BEFORE the quit-and-install (see block comment).
 	try {
 		killServer();
 	} catch {
@@ -507,16 +537,16 @@ function installUpdateNow() {
 }
 
 function setupAutoUpdater() {
-	// Private derivative: never fetch or install upstream releases.
-	return;
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
+		reportUpdateStatus("disabled");
 		return;
 	}
 	try {
 		autoUpdater = require("electron-updater").autoUpdater;
 	} catch (err) {
 		log(`auto-update: electron-updater unavailable (${err?.message ?? err}) — updates disabled`);
+		reportUpdateStatus("disabled");
 		return;
 	}
 	const feed = process.env.LH_UPDATE_FEED;
@@ -534,11 +564,37 @@ function setupAutoUpdater() {
 		debug: (m) => {}, // too chatty for the persistent log
 		error: (m) => log(`updater error: ${m}`),
 	};
+	autoUpdater.on("checking-for-update", () => reportUpdateStatus("checking"));
+	autoUpdater.on("update-available", (info) => reportUpdateStatus("downloading", info?.version));
+	autoUpdater.on("update-not-available", () => reportUpdateStatus("up-to-date"));
 	autoUpdater.on("update-downloaded", (info) => {
 		log(`update downloaded: ${info?.version} — banner shown`);
-		broadcastUpdateStatus({ status: "downloaded", version: info?.version ?? null });
+		reportUpdateStatus("downloaded", info?.version);
 	});
-	autoUpdater.on("error", (err) => log(`updater error: ${err?.message ?? err}`));
+	autoUpdater.on("error", (err) => {
+		log(`updater error: ${err?.message ?? err}`);
+		reportUpdateStatus("error");
+	});
+}
+
+/** One result surface for manual checks. Preload buffers the navigation
+ * request until React subscribes, including when all macOS windows closed. */
+function checkForUpdatesFromMenu() {
+	try {
+		const win = BrowserWindow.getAllWindows()[0] ?? reopenWindow?.();
+		if (win) {
+			if (win.isMinimized()) win.restore();
+			win.focus();
+			const openSettings = () => {
+				try { win.webContents.send("lh:open-settings", "general"); } catch { /* window closed */ }
+			};
+			if (win.webContents.isLoadingMainFrame()) win.webContents.once("did-finish-load", openSettings);
+			else openSettings();
+		}
+	} catch {
+		/* Navigation failure must not prevent the manual check. */
+	}
+	checkForUpdates({ manual: true });
 }
 
 function zoomStep(win, dir) {
@@ -564,8 +620,8 @@ function installMenu() {
 			label: app.name,
 			submenu: [
 				{ role: "about" },
-				// Manual check (Wave C): answers via native dialog — no renderer
-				// round-trip. The 24h automatic checks stay silent.
+				// Manual checks report their result in Settings → General.
+				{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
 				{ type: "separator" },
 				{ role: "hide" },
 				{ role: "hideOthers" },
@@ -610,60 +666,110 @@ function installMenu() {
 
 async function main() {
 	app.on("window-all-closed", () => {
+		chatgpt?.pause();
+		subscriptions?.pause();
 		// macOS convention: the app stays resident, reactivated from the Dock.
 		if (process.platform !== "darwin") app.quit();
 	});
 
 	// The child must not outlive us — cover every quit path.
-	app.on("before-quit", () => {
-		killServer();
-		chatGPTOAuthRuntime?.close();
-	});
+	app.on("before-quit", killServer);
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
 	await app.whenReady();
-	const devUrl = process.env.LH_DEV_URL;
-	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
-	const appOrigin = new URL(url).origin;
 
-	// next dev runs in a different process without the broker capability;
-	// prevent false "connected" state that fails every model request.
-	if (!devUrl) try {
-		chatGPTOAuthRuntime = await createChatGPTOAuthRuntime({
-			userDataDir: app.getPath("userData"),
-			safeStorage,
-			shell,
-			ipcMain,
-			log,
-			authorizeIpc: (event) => {
-				const sender = event?.sender;
-				const frame = event?.senderFrame;
-				const win = sender && BrowserWindow.fromWebContents(sender);
-				return !!(sender && frame && frame === sender.mainFrame &&
-					frame.origin === appOrigin && win &&
-					win.webContents === sender && !win.isDestroyed());
-			},
-		});
-		log("ChatGPT OAuth broker ready");
-	} catch (err) {
-		log(`ChatGPT OAuth unavailable: ${err?.message ?? err}`);
-	}
-	if (devUrl) log("ChatGPT connection unavailable in desktop:dev; use a packaged build.");
+	// Read the same record/custom theme the server uses before constructing
+	// any native window, including the external development shell.
+	appearance = readAppearance(serverDataDir({
+		devUrl: process.env.LH_DEV_URL, env: process.env,
+		packagedDataDir: DATA_DIR(), repoRoot: path.join(__dirname, ".."),
+	}));
+	nativeTheme.themeSource = themeSourceFor(appearance.mode);
 
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
 	// spawn, no packaging, full HMR. The rest of this shell still applies
 	// (guards, menu, single instance).
+	const devUrl = process.env.LH_DEV_URL;
+	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
 	if (!devUrl) {
+		desktopAPISecret = randomBytes(32).toString("hex");
+		const ownedOrigin = new URL(url).origin;
+		// All URLs, not only /api: remove the header again on external redirects.
+		session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ["<all_urls>"] }, (details, callback) => {
+			callback({ requestHeaders: desktopAPIHeaders(details, ownedOrigin, desktopAPISecret, [...trustedAppWindows]) });
+		});
+		chatgpt = createChatGPT({
+			store: fileStore(path.join(app.getPath("userData"), "chatgpt-credentials.json")),
+			openExternal: (target) => shell.openExternal(target),
+			onChange: (value) => {
+				chatgptChild?.send(value);
+				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:chatgpt:changed");
+			},
+		});
+		subscriptions = createSubscriptions({
+			directory: app.getPath("userData"),
+			loadSDK: () => loadSubscriptionSDK(path.dirname(serverEntry())),
+			openExternal: (target) => shell.openExternal(target),
+			onChange: (snapshot) => {
+				subscriptionChild?.send(snapshot);
+				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:subscriptions:changed");
+			},
+		});
+		await subscriptions.ready;
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
-		const healthSecret = crypto.randomBytes(32).toString("base64url");
-		await startServer(new URL(url).port, healthSecret);
-		await waitUntilUp(url, healthSecret);
+		await startServer(new URL(url).port);
+		await waitUntilUp(url);
 		log(`server up: ${url}`);
 	} else {
-		log(`dev mode: ${devUrl}`);
+		log(`dev mode: ${devUrl} — waiting for server`);
+		const { waitForDevServer } = require("./dev-server-readiness.cjs");
+		const startup = new AbortController();
+		const cancelStartup = () => startup.abort(new Error("Development startup cancelled by application quit"));
+		app.once("before-quit", cancelStartup);
+		try {
+			await waitForDevServer(devUrl, { signal: startup.signal });
+			if (startup.signal.aborted) return;
+			log(`dev server ready: ${devUrl}`);
+		} catch (error) {
+			if (!startup.signal.aborted) {
+				log(`dev server startup failed: ${error?.message ?? error}`);
+				app.exit(1);
+			}
+			return;
+		} finally {
+			app.removeListener("before-quit", cancelStartup);
+		}
 	}
+
+	// Renderer controls contain no token/URL/code operation. The separate server
+	// child is the only recipient of credential leases over inherited IPC.
+	ipcMain.handle("lh:chatgpt:control", async (event, command) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return { error: "Untrusted desktop request." };
+		if (!chatgpt || !serverProcess?.connected) return { available: false, pending: false, activeId: null, accounts: [], error: "ChatGPT sign-in requires the desktop app's private server connection. Browser-only and externally launched development servers keep API-key connections." };
+		return chatGPTControl(command, chatgpt);
+	});
+
+	ipcMain.handle("lh:subscriptions:control", async (event, command) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		if (!subscriptions || !serverProcess?.connected) {
+			if (command?.op === "status") return [];
+			throw new Error("Subscription sign-in requires the desktop app's private server connection.");
+		}
+		return subscriptionControl(command, subscriptions);
+	});
+
+	// The dev shell has no browser tabs. Only a one-use action on its own
+	// Next server may be resolved here; never accept an arbitrary external URL.
+	ipcMain.handle("lh:subscriptions:web-browser", async (event, action) => {
+		if (!devUrl || !trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted development request.");
+		await openWebSubscriptionBrowser(action, new URL(url).origin, { openExternal: (target) => shell.openExternal(target) });
+	});
+
+	ipcMain.handle("lh:attachment:pick", (event, mode) => pickAttachmentPath(event, mode, {
+		BrowserWindow, dialog, trustedAppWindows, origin: new URL(url).origin,
+	}));
 
 	installMenu();
 
@@ -672,7 +778,23 @@ async function main() {
 	// interval fire after it below. setupAutoUpdater's contract: failures
 	// are log lines — this can never block boot.
 	setupAutoUpdater();
-	ipcMain.on("lh:update-install", () => installUpdateNow());
+	// Same sender rule as lh:update:get/check. ipcMain.on has no reply channel,
+	// so an untrusted request is dropped and logged.
+	ipcMain.on("lh:update-install", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) {
+			log("auto-update: ignored install request from an untrusted sender");
+			return;
+		}
+		installUpdateNow();
+	});
+	ipcMain.handle("lh:update:get", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		return updateState;
+	});
+	ipcMain.handle("lh:update:check", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		checkForUpdates({ manual: true });
+	});
 
 	// Sidebar-at-narrow-window (owner, 2026-09-17): the renderer auto-closes
 	// the sidebar below SIDEBAR_AUTOCLOSE (928px); opening it again at that
@@ -689,13 +811,32 @@ async function main() {
 		const target = SIDEBAR_AUTOCLOSE;
 		if (width < target) win.setBounds({ x, y, width: target, height });
 	});
-	app.on("activate", () => {
-		if (BrowserWindow.getAllWindows().length === 0) createWindow(url);
+	// The renderer reports every appearance write (and the record on load):
+	// the chrome follows without a restart.
+	ipcMain.on("lh:appearance", (event, next) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return;
+		appearance = normalizeAppearance(next);
+		nativeTheme.themeSource = themeSourceFor(appearance.mode);
+		for (const win of BrowserWindow.getAllWindows()) applyChrome(win);
 	});
-	createWindow(url);
+	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
+	app.on("activate", () => {
+		if (BrowserWindow.getAllWindows().length === 0) reopenWindow();
+	});
+	createWindow(url, firstWindow => {
+		const fromFirstWindow = event => !firstWindow.isDestroyed() && event.sender === firstWindow.webContents &&
+			trustedSender(event, new URL(url).origin, BrowserWindow);
+		let messages;
+		if (app.isPackaged && !devUrl) {
+			const { dismissalStore, startMessages } = require("./startup-messages.cjs");
+			messages = startMessages(firstWindow, dismissalStore(app.getPath("userData")));
+		}
+		ipcMain.handle("lh:startup-message:take", event => messages && fromFirstWindow(event) ? messages.take() : null);
+		ipcMain.handle("lh:startup-message:dismiss", (event, id) => !!messages && fromFirstWindow(event) && messages.dismiss(id));
+	});
 	log(`window open: ${url}`);
-	// First update check AFTER the window exists (the downloaded-banner
-	// push needs a listener); dev builds no-op (no autoUpdater).
+	// Startup + 24h checks stay main-owned and read the current preference.
+	// No renderer subscription is required; late loads retrieve the snapshot.
 	if (autoUpdater) {
 		checkForUpdates();
 		setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);

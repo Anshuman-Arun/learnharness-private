@@ -1,8 +1,12 @@
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ActivitySection, formatElapsed, toBlobs, type ActivityFeed, type FeedExtraction } from "../components/activity-dock.tsx";
 import { formatTokens, formatUsd } from "../components/usage-format.ts";
+import { jobCost } from "../src/server/pricing.ts";
 
 // The section's pure layer: folds, formatting, and blob order — then the SSR
 // render (blobs, "—" doctrine, the abort affordance, the always-present
@@ -27,6 +31,7 @@ function job(over: Partial<ActivityFeed["jobs"][number]> = {}): ActivityFeed["jo
 		updatedAt: new Date(NOW - 1000).toISOString(),
 		title: "Limits lesson",
 		contextLimit: null,
+		costUsd: jobCost({ usage: over.usage }),
 		...over,
 	};
 }
@@ -46,6 +51,31 @@ describe("activity dock pure layer", () => {
 		assert.equal(blobs[1]!.id, "new");
 	});
 
+	it("standalone plugin workers share native row accounting without inventing a session identity", () => {
+		const feed: ActivityFeed = { jobs: [], extractions: [], pluginWorkers: [{
+			id: "my-plugin:task-1", taskId: "task-1", pluginId: "my-plugin", definitionId: "analyzer",
+			status: "running", title: "My plugin · analyzer", model: { provider: "offline", id: "fixture" },
+			createdAt: new Date(NOW - 10_000).toISOString(), updatedAt: new Date(NOW).toISOString(),
+			activity: "tool: inspect", costUsd: 0.004, contextLimit: 10_000,
+			usage: { model: "offline:fixture", inputTokens: 8000, outputTokens: 500, cacheReadTokens: 4000,
+				cacheWriteTokens: 0, reasoningTokens: undefined, steps: 3,
+				lastStep: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 200, cacheWriteTokens: 20, reasoningTokens: undefined } },
+		}] };
+		const blob = toBlobs(feed)[0]!;
+		assert.equal(blob.process, "plugin-worker");
+		assert.equal(blob.chatId, undefined);
+		assert.equal(blob.cost, 0.004);
+		assert.equal(blob.model, "offline:fixture");
+		assert.equal(blob.steps, 3);
+		assert.deepEqual(blob.context, { used: 330, limit: 10_000 }, "last step, including cache buckets, not cumulative usage");
+		const html = renderToStaticMarkup(<ActivitySection feed={feed} />);
+		assert.match(html, /data-testid="activity-blob-plugin-worker"/);
+		assert.match(html, /data-activity-id="my-plugin:task-1"/);
+		assert.match(html, /My plugin · analyzer/);
+		assert.match(html, /tool: inspect/);
+		assert.match(html, /data-testid="activity-abort"/);
+	});
+
 	it("per-chunk jobs (owner, 2026-09-28): one source, N rows — unique ids (React keys), one chatId, part-suffixed titles", () => {
 		const rows = [
 			{ id: "src_a#1", chatId: "src_a", part: { i: 1, n: 2 }, title: "notes.md · 1/2", phase: "extracting", startedAt: NOW - 1000 },
@@ -57,7 +87,7 @@ describe("activity dock pure layer", () => {
 		assert.ok(blobs.every((b) => b.chatId === "src_a"), "abort/link identity stays source-scoped");
 	});
 
-	it("folds cost with jobCost; absent usage is null, never zero", () => {
+	it("uses the server's Pi price projection; absent pricing is null, never zero", () => {
 		const priced = job({
 			usage: {
 				model: "openrouter:z-ai/glm-5.3-flash",
@@ -70,10 +100,10 @@ describe("activity dock pure layer", () => {
 			},
 		});
 		const blob = toBlobs({ jobs: [priced], extractions: [] })[0]!;
-		// (10000-5000)/1e6*0.15 + 5000/1e6*0.03 + 1000/1e6*0.5 = 0.0014
-		// (pi-ai catalog prices — glm-5.3-flash cacheRead corrected
-		// 0.05 → 0.03 in the pi 1.0.2 catalog refresh)
-		assert.ok(blob.cost !== null && blob.cost > 0.0013 && blob.cost < 0.0015);
+		// Pi-normalized fresh input is priced directly, never reduced by reads.
+		assert.equal(blob.cost, 0.00215);
+		const missingProjection = toBlobs({ jobs: [{ ...priced, costUsd: undefined }], extractions: [] })[0]!;
+		assert.equal(missingProjection.cost, null, "the browser must not invent a fallback price");
 		const absent = toBlobs({ jobs: [job()], extractions: [] })[0]!;
 		assert.equal(absent.cost, null);
 	});
@@ -247,5 +277,87 @@ describe("activity section render", () => {
 		// two identical priced jobs → 2 × $0.002 = $0.0040 total (pi prices,
 		// glm-5.3-flash drifted in pi-ai 0.87.1)
 		assert.match(html, /activity-total-cost[^>]*>\$0\.0040</);
+	});
+
+	it("expanded card: END stays on the face row, the title isn't repeated (#450)", async () => {
+		const dom = parseHTML("<html><body><div id='root'></div></body></html>");
+		const globals = { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
+			Element: dom.window.Element, Node: dom.window.Node, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true };
+		const saved = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+		Object.assign(globalThis, globals);
+		const root = createRoot(dom.document.querySelector("#root")!);
+		try {
+			const feed = { jobs: [job({ kind: "pdf", title: "STA301", activity: "pdf_render: 1-5 @150dpi" })], extractions: [] };
+			await act(async () => { root.render(<ActivitySection feed={feed} />); });
+			const face = dom.document.querySelector("button[aria-expanded]")!;
+			await act(async () => { face.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+			const detail = dom.document.querySelector("[data-testid='activity-blob-detail']")!;
+			assert.ok(detail, "the card expanded");
+			// The END button is positioned against the face row only, so it
+			// can't drift down onto the detail rows when the card grows.
+			const abort = dom.document.querySelector("[data-testid='activity-abort']")!;
+			assert.equal(abort.parentElement, face.parentElement);
+			assert.equal(detail.contains(face.parentElement!), false);
+			assert.match(face.parentElement!.className, /\brelative\b/);
+			// The face already shows the title (with its title= reveal); the
+			// detail keeps only the full, wrapped activity line.
+			assert.doesNotMatch(detail.textContent!, /STA301/);
+			assert.match(detail.textContent!, /pdf_render: 1-5 @150dpi/);
+			assert.equal(face.querySelector("[title='STA301']")?.textContent, "STA301");
+		} finally {
+			await act(async () => root.unmount());
+			for (const [key, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
+		}
+	});
+
+	const stopCases: { label: string; feed: ActivityFeed; request: { kind: string; id: string } }[] = [
+		{ label: "job", feed: { jobs: [job({ id: "pdf-job", kind: "pdf" })], extractions: [] }, request: { kind: "job", id: "pdf-job" } },
+		{ label: "plugin worker", feed: { jobs: [], extractions: [], pluginWorkers: [{
+			id: "fixture-plugin:task-1", taskId: "task-1", pluginId: "fixture-plugin", definitionId: "worker",
+			status: "running", title: "Fixture worker", createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString(),
+			model: { provider: "offline", id: "fixture" }, costUsd: null, contextLimit: null,
+		}] }, request: { kind: "plugin-worker", id: "fixture-plugin:task-1" } },
+		{ label: "extraction chunk", feed: { jobs: [], extractions: [{
+			id: "source-1#2", chatId: "source-1", part: { i: 2, n: 3 }, title: "Notes · 2/3", phase: "extracting", startedAt: NOW,
+		}] }, request: { kind: "extraction", id: "source-1" } },
+	];
+	for (const { label, feed, request } of stopCases) it(`expanded ${label}: stop targets its process without toggling detail`, async (t) => {
+		const dom = parseHTML("<html><body><div id='root'></div></body></html>");
+		const globals = { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
+			Element: dom.window.Element, Node: dom.window.Node, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true };
+		const saved = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+		Object.assign(globalThis, globals);
+		const calls: unknown[] = [];
+		let finish!: (response: Response) => void;
+		const pending = new Promise<Response>(resolve => { finish = resolve; });
+		t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
+			assert.equal(url, "/api/activity/abort");
+			assert.equal(init?.method, "POST");
+			calls.push(JSON.parse(String(init?.body)));
+			return pending;
+		});
+		const root = createRoot(dom.document.querySelector("#root")!);
+		try {
+			await act(async () => { root.render(<ActivitySection feed={feed} />); });
+			const face = dom.document.querySelector("button[aria-expanded]")!;
+			const stop = dom.document.querySelector("[data-testid='activity-abort']")!;
+			assert.equal(face.contains(stop), false, "stop is a sibling control, never a nested button");
+			assert.equal(stop.getAttribute("type"), "button");
+			assert.match(stop.getAttribute("aria-label")!, /^End /);
+			await act(async () => { face.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+			assert.equal(face.getAttribute("aria-expanded"), "true");
+			await act(async () => { stop.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+			assert.deepEqual(calls, [request]);
+			assert.equal(face.getAttribute("aria-expanded"), "true", "stop must not collapse the disclosure");
+			assert.equal(stop.hasAttribute("disabled"), true, "pending cancellation disables duplicate clicks");
+			assert.match(dom.document.querySelector("[data-testid='activity-blob-detail']")!.textContent!, /Stopping…/);
+			await act(async () => { finish(Response.json({ ok: true })); });
+			await act(async () => { root.render(<ActivitySection feed={{ jobs: [], extractions: [] }} />); });
+			assert.equal(dom.document.querySelector("[data-testid='activity-abort']"), null, "settled feed removes the control");
+		} finally {
+			finish(Response.json({ ok: true }));
+			await act(async () => root.unmount());
+			for (const [key, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
+		}
 	});
 });

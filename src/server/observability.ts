@@ -24,6 +24,8 @@ import { chatStore } from "../store/chats.ts";
 import { graphRevision } from "./graph.ts";
 import { catalogContextLimits } from "./model-catalog.ts";
 import { listJobs } from "./jobs.ts";
+import { jobCost } from "./pricing.ts";
+import { pluginWorkerActivities, type PluginWorkerActivity } from "./plugin-worker-activity.ts";
 import type { JobRecord } from "../core/contracts.ts";
 
 export { abortExtraction, extractionStatuses, type ExtractionPhase, type RunningExtraction } from "../agent/subagents/extraction.ts";
@@ -36,7 +38,14 @@ export { chatStore } from "../store/chats.ts";
  *  model is missing from the catalog (the blob then renders no context
  *  line — never a fake window). */
 export interface ActivityJob extends JobRecord {
+	costUsd: number | null;
 	title: string;
+	contextLimit: number | null;
+}
+
+/** Standalone plugin task; deliberately has no session identity or result payload. */
+export interface ActivityPluginWorker extends PluginWorkerActivity {
+	costUsd: number | null;
 	contextLimit: number | null;
 }
 
@@ -56,9 +65,8 @@ export interface ActivityExtraction {
 
 /** The dock's whole world in one payload: every running process, every view.
  *  Jobs are RUNNING-ONLY — finished jobs belong to their chat's transcript;
- *  the blob disappears when the process ends. Cost math is NOT done here:
- *  raw usage rides on the records and the client folds it with the pure
- *  helpers in core/prices.ts (transport stays thin). */
+ *  the blob disappears when the process ends. Costs are joined here through
+ *  the server-side Pi pricing adapter; clients never reconstruct rates. */
 /** The dock's whole world + the graph's version stamp (wave 6 session
  *  deletion): the payload carries graphRevision (max mtime across the
  *  graph data files — see server/graph.ts) so any view can detect "the
@@ -67,6 +75,7 @@ export interface ActivityExtraction {
  *  returns the same stamp. */
 export function activityFeed(): {
 	jobs: ActivityJob[];
+	pluginWorkers: ActivityPluginWorker[];
 	extractions: ActivityExtraction[];
 	graphRevision: number;
 } {
@@ -78,6 +87,7 @@ export function activityFeed(): {
 			if (job.status === "running") {
 				jobs.push({
 					...job,
+					costUsd: jobCost(job),
 					title: chat.title ?? chat.id,
 					contextLimit: job.usage ? (limits.get(job.usage.model) ?? null) : null,
 				});
@@ -97,10 +107,21 @@ export function activityFeed(): {
 		phase: run.phase,
 		startedAt: run.startedAt,
 	}));
+	// A native createBackgroundTool job already owns its worker row and durable END.
+	// Acceptance and job linkage are synchronous, so the queued→running bridge
+	// cannot briefly expose both representations.
+	const linked = new Set(jobs.flatMap(job => job.kind === "plugin" && job.plugin?.taskId
+		? [`${job.plugin.pluginId}:${job.plugin.taskId}`] : []));
+	const pluginWorkers: ActivityPluginWorker[] = pluginWorkerActivities()
+		.filter(task => !linked.has(task.id))
+		.map(task => ({ ...task, costUsd: jobCost(task),
+			contextLimit: task.usage ? (limits.get(task.usage.model) ?? null) : null }))
+		.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 	// oldest-first on last activity: the stable blob order (ISO strings sort chronologically)
 	jobs.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
 	return {
 		jobs,
+		pluginWorkers,
 		extractions: extractions.sort((a, b) => a.startedAt - b.startedAt),
 		graphRevision: graphRevision(),
 	};

@@ -18,16 +18,26 @@
  */
 
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
-import {
-	CHATGPT_PROVIDER_ID,
-	CHATGPT_SOURCE_PROVIDER_ID,
-	chatGPTBrokerConfigured,
-	getChatGPTBrokerStatus,
-	getChatGPTBrokerModels,
-	type ChatGPTAvailableModel,
-} from "../agent/chatgpt-broker.ts";
+import { customProviderAvailable } from "./custom-provider.ts";
+import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
+import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
+import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
+
+export async function refreshConnectionCatalog(provider?: string): Promise<void> {
+	await Promise.all([
+		// The subscription bridge still trusts only the bundled OpenAI catalog.
+		!provider || provider === "chatgpt" ? refreshChatGPTModels(getBuiltinModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
+		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+	]);
+}
+function connectionModel(provider: string, id: string): Model<Api> | undefined {
+	if (provider === CLAUDE_CODE_PROVIDER && !claudeCodeAvailable()) return undefined;
+	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
+}
+function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId)]; }
 import { settingsStore } from "../store/settings.ts";
 import { effectiveSettings } from "./stores.ts";
 import { keyValue } from "./keys.ts";
@@ -41,8 +51,17 @@ import type {
 	SlotPins,
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
-import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
-import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type AgentSettings, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
+import { AUTH_PROVIDER_KEYS, CUSTOM_PROVIDER } from "../core/auth-keys.ts";
+import { claudeCodeAvailable } from "./claude-code-config.ts";
+import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
+import {
+	BACKGROUND_MODEL_ROLES,
+	MODEL_SLOTS,
+	customProviderUsable,
+	type BackgroundModelRole,
+	type ModelSlotName,
+	type ModelsSettings,
+} from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
 export type ModelDto = ModelCatalogEntry;
@@ -118,6 +137,7 @@ export function catalogSlots(): SlotPins {
 			? {
 					model: { provider: slot.provider, id: slot.id },
 					...(slot.thinkingLevel !== undefined ? { thinkingLevel: slot.thinkingLevel } : {}),
+					...(slot.cacheRetention !== undefined ? { cacheRetention: slot.cacheRetention } : {}),
 				}
 			: null;
 	}
@@ -128,20 +148,22 @@ export function catalogSlots(): SlotPins {
  *  plain-key model provider (core/auth-keys.ts's pi-ai-derived table),
  *  with keyPresent read env-wins through the keys seam, fresh per call —
  *  saving a key immediately federates the provider into the picker. */
-export function catalogProviders(chatGPTConnected = false): CatalogProvider[] {
-	const providers = AUTH_PROVIDER_KEYS.map((p) => ({
+export function catalogProviders(): CatalogProvider[] {
+	piModels();
+	return AUTH_PROVIDER_KEYS.map((p) => ({
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	}));
-	if (chatGPTBrokerConfigured()) {
-		providers.push({
-			id: CHATGPT_PROVIDER_ID,
-			envVar: "CHATGPT_OAUTH",
-			keyPresent: chatGPTConnected,
-		});
-	}
-	return providers.sort((a, b) => a.id.localeCompare(b.id));
+	})).concat([
+		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
+		{ id: CLAUDE_CODE_PROVIDER, envVar: "", keyPresent: claudeCodeAvailable() },
+		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
+		// The custom endpoint: a row only when usable (base URL set). keyPresent
+		// reflects usability, not key presence (keyless local servers are allowed).
+		...(customProviderUsable(effectiveSettings().customProvider)
+			? [{ id: CUSTOM_PROVIDER.id, envVar: CUSTOM_PROVIDER.envVar, keyPresent: customProviderAvailable() }]
+			: []),
+	]).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly
@@ -152,29 +174,30 @@ function keyedProviderIds(): Set<string> {
 }
 
 /** Project one catalog model to the client DTO. */
-export function toModelDto(model: Model<Api>, provider = model.provider): ModelDto {
+export function toModelDto(model: Model<Api>): ModelDto {
 	return {
 		id: model.id,
 		name: model.name,
-		provider,
+		provider: model.provider,
 		reasoning: model.reasoning,
 		input: [...model.input],
 		supportedLevels: getSupportedThinkingLevels(model),
-		cost: {
+		cost: model.provider === CLAUDE_CODE_PROVIDER || model.provider === CUSTOM_PROVIDER.id ? null : {
 			input: model.cost.input,
 			output: model.cost.output,
 			cacheRead: model.cost.cacheRead,
 			cacheWrite: model.cost.cacheWrite,
 		},
-		contextWindow: model.contextWindow,
-		maxTokens: model.maxTokens,
+		contextWindow: model.provider === CLAUDE_CODE_PROVIDER ? null : model.contextWindow,
+		maxTokens: model.provider === CLAUDE_CODE_PROVIDER ? null : model.maxTokens,
 	};
 }
 
 /** The live-limits index (context-meter amendment, owner 2026-09-23):
  *  provider:id → contextWindow from pi's catalog, over the SAME keyed
- *  providers the picker federates. The one source for every context
- *  meter's denominator — the stats-bar join holds /api/models' copy,
+ *  providers the picker federates. Native CLI aliases are excluded:
+ *  only a session-specific CLI report can provide their denominator.
+ *  For other models the stats-bar join holds /api/models' copy,
  *  and the activity feed (observability.ts) resolves job limits
  *  server-side through this. No hardcoded fallback exists anywhere:
  *  a model missing here reads limit-null (usage-only, honest render). */
@@ -182,16 +205,12 @@ export function catalogContextLimits(): Map<string, number> {
 	const keyed = keyedProviderIds();
 	const index = new Map<string, number>();
 	for (const provider of piModels().getProviders()) {
-		if (!keyed.has(provider.id)) continue;
+		if (!keyed.has(provider.id) || provider.id === CLAUDE_CODE_PROVIDER) continue;
 		for (const model of piModels().getModels(provider.id)) {
 			index.set(`${provider.id}:${model.id}`, model.contextWindow);
 		}
 	}
-	if (chatGPTBrokerConfigured()) {
-		for (const model of piModels().getModels(CHATGPT_SOURCE_PROVIDER_ID)) {
-			index.set(`${CHATGPT_PROVIDER_ID}:${model.id}`, model.contextWindow);
-		}
-	}
+	for (const model of [...chatGPTModels(), ...nativeSubscriptionModels()]) index.set(`${model.provider}:${model.id}`, model.contextWindow);
 	return index;
 }
 
@@ -199,59 +218,22 @@ export function catalogContextLimits(): Map<string, number> {
  *  (sorted by provider then id — stable, diff-friendly) + the config
  *  defaults a settings-less chat runs + the background roles' resolved
  *  pins (the settings UI's per-role default captions). */
-export function modelCatalog(options: { chatGPTConnected?: boolean; availableChatGPTModels?: ChatGPTAvailableModel[] } = {}): ModelCatalogResponse {
+export function modelCatalog(): ModelCatalogResponse {
 	const keyed = keyedProviderIds();
-	const keyedModels = piModels()
+	const models = piModels()
 		.getProviders()
 		.filter((p) => keyed.has(p.id))
 		.flatMap((p) => piModels().getModels(p.id))
-		.map((model) => toModelDto(model));
-	// The account's live roster is the upper bound. Pi still defines the
-	// transport/metadata for models it supports: unknown slugs are omitted.
-	// A missing roster in pure legacy tests retains their catalog fixture;
-	// liveModelCatalog always provides the real (possibly empty) roster.
-	const allowed = options.availableChatGPTModels &&
-		new Map(options.availableChatGPTModels.map((item) => [item.id, item.name]));
-	const chatGPTModels = options.chatGPTConnected
-		? piModels().getModels(CHATGPT_SOURCE_PROVIDER_ID)
-			.filter((model) => !allowed || allowed.has(model.id))
-			.map((model) => ({
-				...toModelDto(model, CHATGPT_PROVIDER_ID),
-				name: allowed?.get(model.id) || model.name,
-			}))
-		: [];
-	const models = [...keyedModels, ...chatGPTModels]
-		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)));
+		.map(toModelDto)
+		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
+		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
 	return {
 		models,
 		defaults: catalogDefaults(),
 		rolePins: catalogRolePins(),
 		slots: catalogSlots(),
-		providers: catalogProviders(options.chatGPTConnected),
+		providers: catalogProviders(),
 	};
-}
-
-export async function liveModelCatalog(): Promise<ModelCatalogResponse> {
-	const chatGPT = await getChatGPTBrokerStatus();
-	let availableChatGPTModels: ChatGPTAvailableModel[] = [];
-	if (chatGPT.connected) {
-		try { availableChatGPTModels = await getChatGPTBrokerModels(); }
-		catch { /* Do not invent entitlement if model discovery fails. */ }
-	}
-	return modelCatalog({ chatGPTConnected: chatGPT.connected, availableChatGPTModels });
-}
-
-function modelFor(provider: string, id: string): Model<Api> | undefined {
-	return piModels().getModel(
-		provider === CHATGPT_PROVIDER_ID ? CHATGPT_SOURCE_PROVIDER_ID : provider,
-		id,
-	);
-}
-
-function knownProviderIds(): string[] {
-	const providers = piModels().getProviders().map((provider) => provider.id);
-	if (chatGPTBrokerConfigured()) providers.push(CHATGPT_PROVIDER_ID);
-	return providers;
 }
 
 /** One validated outcome for a settings write. */
@@ -266,13 +248,13 @@ export type SettingsValidation =
  *    the model the picker writes against (settings.model, else config's
  *    prober/teacher pin; one controller, so the two specs share it). */
 export function validateChatSettings(settings: ChatSettings): SettingsValidation {
-	const providers = knownProviderIds();
+	const providers = connectionProviderIds();
 	if (settings.model) {
 		const { provider, id } = settings.model;
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!modelFor(provider, id)) {
+		if (!connectionModel(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -285,10 +267,17 @@ export function validateChatSettings(settings: ChatSettings): SettingsValidation
 	return { ok: true };
 }
 
-export function validateModelsSettings(settings: ModelsSettings): SettingsValidation {
+/** Validate introduced/replaced model selections, not unchanged saved pins.
+ * A disconnected subscription loses its available catalog, but its stored
+ * selections must not prevent repairing another slot or editing thinking.
+ * Only the SAME slot's provider+id can pass through; runtime admission stays
+ * separate. Callers without a stored section retain strict catalog checking. */
+export function validateModelsSettings(settings: ModelsSettings, stored?: ModelsSettings): SettingsValidation {
 	for (const name of MODEL_SLOTS) {
 		const slot = settings[name];
 		if (!slot) continue;
+		const previous = stored?.[name]?.model;
+		if (slot.model && previous && slot.model.provider === previous.provider && slot.model.id === previous.id) continue;
 		const verdict = validateSlotSpec(name, slot);
 		if (!verdict.ok) return verdict;
 	}
@@ -296,13 +285,13 @@ export function validateModelsSettings(settings: ModelsSettings): SettingsValida
 }
 
 function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: string; id: string }; thinkingLevel?: ThinkingLevel }): SettingsValidation {
-	const providers = knownProviderIds();
+	const providers = connectionProviderIds();
 	if (slot.model) {
 		const { provider, id } = slot.model;
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}
-		if (!modelFor(provider, id)) {
+		if (!connectionModel(provider, id)) {
 			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
 		}
 	}
@@ -313,47 +302,6 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
 	return { ok: true };
 }
 
-/** Account-authorized write gate: the pinned ChatGPT model must be both
- * supported by pi-ai AND on this connected account's visible roster. */
-async function validateConnectedAccountModel(provider: string, id: string): Promise<SettingsValidation> {
-	if (provider !== CHATGPT_PROVIDER_ID) return { ok: true };
-	const status = await getChatGPTBrokerStatus();
-	if (!status.connected) return { ok: false, error: "Connect ChatGPT before selecting a subscription model." };
-	try {
-		const allowed = await getChatGPTBrokerModels();
-		if (allowed.some((model) => model.id === id)) return { ok: true };
-		return { ok: false, error: `ChatGPT model "${id}" is unavailable to the connected account.` };
-	} catch {
-		return { ok: false, error: "ChatGPT model catalog could not be verified. Retry before saving." };
-	}
-}
-export async function validateAccountAwareChatSettings(settings: ChatSettings): Promise<SettingsValidation> {
-	const verdict = validateChatSettings(settings);
-	if (!verdict.ok || !settings.model) return verdict;
-	return validateConnectedAccountModel(settings.model.provider, settings.model.id);
-}
-export async function validateAccountAwareModelsSettings(settings: ModelsSettings): Promise<SettingsValidation> {
-	const verdict = validateModelsSettings(settings);
-	if (!verdict.ok) return verdict;
-	for (const name of MODEL_SLOTS) {
-		const model = settings[name]?.model;
-		if (!model) continue;
-		const allowed = await validateConnectedAccountModel(model.provider, model.id);
-		if (!allowed.ok) return allowed;
-	}
-	return {ok:true};
-}
-export async function validateAccountAwareAgentModels(settings: Pick<AgentSettings, "models">): Promise<SettingsValidation> {
-	for (const entry of Object.values(settings.models ?? {})) {
-		if (!entry?.model) continue;
-		const base = validateChatSettings({model: entry.model});
-		if (!base.ok) return base;
-		const allowed = await validateConnectedAccountModel(entry.model.provider, entry.model.id);
-		if (!allowed.ok) return allowed;
-	}
-	return {ok:true};
-}
-
 // ─── clamp-on-write (owner ruling, interlude 2026-09-22) ─────────────────────
 // A model swap with a pinned thinking level must JUST WORK: the pin
 // translates to the new model's nearest supported level — pi's
@@ -361,11 +309,10 @@ export async function validateAccountAwareAgentModels(settings: Pick<AgentSettin
 // runtime — and the clamped value is what lands in the record. The
 // server is the truth: the record shows the clamped level after write.
 
-/** Clamp one level against one model (identity when the model is unknown
- *  or the level already supported — the existence gate rejects unknown
- *  models separately, so this only ever sees real ones in practice). */
+/** Clamp one level against one model. Preserve the preference when metadata
+ *  is unavailable for an unchanged saved pin; runtime clamps after reconnect. */
 function clampLevelFor(provider: string, id: string, level: ThinkingLevel): ThinkingLevel {
-	const model = modelFor(provider, id);
+	const model = connectionModel(provider, id);
 	return model ? clampThinkingLevel(model, level) : level;
 }
 
@@ -381,7 +328,7 @@ export function clampModelsLevels(settings: ModelsSettings): ModelsSettings {
 		out[name] =
 			slot.thinkingLevel !== undefined
 				? {
-						model: slot.model,
+						...slot,
 						thinkingLevel: clampLevelFor(slot.model.provider, slot.model.id, slot.thinkingLevel),
 					}
 				: slot;

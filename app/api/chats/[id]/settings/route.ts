@@ -4,26 +4,9 @@ import {
 	getChat,
 	parseSettingsBody,
 	stores,
-	validateAccountAwareChatSettings,
+	validateChatSettings,
 } from "@/src/server";
-import { emit, type ChatSettings } from "@/src/core";
-
-/** A mode switch patches only this preference, preserving current model choices. */
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const { id } = await params;
-	const body = await req.json().catch(() => null);
-	const parsed = parseSettingsBody(body);
-	if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
-	if (!parsed.settings.teachingMode || Object.keys(body).some((key) => key !== "teachingMode")) {
-		return Response.json({ error: "Send only teachingMode: guided or explain" }, { status: 400 });
-	}
-	const chat = getChat(id);
-	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
-	const settings: ChatSettings = { ...chat.settings, teachingMode: parsed.settings.teachingMode };
-	stores.chatStore.saveSettings(id, settings);
-	emit("record-changed", { chatId: id });
-	return Response.json({ settings });
-}
+import type { ChatSettings } from "@/src/core";
 
 /**
  * The per-chat model control (model-control wave): replace-whole settings —
@@ -49,7 +32,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 	const parsed = parseSettingsBody(body);
 	if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
 
-	const verdict = await validateAccountAwareChatSettings(parsed.settings);
+	const verdict = validateChatSettings(parsed.settings);
 	if (!verdict.ok) {
 		return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
 	}
@@ -59,10 +42,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 	// Clamp-on-write (owner, interlude 2026-09-22): a pinned thinking
 	// level never rejects — it clamps to the named model's nearest
 	// supported (body model, else the record's strong slot).
-	// Model controls predate teaching style; their replace-whole writes must
-	// not erase a preference changed from another control or browser tab.
-	const teachingMode = parsed.settings.teachingMode ?? getChat(id)?.settings?.teachingMode;
-	const settings = clampChatLevel({ ...parsed.settings, ...(teachingMode ? { teachingMode } : {}) }, effectiveSettings().models.strong);
+	const settings = clampChatLevel(parsed.settings, effectiveSettings().models.strong);
 	stores.chatStore.saveSettings(id, settings);
 	return Response.json({ settings });
 }
