@@ -1,0 +1,76 @@
+name: One-time Windows installer
+on:
+  push:
+    branches: [integration/learning-features-nov2026]
+    paths: [.github/workflows/build-windows-once.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  build-installer:
+    name: Build Windows installer once
+    runs-on: windows-2025
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Minimal code check
+        run: npm run typecheck
+      - name: Compile desktop server
+        run: |
+          npm run build
+          node scripts/build-server.mjs
+      - name: Smoke-test packaged backend
+        run: node scripts/smoke-server.mjs --electron
+      - name: Make one installable Windows EXE
+        run: npx --no-install electron-builder --config electron-builder.custom-windows.yml --win --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Check installer and payload are present
+        run: |
+          set -euo pipefail
+          test -f "dist/win-unpacked/LearnHarness Custom.exe"
+          test -f "dist/win-unpacked/resources/server/standalone/server.js"
+          test -f "dist/win-unpacked/resources/server/standalone/.next/BUILD_ID"
+          compgen -G "dist/LearnHarness-Custom-*-x64-setup.exe" >/dev/null
+      - name: Keep an Actions artifact as a backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: LearnHarness-Custom-Windows-Installer
+          path: dist/LearnHarness-Custom-*-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish permanent installer in this repository's releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: custom-windows-v0.7.0-2026-11-20
+        run: |
+          set -euo pipefail
+          installer="$(find dist -maxdepth 1 -type f -name 'LearnHarness-Custom-*-x64-setup.exe' -print -quit)"
+          test -n "$installer"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$installer" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$installer" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "LearnHarness Custom for Windows (Nov 2026)" \
+              --notes "Install once, then launch LearnHarness Custom from the Start menu. Built from integration/learning-features-nov2026 with upstream PR #753 (ChatGPT-backed search) and PR #816 (answer review). The app has a separate user-data profile and automatic updates disabled, to keep it independent of official LearnHarness. This Windows installer is unsigned."
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,assets
