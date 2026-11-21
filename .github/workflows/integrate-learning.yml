@@ -28,4 +28,13 @@ jobs:
           git remote remove origin
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
           git config http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git push --force-with-lease="refs/heads/integration/learning-features-nov2026:$EXPECTED_SHA" origin HEAD:refs/heads/integration/learning-features-nov2026
+          git fetch --no-tags origin integration/learning-features-nov2026
+          git config user.name "LearnHarness integration"
+          git config user.email "integration@users.noreply.github.com"
+          git reset --soft origin/integration/learning-features-nov2026
+          git rm -r -f .github/workflows
+          git checkout origin/integration/learning-features-nov2026 -- .github/workflows
+          git add -A
+          git commit -m "Import tested LearnHarness upstream with compatible feature PRs"
+          git diff --exit-code origin/integration/learning-features-nov2026 HEAD -- .github/workflows
+          git push origin HEAD:refs/heads/integration/learning-features-nov2026
